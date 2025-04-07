@@ -11,9 +11,9 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Constants
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '82730443897-1c90hk21hl7re899k2ktt0bmuce1b04g.apps.googleusercontent.com';
-const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || 'http://localhost:5173/auth/callback';
-const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || ""; // Should be set as an environment variable
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '82730443897-ji64k4jhk02lonkps5vu54e1q5opoq3g.apps.googleusercontent.com';
+const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3000/api/auth/google/callback';
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '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'; // Should be set as an environment variable
 
 // Middleware
 app.use(cors({
@@ -43,8 +43,8 @@ app.get('/api/auth/google/url', (req, res) => {
 });
 
 // Google OAuth callback
-app.post('/api/auth/google/callback', async (req, res) => {
-  const { code } = req.body;
+app.get('/api/auth/google/callback', async (req, res) => {
+  const { code } = req.query;
   
   if (!code) {
     return res.status(400).json({ message: 'Authorization code is required' });
@@ -91,20 +91,10 @@ app.post('/api/auth/google/callback', async (req, res) => {
     // and generate a session token or JWT for the frontend
     
     // For this test server, we'll just return the user data and tokens
-    res.json({
-      user: {
-        id: userData.id,
-        email: userData.email,
-        name: userData.name,
-        picture: userData.picture,
-      },
-      tokens: {
-        access_token: tokenData.access_token,
-        refresh_token: tokenData.refresh_token,
-        id_token: tokenData.id_token,
-        expires_in: tokenData.expires_in,
-      }
-    });
+    const jwtToken = 'test_jwt_token'; // In a real app, this would be a proper JWT
+    
+    // Redirect to frontend with token
+    res.redirect(`${process.env.CLIENT_URL || 'http://localhost:5173'}/auth/callback?token=${jwtToken}`);
   } catch (error) {
     console.error('OAuth callback error:', error);
     res.status(500).json({ message: 'Authentication failed' });
