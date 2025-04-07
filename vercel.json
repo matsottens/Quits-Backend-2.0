@@ -1,15 +1,25 @@
 {
-  "buildCommand": "npm run build",
+  "version": 2,
+  "buildCommand": "npm run build:all",
   "installCommand": "npm install && npm run install:all",
-  "outputDirectory": "frontend/dist",
-  "rewrites": [
+  "builds": [
     {
-      "source": "/api/:path*",
-      "destination": "/api/:path*"
+      "src": "frontend/package.json",
+      "use": "@vercel/vite"
     },
     {
-      "source": "/:path*",
-      "destination": "/index.html"
+      "src": "backend/package.json",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/backend/dist/index.js"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/frontend/$1"
     }
   ]
 } 
