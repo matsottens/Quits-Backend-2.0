@@ -15,6 +15,7 @@
     "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\""
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.49.4",
     "concurrently": "^8.2.2"
   }
-} 
+}
