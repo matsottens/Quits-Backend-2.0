@@ -12,12 +12,14 @@ const PORT = process.env.PORT || 3000;
 
 // Constants
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '82730443897-ji64k4jhk02lonkps5vu54e1q5opoq3g.apps.googleusercontent.com';
-const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || 'https://quits.cc/auth/callback';
+const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || 'http://localhost:5173/auth/callback';
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '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'; // Should be set as an environment variable
 
 // Middleware
 app.use(cors({
-  origin: ['https://quits.cc', 'https://www.quits.cc'],
+  origin: process.env.NODE_ENV === 'production' 
+    ? ['https://quits.cc', 'https://www.quits.cc']
+    : ['http://localhost:5173'],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   credentials: true,
   allowedHeaders: ['Content-Type', 'Authorization'],
