@@ -18,7 +18,10 @@ const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || 'GOCSPX-dOLMXYt
 // Middleware
 app.use(cors({
   origin: ['https://quits.cc', 'https://www.quits.cc'],
-  credentials: true
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  exposedHeaders: ['Content-Range', 'X-Content-Range']
 }));
 app.use(express.json());
 
@@ -88,14 +91,14 @@ app.get('/api/auth/google/callback', async (req, res) => {
       return res.status(400).json({ message: 'Failed to fetch user information' });
     }
     
-    // In a real app, you would create/update the user in your database here
-    // and generate a session token or JWT for the frontend
-    
-    // For this test server, we'll just return the user data and tokens
+    // Generate JWT token
     const jwtToken = 'test_jwt_token'; // In a real app, this would be a proper JWT
     
-    // Redirect to frontend with token
-    res.redirect(`${process.env.CLIENT_URL || 'http://localhost:5173'}/auth/callback?token=${jwtToken}`);
+    // Instead of redirecting, send the token in the response
+    res.json({
+      token: jwtToken,
+      user: userData
+    });
   } catch (error) {
     console.error('OAuth callback error:', error);
     res.status(500).json({ message: 'Authentication failed' });
