@@ -1,15 +1,20 @@
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import { google } from 'googleapis';
 import { oauth2Client } from '../config/google.js';
 import { summarizeEmail } from '../services/gemini.js';
 import { extractSubscriptionDetails } from '../services/subscription.js';
-import { authenticateUser } from '../middlewares/auth.js';
+import { authenticateUser } from '../middleware/auth.js';
 import { supabase } from '../config/supabase.js';
 
 const router = express.Router();
 
-// Middleware to authenticate user
-router.use(authenticateUser);
+// Apply authentication middleware to all routes except test-gemini
+router.use((req, res, next) => {
+  if (req.path === '/test-gemini') {
+    return next();
+  }
+  return authenticateUser(req, res, next);
+});
 
 // Start email scanning
 router.post('/scan', async (req, res) => {
@@ -135,5 +140,58 @@ function extractEmailContent(message) {
   
   return content;
 }
+
+/**
+ * Test endpoint to verify Gemini service is working
+ */
+router.post('/test-gemini', async (req: Request, res: Response) => {
+  try {
+    const { emailContent } = req.body;
+    
+    if (!emailContent) {
+      return res.status(400).json({ error: 'Email content is required' });
+    }
+    
+    console.log('Testing Gemini service with sample email content');
+    const result = await summarizeEmail(emailContent);
+    
+    return res.json({
+      success: true,
+      result
+    });
+  } catch (error) {
+    console.error('Error testing Gemini service:', error);
+    return res.status(500).json({ 
+      error: 'Failed to test Gemini service',
+      details: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
+/**
+ * Process an email and extract subscription details
+ */
+router.post('/process', async (req: Request, res: Response) => {
+  try {
+    const { emailContent } = req.body;
+    
+    if (!emailContent) {
+      return res.status(400).json({ error: 'Email content is required' });
+    }
+    
+    const result = await summarizeEmail(emailContent);
+    
+    return res.json({
+      success: true,
+      data: result
+    });
+  } catch (error) {
+    console.error('Error processing email:', error);
+    return res.status(500).json({ 
+      error: 'Failed to process email',
+      details: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
 
 export default router; 

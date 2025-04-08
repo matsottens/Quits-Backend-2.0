@@ -1,27 +1,22 @@
-import { VertexAI } from '@google-cloud/vertexai';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-// Initialize Vertex AI with your Google Cloud project and location
-const projectId = process.env.GOOGLE_CLOUD_PROJECT;
-const location = process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
+// Get API key from environment variables
 const apiKey = process.env.GEMINI_API_KEY;
 
 if (!apiKey) {
   throw new Error('Missing Gemini API key in environment variables');
 }
 
-const vertexAI = new VertexAI({
-  project: projectId,
-  location,
-  apiKey
-});
+console.log('Initializing Gemini API with API key');
 
-// Access Gemini model
-const generativeModel = vertexAI.getGenerativeModel({
-  model: 'gemini-pro',
-});
+// Initialize the Gemini API
+const genAI = new GoogleGenerativeAI(apiKey);
+
+// Get the generative model
+const model = genAI.getGenerativeModel({ model: 'gemini-1.5-pro' });
 
 /**
  * Summarize email content and extract subscription details
@@ -51,23 +46,26 @@ export async function summarizeEmail(emailContent: string): Promise<any> {
         "nextBillingDate": string, // YYYY-MM-DD format if found
         "provider": string, // Company providing the service
         "category": string, // Category of subscription if identifiable (e.g., "entertainment", "productivity", etc.)
-        "confidence": number // 0-1 confidence score
+        "confidence": number, // 0-1 confidence score
+        "summary": string // A brief 2-3 sentence summary of the email content
       }
       
       If the email is not related to a subscription, set isSubscription to false and leave other fields empty.
     `;
     
-    const response = await generativeModel.generateContent({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    });
-    
-    const responseText = response.response.candidates[0].content.parts[0].text;
+    console.log('Sending request to Gemini API...');
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const text = response.text();
+    console.log('Received response from Gemini API');
     
     // Extract JSON from response
-    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const jsonString = jsonMatch[0];
-      return JSON.parse(jsonString);
+      const result = JSON.parse(jsonString);
+      console.log('Successfully parsed subscription data:', result);
+      return result;
     }
     
     throw new Error('Failed to extract JSON from Gemini response');
@@ -76,7 +74,8 @@ export async function summarizeEmail(emailContent: string): Promise<any> {
     return {
       isSubscription: false,
       confidence: 0,
-      error: 'Failed to analyze email content'
+      error: 'Failed to analyze email content',
+      summary: 'Unable to process this email due to an error.'
     };
   }
 } 
