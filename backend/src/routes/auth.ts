@@ -29,7 +29,7 @@ router.get('/google/callback', async (req, res) => {
   
   if (!code || typeof code !== 'string') {
     console.error('No code provided in callback');
-    return res.status(400).json({ error: 'Invalid authorization code' });
+    return res.redirect(`${process.env.CLIENT_URL}/login?error=no_code`);
   }
   
   try {
@@ -37,6 +37,12 @@ router.get('/google/callback', async (req, res) => {
     
     // Exchange code for tokens
     const { tokens } = await oauth2Client.getToken(code);
+    
+    if (!tokens || !tokens.access_token) {
+      console.error('No tokens received from Google');
+      return res.redirect(`${process.env.CLIENT_URL}/login?error=no_tokens`);
+    }
+    
     oauth2Client.setCredentials(tokens);
     
     console.log('Successfully exchanged code for tokens');
@@ -51,7 +57,7 @@ router.get('/google/callback', async (req, res) => {
     
     if (!userInfo.data.email) {
       console.error('No email found in user info');
-      return res.status(400).json({ error: 'Email not found in user info' });
+      return res.redirect(`${process.env.CLIENT_URL}/login?error=no_email`);
     }
     
     console.log('Retrieved user info for:', userInfo.data.email);
@@ -65,7 +71,7 @@ router.get('/google/callback', async (req, res) => {
       
     if (fetchError && fetchError.code !== 'PGRST116') {
       console.error('Database error:', fetchError);
-      return res.status(500).json({ error: 'Database error' });
+      return res.redirect(`${process.env.CLIENT_URL}/login?error=database_error`);
     }
     
     let userId;
@@ -86,7 +92,7 @@ router.get('/google/callback', async (req, res) => {
         
       if (createError) {
         console.error('Failed to create user:', createError);
-        return res.status(500).json({ error: 'Failed to create user' });
+        return res.redirect(`${process.env.CLIENT_URL}/login?error=user_creation_failed`);
       }
       
       userId = newUser.id;
@@ -118,11 +124,13 @@ router.get('/google/callback', async (req, res) => {
         access_token: tokens.access_token,
         refresh_token: tokens.refresh_token,
         expires_at: tokens.expiry_date,
+      }, {
+        onConflict: 'user_id'
       });
       
     if (tokenError) {
       console.error('Failed to store tokens:', tokenError);
-      return res.status(500).json({ error: 'Failed to store tokens' });
+      return res.redirect(`${process.env.CLIENT_URL}/login?error=token_storage_failed`);
     }
     
     // Create JWT for frontend auth
@@ -147,7 +155,8 @@ router.get('/google/callback', async (req, res) => {
     console.error('Auth error:', error);
     // Redirect to frontend with error
     const redirectUrl = new URL('/login', process.env.CLIENT_URL);
-    redirectUrl.searchParams.append('error', 'Authentication failed');
+    redirectUrl.searchParams.append('error', 'authentication_failed');
+    redirectUrl.searchParams.append('details', error.message || 'Unknown error');
     res.redirect(redirectUrl.toString());
   }
 });
