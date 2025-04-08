@@ -15,8 +15,8 @@ if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
 
 // Ensure the redirect URI matches what's configured in Google Cloud Console
 const redirectUri = NODE_ENV === 'production'
-  ? 'https://api.quits.cc/api/auth/google/callback'
-  : 'http://localhost:3000/api/auth/google/callback';
+  ? 'https://quits.cc/auth/callback'
+  : 'http://localhost:5173/auth/callback';
 
 // Initialize OAuth2 client
 const oauth2Client = new google.auth.OAuth2(
