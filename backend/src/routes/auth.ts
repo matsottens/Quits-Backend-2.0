@@ -50,6 +50,7 @@ router.get('/google/callback', async (req, res) => {
       .single();
       
     if (fetchError && fetchError.code !== 'PGRST116') {
+      console.error('Database error:', fetchError);
       return res.status(500).json({ error: 'Database error' });
     }
     
@@ -69,6 +70,7 @@ router.get('/google/callback', async (req, res) => {
         .single();
         
       if (createError) {
+        console.error('Failed to create user:', createError);
         return res.status(500).json({ error: 'Failed to create user' });
       }
       
@@ -77,17 +79,21 @@ router.get('/google/callback', async (req, res) => {
       userId = existingUser.id;
       
       // Update existing user info
-      await supabase
+      const { error: updateError } = await supabase
         .from('users')
         .update({
           name: userInfo.data.name || existingUser.name,
           avatar_url: userInfo.data.picture || existingUser.avatar_url,
         })
         .eq('id', userId);
+        
+      if (updateError) {
+        console.error('Failed to update user:', updateError);
+      }
     }
     
     // Store tokens in user_tokens table
-    await supabase
+    const { error: tokenError } = await supabase
       .from('user_tokens')
       .upsert({
         user_id: userId,
@@ -95,20 +101,25 @@ router.get('/google/callback', async (req, res) => {
         refresh_token: tokens.refresh_token,
         expires_at: tokens.expiry_date,
       });
+      
+    if (tokenError) {
+      console.error('Failed to store tokens:', tokenError);
+    }
     
     // Create JWT for frontend auth
     const jwtToken = jwt.sign(
       { 
-        sub: userId, 
-        email: userInfo.data.email 
+        userId,
+        email: userInfo.data.email,
+        name: userInfo.data.name,
+        avatar_url: userInfo.data.picture
       },
-      process.env.JWT_SECRET || 'default_secret',
+      process.env.JWT_SECRET || 'your-jwt-secret-key',
       { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
     );
     
     // Redirect to frontend with token
     res.redirect(`${process.env.CLIENT_URL}/auth/callback?token=${jwtToken}`);
-    
   } catch (error) {
     console.error('Auth error:', error);
     res.status(500).json({ error: 'Authentication failed' });
