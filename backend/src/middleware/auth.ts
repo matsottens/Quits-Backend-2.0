@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
+import { supabase } from '../config/supabase.js';
 
 interface AuthRequest extends Request {
   user?: {
@@ -10,7 +10,7 @@ interface AuthRequest extends Request {
   };
 }
 
-const authenticateToken = (req: AuthRequest, res: Response, next: NextFunction) => {
+const authenticateToken = async (req: AuthRequest, res: Response, next: NextFunction) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
@@ -19,8 +19,22 @@ const authenticateToken = (req: AuthRequest, res: Response, next: NextFunction) 
   }
 
   try {
-    const user = jwt.verify(token, process.env.JWT_SECRET || 'quits-jwt-secret-key-development');
-    req.user = user as AuthRequest['user'];
+    // Verify the token with Supabase
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+
+    if (error || !user) {
+      console.error('Token verification error:', error);
+      return res.status(403).json({ error: 'Invalid token' });
+    }
+
+    // Set user data in request
+    req.user = {
+      id: user.id,
+      email: user.email || '',
+      name: user.user_metadata?.name,
+      avatar_url: user.user_metadata?.avatar_url
+    };
+
     next();
   } catch (error) {
     console.error('Token verification error:', error);
