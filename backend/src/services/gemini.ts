@@ -30,39 +30,70 @@ const model = vertexAI.preview.getGenerativeModel({
   model: 'gemini-pro',
 });
 
+interface SubscriptionAnalysis {
+  isSubscription: boolean;
+  serviceName?: string;
+  subscriptionType?: string;
+  amount?: number;
+  currency?: string;
+  billingFrequency?: string;
+  nextBillingDate?: string;
+  confidence?: number;
+  error?: string;
+}
+
 /**
  * Summarize email content and extract subscription details
  * @param emailContent The raw email content to summarize
  * @returns The structured summary with subscription details
  */
-export async function summarizeEmail(emailContent: string): Promise<any> {
+export async function summarizeEmail(emailContent: string): Promise<SubscriptionAnalysis> {
   try {
     const prompt = `
       Analyze the following email content and extract subscription details.
-      If the email is not related to a subscription, set isSubscription to false and return an error message.
+      Focus on identifying recurring payments, subscriptions, memberships, or services.
+      
+      Rules:
+      1. Look for key indicators like "subscription", "recurring payment", "membership", "billing", etc.
+      2. Extract specific amounts, currencies, and billing frequencies.
+      3. Try to find the next billing date if mentioned.
+      4. Assign a confidence score (0-1) based on how certain you are this is a subscription.
+      5. If you're not sure it's a subscription, set isSubscription to false.
       
       Email content:
       ${emailContent}
       
-      Return a JSON object with the following fields:
+      Return a JSON object with these fields:
       {
         "isSubscription": boolean,
-        "serviceName": string,
-        "subscriptionType": string,
-        "amount": number,
-        "currency": string,
-        "billingFrequency": string,
-        "nextBillingDate": string,
-        "error": string (if not a subscription)
+        "serviceName": string (name of the service/company),
+        "subscriptionType": string (e.g., "streaming", "software", "membership"),
+        "amount": number (just the number, no currency),
+        "currency": string (e.g., "USD", "EUR"),
+        "billingFrequency": string (e.g., "monthly", "yearly"),
+        "nextBillingDate": string (YYYY-MM-DD format if found),
+        "confidence": number (0-1),
+        "error": string (if not a subscription or error occurred)
       }
     `;
 
     const result = await model.generateContent(prompt);
     const response = await result.response;
-    const text = response.text();
+    const text = await response.text();
     
     try {
-      return JSON.parse(text);
+      const parsed = JSON.parse(text);
+      return {
+        isSubscription: Boolean(parsed.isSubscription),
+        serviceName: parsed.serviceName,
+        subscriptionType: parsed.subscriptionType,
+        amount: typeof parsed.amount === 'number' ? parsed.amount : parseFloat(parsed.amount),
+        currency: parsed.currency,
+        billingFrequency: parsed.billingFrequency,
+        nextBillingDate: parsed.nextBillingDate,
+        confidence: parsed.confidence,
+        error: parsed.error
+      };
     } catch (error) {
       console.error('Failed to parse Gemini response:', error);
       return {
