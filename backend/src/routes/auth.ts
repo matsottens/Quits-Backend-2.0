@@ -32,6 +32,11 @@ router.get('/google/callback', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Authorization code is required' });
     }
 
+    // Set the redirect URI based on the request origin
+    const origin = req.headers.origin || 'http://localhost:5173';
+    oauth2Client.redirectUri = `${origin}/auth/callback`;
+
+    console.log('Received auth code, attempting to exchange for tokens...');
     const { tokens } = await oauth2Client.getToken(code as string);
     oauth2Client.setCredentials(tokens);
 
@@ -51,7 +56,7 @@ router.get('/google/callback', async (req: Request, res: Response) => {
 
     return res.json({ token });
   } catch (error) {
-    console.error('OAuth callback error:', error);
+    console.error('Auth error:', error);
     return res.status(500).json({ error: 'Failed to authenticate with Google' });
   }
 });
