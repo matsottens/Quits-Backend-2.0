@@ -3,6 +3,7 @@ import cors from 'cors';
 import fetch from 'node-fetch';
 import { URLSearchParams } from 'url';
 import dotenv from 'dotenv';
+import jwt from 'jsonwebtoken';
 
 // Load environment variables
 dotenv.config();
@@ -17,15 +18,14 @@ const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || 'GOCSPX-dOLMXYt
 
 // Middleware
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? ['https://quits.cc', 'https://www.quits.cc']
-    : ['http://localhost:5173'],
+  origin: 'http://localhost:5173',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   credentials: true,
   allowedHeaders: ['Content-Type', 'Authorization'],
-  exposedHeaders: ['Content-Range', 'X-Content-Range']
 }));
+
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -53,7 +53,7 @@ app.get('/api/auth/google/callback', async (req, res) => {
   const { code } = req.query;
   
   if (!code) {
-    return res.status(400).json({ message: 'Authorization code is required' });
+    return res.status(400).json({ error: 'Authorization code is required' });
   }
   
   try {
@@ -76,7 +76,7 @@ app.get('/api/auth/google/callback', async (req, res) => {
     
     if (tokenResponse.status !== 200) {
       console.error('Token exchange error:', tokenData);
-      return res.status(400).json({ message: 'Failed to exchange authorization code' });
+      return res.status(400).json({ error: 'Failed to exchange authorization code' });
     }
     
     // Fetch user info with the access token
@@ -90,20 +90,27 @@ app.get('/api/auth/google/callback', async (req, res) => {
     
     if (userInfoResponse.status !== 200) {
       console.error('User info error:', userData);
-      return res.status(400).json({ message: 'Failed to fetch user information' });
+      return res.status(400).json({ error: 'Failed to fetch user information' });
     }
     
     // Generate JWT token
-    const jwtToken = 'test_jwt_token'; // In a real app, this would be a proper JWT
-    
-    // Instead of redirecting, send the token in the response
+    const jwtToken = jwt.sign(
+      { 
+        sub: userData.id,
+        email: userData.email
+      },
+      process.env.JWT_SECRET || 'your-jwt-secret-key',
+      { expiresIn: '7d' }
+    );
+
+    // Return the token and user data
     res.json({
       token: jwtToken,
       user: userData
     });
   } catch (error) {
     console.error('OAuth callback error:', error);
-    res.status(500).json({ message: 'Authentication failed' });
+    res.status(500).json({ error: 'Authentication failed', details: error.message });
   }
 });
 

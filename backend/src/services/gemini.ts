@@ -4,7 +4,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 // Initialize Vertex AI with your Google Cloud project and location
-const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID;
+const projectId = process.env.GOOGLE_CLOUD_PROJECT;
 const location = process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
 const apiKey = process.env.GEMINI_API_KEY;
 
