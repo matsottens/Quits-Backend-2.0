@@ -2,10 +2,15 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 
 interface AuthRequest extends Request {
-  user?: any;
+  user?: {
+    id: string;
+    email: string;
+    name?: string;
+    avatar_url?: string;
+  };
 }
 
-export const authenticateToken = (req: AuthRequest, res: Response, next: NextFunction) => {
+const authenticateToken = (req: AuthRequest, res: Response, next: NextFunction) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
@@ -15,7 +20,7 @@ export const authenticateToken = (req: AuthRequest, res: Response, next: NextFun
 
   try {
     const user = jwt.verify(token, process.env.JWT_SECRET || 'quits-jwt-secret-key-development');
-    req.user = user;
+    req.user = user as AuthRequest['user'];
     next();
   } catch (error) {
     console.error('Token verification error:', error);
@@ -23,4 +28,4 @@ export const authenticateToken = (req: AuthRequest, res: Response, next: NextFun
   }
 };
 
-export const authenticateUser = authenticateToken; 
+export { authenticateToken, authenticateToken as authenticateUser, AuthRequest }; 
