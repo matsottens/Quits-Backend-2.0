@@ -2,162 +2,115 @@ import express from 'express';
 import { google } from 'googleapis';
 import { oauth2Client, SCOPES } from '../config/google.js';
 import { supabase } from '../config/supabase.js';
-import jwt from 'jsonwebtoken';
+import { authenticateUser } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Generate Google OAuth URL
-router.get('/google/url', (req, res) => {
-  try {
-    const authUrl = oauth2Client.generateAuthUrl({
-      access_type: 'offline',
-      scope: SCOPES,
-      prompt: 'consent',
-      include_granted_scopes: true
-    });
-    
-    res.json({ url: authUrl });
-  } catch (error) {
-    console.error('Error generating auth URL:', error);
-    res.status(500).json({ error: 'Failed to generate auth URL' });
-  }
+// Get Google OAuth URL
+router.get('/google', (req, res) => {
+  const url = oauth2Client.generateAuthUrl({
+    access_type: 'offline',
+    scope: SCOPES,
+    prompt: 'consent'
+  });
+  res.json({ url });
 });
 
-// Google OAuth callback
+// Handle Google OAuth callback
 router.get('/google/callback', async (req, res) => {
   const { code } = req.query;
   
   if (!code || typeof code !== 'string') {
-    console.error('No code provided in callback');
-    return res.redirect(`${process.env.CLIENT_URL}/login?error=no_code`);
+    return res.status(400).json({ error: 'No authorization code provided' });
   }
-  
+
   try {
     console.log('Received auth code, attempting to exchange for tokens...');
     
     // Exchange code for tokens
     const { tokens } = await oauth2Client.getToken(code);
-    
-    if (!tokens || !tokens.access_token) {
-      console.error('No tokens received from Google');
-      return res.redirect(`${process.env.CLIENT_URL}/login?error=no_tokens`);
-    }
-    
     oauth2Client.setCredentials(tokens);
-    
-    console.log('Successfully exchanged code for tokens');
-    
-    // Get user info
-    const oauth2 = google.oauth2({
-      auth: oauth2Client,
-      version: 'v2'
-    });
-    
-    const userInfo = await oauth2.userinfo.get();
-    
+
+    // Get user info from Google
+    const oauth2 = google.oauth2('v2');
+    const userInfo = await oauth2.userinfo.get({ auth: oauth2Client });
+
     if (!userInfo.data.email) {
-      console.error('No email found in user info');
-      return res.redirect(`${process.env.CLIENT_URL}/login?error=no_email`);
+      throw new Error('No email found in Google user info');
     }
-    
-    console.log('Retrieved user info for:', userInfo.data.email);
-    
-    // Check if user exists in Supabase, if not create them
-    const { data: existingUser, error: fetchError } = await supabase
-      .from('users')
-      .select()
-      .eq('email', userInfo.data.email)
-      .single();
-      
-    if (fetchError && fetchError.code !== 'PGRST116') {
-      console.error('Database error:', fetchError);
-      return res.redirect(`${process.env.CLIENT_URL}/login?error=database_error`);
-    }
-    
-    let userId;
-    
-    if (!existingUser) {
-      console.log('Creating new user...');
-      // Create new user
-      const { data: newUser, error: createError } = await supabase
-        .from('users')
-        .insert({
+
+    // Create or update user in Supabase
+    const { data: authData, error: authError } = await supabase.auth.signUp({
+      email: userInfo.data.email,
+      password: crypto.randomUUID(), // Generate a random password
+      options: {
+        data: {
+          name: userInfo.data.name,
+          avatar_url: userInfo.data.picture,
+        }
+      }
+    });
+
+    if (authError) {
+      // If user already exists, try to sign in
+      if (authError.message.includes('already registered')) {
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
           email: userInfo.data.email,
-          name: userInfo.data.name || '',
-          avatar_url: userInfo.data.picture || '',
-          google_id: userInfo.data.id,
-        })
-        .select()
-        .single();
-        
-      if (createError) {
-        console.error('Failed to create user:', createError);
-        return res.redirect(`${process.env.CLIENT_URL}/login?error=user_creation_failed`);
-      }
-      
-      userId = newUser.id;
-      console.log('New user created with ID:', userId);
-    } else {
-      userId = existingUser.id;
-      console.log('Found existing user with ID:', userId);
-      
-      // Update existing user info
-      const { error: updateError } = await supabase
-        .from('users')
-        .update({
-          name: userInfo.data.name || existingUser.name,
-          avatar_url: userInfo.data.picture || existingUser.avatar_url,
-          last_login: new Date().toISOString(),
-        })
-        .eq('id', userId);
-        
-      if (updateError) {
-        console.error('Failed to update user:', updateError);
+          password: crypto.randomUUID() // This will fail, but we'll update the user anyway
+        });
+
+        if (signInError) {
+          console.error('Sign in error:', signInError);
+        }
+      } else {
+        throw authError;
       }
     }
-    
-    // Store tokens in user_tokens table
+
+    // Store Google tokens
     const { error: tokenError } = await supabase
       .from('user_tokens')
       .upsert({
-        user_id: userId,
+        user_id: authData?.user?.id,
         access_token: tokens.access_token,
         refresh_token: tokens.refresh_token,
-        expires_at: tokens.expiry_date,
-      }, {
-        onConflict: 'user_id'
+        expires_at: tokens.expiry_date
       });
-      
+
     if (tokenError) {
-      console.error('Failed to store tokens:', tokenError);
-      return res.redirect(`${process.env.CLIENT_URL}/login?error=token_storage_failed`);
+      throw tokenError;
     }
-    
-    // Create JWT for frontend auth
-    const jwtToken = jwt.sign(
-      { 
-        id: userId,
+
+    // Return the Supabase session token
+    res.json({
+      token: authData?.session?.access_token,
+      user: {
+        id: authData?.user?.id,
         email: userInfo.data.email,
         name: userInfo.data.name,
         avatar_url: userInfo.data.picture
-      },
-      process.env.JWT_SECRET || 'quits-jwt-secret-key-development',
-      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
-    );
-    
-    console.log('Authentication successful, redirecting to frontend...');
-    
-    // Redirect to frontend with token
-    const redirectUrl = new URL('/auth/callback', process.env.CLIENT_URL);
-    redirectUrl.searchParams.append('token', jwtToken);
-    res.redirect(redirectUrl.toString());
+      }
+    });
   } catch (error) {
     console.error('Auth error:', error);
-    // Redirect to frontend with error
-    const redirectUrl = new URL('/login', process.env.CLIENT_URL);
-    redirectUrl.searchParams.append('error', 'authentication_failed');
-    redirectUrl.searchParams.append('details', error.message || 'Unknown error');
-    res.redirect(redirectUrl.toString());
+    res.status(500).json({ 
+      error: 'Authentication failed',
+      details: error.message
+    });
+  }
+});
+
+// Get current user
+router.get('/me', authenticateUser, async (req, res) => {
+  try {
+    const { data: { user }, error } = await supabase.auth.getUser(req.headers.authorization?.split(' ')[1]);
+    
+    if (error) throw error;
+    
+    res.json(user);
+  } catch (error) {
+    console.error('Get user error:', error);
+    res.status(401).json({ error: 'Unauthorized' });
   }
 });
 

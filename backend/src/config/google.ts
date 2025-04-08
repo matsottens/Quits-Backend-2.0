@@ -3,25 +3,26 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REDIRECT_URI) {
+const {
+  GOOGLE_CLIENT_ID,
+  GOOGLE_CLIENT_SECRET,
+  GOOGLE_REDIRECT_URI,
+  NODE_ENV
+} = process.env;
+
+if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
   throw new Error('Missing Google OAuth environment variables');
 }
 
-// Ensure the redirect URI matches the frontend callback URL
-const redirectUri = process.env.NODE_ENV === 'production' 
-  ? 'https://quits.cc/auth/callback'
-  : 'http://localhost:5173/auth/callback';
+// Ensure the redirect URI matches what's configured in Google Cloud Console
+const redirectUri = NODE_ENV === 'production'
+  ? 'https://api.quits.cc/auth/google/callback'
+  : GOOGLE_REDIRECT_URI || 'http://localhost:3000/auth/google/callback';
 
 export const oauth2Client = new google.auth.OAuth2(
-  process.env.GOOGLE_CLIENT_ID,
-  process.env.GOOGLE_CLIENT_SECRET,
-  redirectUri,
-  {
-    timeout: 10000,
-    responseType: 'code',
-    accessType: 'offline',
-    prompt: 'consent'
-  }
+  GOOGLE_CLIENT_ID,
+  GOOGLE_CLIENT_SECRET,
+  redirectUri
 );
 
 // Scopes for Gmail API access
