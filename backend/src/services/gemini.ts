@@ -3,18 +3,26 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-if (!process.env.VERTEX_PROJECT_ID) {
-  throw new Error('Missing VERTEX_PROJECT_ID in environment variables');
+if (!process.env.GOOGLE_CLOUD_PROJECT) {
+  throw new Error('Missing GOOGLE_CLOUD_PROJECT in environment variables');
 }
 
-if (!process.env.VERTEX_LOCATION) {
-  throw new Error('Missing VERTEX_LOCATION in environment variables');
+if (!process.env.GOOGLE_CLOUD_LOCATION) {
+  throw new Error('Missing GOOGLE_CLOUD_LOCATION in environment variables');
+}
+
+if (!process.env.GEMINI_API_KEY) {
+  throw new Error('Missing GEMINI_API_KEY in environment variables');
 }
 
 // Initialize Vertex AI with project and location
 const vertexAI = new VertexAI({
-  project: process.env.VERTEX_PROJECT_ID,
-  location: process.env.VERTEX_LOCATION,
+  project: process.env.GOOGLE_CLOUD_PROJECT,
+  location: process.env.GOOGLE_CLOUD_LOCATION,
+  apiEndpoint: 'us-central1-aiplatform.googleapis.com',
+  credentials: {
+    client_email: process.env.GEMINI_API_KEY,
+  }
 });
 
 // Get the model
