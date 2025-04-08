@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { supabase } from '../config/supabase.js';
 
-interface AuthRequest extends Request {
+export interface AuthRequest extends Request {
   user?: {
     id: string;
     email: string;
@@ -10,7 +10,7 @@ interface AuthRequest extends Request {
   };
 }
 
-const authenticateToken = async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const authenticateUser = async (req: AuthRequest, res: Response, next: NextFunction): Promise<Response | void> => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
@@ -42,4 +42,5 @@ const authenticateToken = async (req: AuthRequest, res: Response, next: NextFunc
   }
 };
 
-export { authenticateToken, authenticateToken as authenticateUser, AuthRequest }; 
+// Export types and middleware
+export { AuthRequest as AuthenticatedRequest }; 

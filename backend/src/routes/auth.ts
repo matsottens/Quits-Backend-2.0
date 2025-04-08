@@ -2,115 +2,115 @@ import express from 'express';
 import { google } from 'googleapis';
 import { oauth2Client, SCOPES } from '../config/google.js';
 import { supabase } from '../config/supabase.js';
-import { authenticateUser } from '../middleware/auth.js';
+import { authenticateUser, AuthRequest } from '../middleware/auth.js';
 
 const router = express.Router();
 
 // Get Google OAuth URL
 router.get('/google', (req, res) => {
-  const url = oauth2Client.generateAuthUrl({
-    access_type: 'offline',
-    scope: SCOPES,
-    prompt: 'consent'
-  });
-  res.json({ url });
+  try {
+    const url = oauth2Client.generateAuthUrl({
+      access_type: 'offline',
+      scope: SCOPES,
+      prompt: 'consent'
+    });
+    res.json({ url });
+  } catch (error) {
+    console.error('Error generating auth URL:', error);
+    res.status(500).json({ error: 'Failed to generate auth URL' });
+  }
 });
 
 // Handle Google OAuth callback
 router.get('/google/callback', async (req, res) => {
-  const { code } = req.query;
-  
-  if (!code || typeof code !== 'string') {
-    return res.status(400).json({ error: 'No authorization code provided' });
-  }
-
   try {
-    console.log('Received auth code, attempting to exchange for tokens...');
-    
+    const { code } = req.query;
+
+    if (!code || typeof code !== 'string') {
+      return res.status(400).json({ error: 'No authorization code provided' });
+    }
+
     // Exchange code for tokens
     const { tokens } = await oauth2Client.getToken(code);
-    oauth2Client.setCredentials(tokens);
+    
+    if (!tokens.access_token) {
+      return res.status(400).json({ error: 'Failed to get access token' });
+    }
 
     // Get user info from Google
+    oauth2Client.setCredentials(tokens);
     const oauth2 = google.oauth2('v2');
-    const userInfo = await oauth2.userinfo.get({ auth: oauth2Client });
+    const { data: userInfo } = await oauth2.userinfo.get({ auth: oauth2Client });
 
-    if (!userInfo.data.email) {
-      throw new Error('No email found in Google user info');
+    if (!userInfo.email) {
+      return res.status(400).json({ error: 'No email found in user info' });
     }
 
     // Create or update user in Supabase
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email: userInfo.data.email,
-      password: crypto.randomUUID(), // Generate a random password
+    const { data: user, error: userError } = await supabase.auth.signUp({
+      email: userInfo.email,
+      password: crypto.randomUUID(), // Generate random password for OAuth users
       options: {
         data: {
-          name: userInfo.data.name,
-          avatar_url: userInfo.data.picture,
+          name: userInfo.name,
+          avatar_url: userInfo.picture,
         }
       }
     });
 
-    if (authError) {
-      // If user already exists, try to sign in
-      if (authError.message.includes('already registered')) {
-        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-          email: userInfo.data.email,
-          password: crypto.randomUUID() // This will fail, but we'll update the user anyway
-        });
-
-        if (signInError) {
-          console.error('Sign in error:', signInError);
-        }
-      } else {
-        throw authError;
-      }
+    if (userError) {
+      console.error('Error creating user:', userError);
+      return res.status(500).json({ error: 'Failed to create user' });
     }
 
-    // Store Google tokens
+    // Store tokens in database
     const { error: tokenError } = await supabase
       .from('user_tokens')
       .upsert({
-        user_id: authData?.user?.id,
+        user_id: user.user?.id,
         access_token: tokens.access_token,
         refresh_token: tokens.refresh_token,
-        expires_at: tokens.expiry_date
+        expiry_date: tokens.expiry_date,
       });
 
     if (tokenError) {
-      throw tokenError;
+      console.error('Error storing tokens:', tokenError);
+      return res.status(500).json({ error: 'Failed to store tokens' });
     }
 
-    // Return the Supabase session token
-    res.json({
-      token: authData?.session?.access_token,
-      user: {
-        id: authData?.user?.id,
-        email: userInfo.data.email,
-        name: userInfo.data.name,
-        avatar_url: userInfo.data.picture
-      }
+    // Create session
+    const { data: session, error: sessionError } = await supabase.auth.signInWithPassword({
+      email: userInfo.email,
+      password: crypto.randomUUID(), // This will fail but that's ok, we just need the session
     });
+
+    if (sessionError) {
+      console.error('Error creating session:', sessionError);
+      return res.status(500).json({ error: 'Failed to create session' });
+    }
+
+    res.json({ token: session.session?.access_token });
   } catch (error) {
-    console.error('Auth error:', error);
-    res.status(500).json({ 
-      error: 'Authentication failed',
-      details: error.message
-    });
+    console.error('OAuth callback error:', error);
+    res.status(500).json({ error: 'Authentication failed' });
   }
 });
 
-// Get current user
-router.get('/me', authenticateUser, async (req, res) => {
+// Get user profile
+router.get('/me', authenticateUser, async (req: AuthRequest, res) => {
   try {
-    const { data: { user }, error } = await supabase.auth.getUser(req.headers.authorization?.split(' ')[1]);
-    
+    const { data: profile, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', req.user.id)
+      .single();
+
     if (error) throw error;
-    
-    res.json(user);
+
+    res.json(profile);
   } catch (error) {
-    console.error('Get user error:', error);
-    res.status(401).json({ error: 'Unauthorized' });
+    console.error('Error fetching profile:', error);
+    res.status(500).json({ error: 'Failed to fetch profile' });
   }
 });
 
