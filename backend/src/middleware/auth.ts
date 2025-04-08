@@ -2,12 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 
 interface AuthRequest extends Request {
-  user?: {
-    userId: string;
-    email: string;
-    name?: string;
-    avatar_url?: string;
-  };
+  user?: any;
 }
 
 export const authenticateToken = (req: AuthRequest, res: Response, next: NextFunction) => {
@@ -20,7 +15,7 @@ export const authenticateToken = (req: AuthRequest, res: Response, next: NextFun
 
   try {
     const user = jwt.verify(token, process.env.JWT_SECRET || 'quits-jwt-secret-key-development');
-    req.user = user as any;
+    req.user = user;
     next();
   } catch (error) {
     console.error('Token verification error:', error);
@@ -28,4 +23,4 @@ export const authenticateToken = (req: AuthRequest, res: Response, next: NextFun
   }
 };
 
-export default authenticateToken; 
+export const authenticateUser = authenticateToken; 

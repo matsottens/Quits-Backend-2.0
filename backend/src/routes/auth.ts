@@ -122,12 +122,13 @@ router.get('/google/callback', async (req, res) => {
       
     if (tokenError) {
       console.error('Failed to store tokens:', tokenError);
+      return res.status(500).json({ error: 'Failed to store tokens' });
     }
     
     // Create JWT for frontend auth
     const jwtToken = jwt.sign(
       { 
-        userId,
+        id: userId,
         email: userInfo.data.email,
         name: userInfo.data.name,
         avatar_url: userInfo.data.picture
@@ -144,7 +145,10 @@ router.get('/google/callback', async (req, res) => {
     res.redirect(redirectUrl.toString());
   } catch (error) {
     console.error('Auth error:', error);
-    res.status(500).json({ error: 'Authentication failed' });
+    // Redirect to frontend with error
+    const redirectUrl = new URL('/login', process.env.CLIENT_URL);
+    redirectUrl.searchParams.append('error', 'Authentication failed');
+    res.redirect(redirectUrl.toString());
   }
 });
 
