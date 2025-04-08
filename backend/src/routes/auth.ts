@@ -28,6 +28,7 @@ router.get('/google/callback', async (req, res) => {
   const { code } = req.query;
   
   if (!code || typeof code !== 'string') {
+    console.error('No code provided in callback');
     return res.status(400).json({ error: 'Invalid authorization code' });
   }
   
@@ -100,6 +101,7 @@ router.get('/google/callback', async (req, res) => {
         .update({
           name: userInfo.data.name || existingUser.name,
           avatar_url: userInfo.data.picture || existingUser.avatar_url,
+          last_login: new Date().toISOString(),
         })
         .eq('id', userId);
         
@@ -137,9 +139,9 @@ router.get('/google/callback', async (req, res) => {
     console.log('Authentication successful, redirecting to frontend...');
     
     // Redirect to frontend with token
-    const redirectUrl = `${process.env.CLIENT_URL}/auth/callback?token=${jwtToken}`;
-    console.log('Redirecting to:', redirectUrl);
-    res.redirect(redirectUrl);
+    const redirectUrl = new URL('/auth/callback', process.env.CLIENT_URL);
+    redirectUrl.searchParams.append('token', jwtToken);
+    res.redirect(redirectUrl.toString());
   } catch (error) {
     console.error('Auth error:', error);
     res.status(500).json({ error: 'Authentication failed' });
