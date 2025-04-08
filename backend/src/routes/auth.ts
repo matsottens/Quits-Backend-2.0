@@ -8,13 +8,19 @@ const router = express.Router();
 
 // Generate Google OAuth URL
 router.get('/google/url', (req, res) => {
-  const authUrl = oauth2Client.generateAuthUrl({
-    access_type: 'offline',
-    scope: SCOPES,
-    prompt: 'consent',
-  });
-  
-  res.json({ url: authUrl });
+  try {
+    const authUrl = oauth2Client.generateAuthUrl({
+      access_type: 'offline',
+      scope: SCOPES,
+      prompt: 'consent',
+      include_granted_scopes: true
+    });
+    
+    res.json({ url: authUrl });
+  } catch (error) {
+    console.error('Error generating auth URL:', error);
+    res.status(500).json({ error: 'Failed to generate auth URL' });
+  }
 });
 
 // Google OAuth callback
@@ -26,9 +32,13 @@ router.get('/google/callback', async (req, res) => {
   }
   
   try {
+    console.log('Received auth code, attempting to exchange for tokens...');
+    
     // Exchange code for tokens
     const { tokens } = await oauth2Client.getToken(code);
     oauth2Client.setCredentials(tokens);
+    
+    console.log('Successfully exchanged code for tokens');
     
     // Get user info
     const oauth2 = google.oauth2({
@@ -39,8 +49,11 @@ router.get('/google/callback', async (req, res) => {
     const userInfo = await oauth2.userinfo.get();
     
     if (!userInfo.data.email) {
+      console.error('No email found in user info');
       return res.status(400).json({ error: 'Email not found in user info' });
     }
+    
+    console.log('Retrieved user info for:', userInfo.data.email);
     
     // Check if user exists in Supabase, if not create them
     const { data: existingUser, error: fetchError } = await supabase
@@ -57,6 +70,7 @@ router.get('/google/callback', async (req, res) => {
     let userId;
     
     if (!existingUser) {
+      console.log('Creating new user...');
       // Create new user
       const { data: newUser, error: createError } = await supabase
         .from('users')
@@ -75,8 +89,10 @@ router.get('/google/callback', async (req, res) => {
       }
       
       userId = newUser.id;
+      console.log('New user created with ID:', userId);
     } else {
       userId = existingUser.id;
+      console.log('Found existing user with ID:', userId);
       
       // Update existing user info
       const { error: updateError } = await supabase
@@ -114,12 +130,16 @@ router.get('/google/callback', async (req, res) => {
         name: userInfo.data.name,
         avatar_url: userInfo.data.picture
       },
-      process.env.JWT_SECRET || 'your-jwt-secret-key',
+      process.env.JWT_SECRET || 'quits-jwt-secret-key-development',
       { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
     );
     
+    console.log('Authentication successful, redirecting to frontend...');
+    
     // Redirect to frontend with token
-    res.redirect(`${process.env.CLIENT_URL}/auth/callback?token=${jwtToken}`);
+    const redirectUrl = `${process.env.CLIENT_URL}/auth/callback?token=${jwtToken}`;
+    console.log('Redirecting to:', redirectUrl);
+    res.redirect(redirectUrl);
   } catch (error) {
     console.error('Auth error:', error);
     res.status(500).json({ error: 'Authentication failed' });

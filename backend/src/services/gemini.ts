@@ -3,26 +3,18 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const apiKey = process.env.GEMINI_API_KEY;
-const projectId = process.env.VERTEX_PROJECT_ID;
-const location = process.env.VERTEX_LOCATION;
-
-if (!apiKey) {
-  throw new Error('Missing Gemini API key in environment variables');
+if (!process.env.VERTEX_PROJECT_ID) {
+  throw new Error('Missing VERTEX_PROJECT_ID in environment variables');
 }
 
-if (!projectId) {
-  throw new Error('Missing Vertex project ID in environment variables');
-}
-
-if (!location) {
-  throw new Error('Missing Vertex location in environment variables');
+if (!process.env.VERTEX_LOCATION) {
+  throw new Error('Missing VERTEX_LOCATION in environment variables');
 }
 
 // Initialize Vertex AI with project and location
 const vertexAI = new VertexAI({
-  project: projectId,
-  location: location,
+  project: process.env.VERTEX_PROJECT_ID,
+  location: process.env.VERTEX_LOCATION,
 });
 
 // Get the model
