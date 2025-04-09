@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import authRoutes from './routes/auth.js';
 import emailRoutes from './routes/email.js';
 import subscriptionRoutes from './routes/subscription.js';
+import { Request, Response, NextFunction } from 'express';
 
 // Load environment variables
 dotenv.config();
@@ -49,6 +50,34 @@ app.use((req, res, next) => {
   next();
 });
 
+// Create a separate CORS middleware function to handle OPTIONS requests
+const handleCors: express.RequestHandler = (req, res, next) => {
+  const origin = req.headers.origin;
+  
+  // Allow requests with no origin (like mobile apps, curl, etc)
+  if (!origin) return next();
+  
+  // Set appropriate CORS headers for allowed origins
+  if (corsOrigins.includes(origin) || 
+      origin === 'https://www.quits.cc' || 
+      origin === 'https://quits.cc') {
+    res.header('Access-Control-Allow-Origin', origin); // Dynamically set to the requesting origin
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+    
+    // Handle preflight requests
+    if (req.method === 'OPTIONS') {
+      return res.status(200).end();
+    }
+  }
+  
+  next();
+};
+
+// Use the properly typed middleware function
+app.use(handleCors);
+
 // Middleware
 app.use(helmet({
   contentSecurityPolicy: {
@@ -60,15 +89,6 @@ app.use(helmet({
       "img-src": ["'self'", "data:", "https:"] // Allow images from self, data URLs, and https
     }
   }
-}));
-
-// This cors middleware will be skipped when our custom handler above has already sent a response for OPTIONS
-app.use(cors({
-  origin: function(origin, callback) {
-    // Already handled by our custom middleware
-    callback(null, true);
-  },
-  credentials: true
 }));
 
 app.use(express.json());
