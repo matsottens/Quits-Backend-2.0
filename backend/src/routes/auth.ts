@@ -315,24 +315,25 @@ router.get('/google/callback/jsonp', async (req: Request, res: Response) => {
 // Direct form-based callback endpoint with redirect back (CSP-friendly)
 router.post('/google/callback/direct2', express.urlencoded({ extended: true }), async (req: Request, res: Response) => {
   try {
+    // Handle CORS for all requests to this endpoint, regardless of request method
+    const requestOrigin = req.headers.origin || '';
+    // Always allow quits.cc domains with or without www
+    if (requestOrigin.includes('quits.cc')) {
+      res.header('Access-Control-Allow-Origin', requestOrigin);
+      res.header('Access-Control-Allow-Methods', 'POST, OPTIONS, GET');
+      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept');
+      res.header('Access-Control-Allow-Credentials', 'true');
+    }
+
     const { code, origin, requestId, redirectUri: providedRedirectUri } = req.body;
     
     console.log('Direct form callback received v2:', {
       hasCode: !!code,
       origin: origin || 'not provided',
       requestId: requestId || 'not provided',
-      providedRedirectUri: providedRedirectUri || 'not provided'
+      providedRedirectUri: providedRedirectUri || 'not provided',
+      actualRequestOrigin: requestOrigin
     });
-    
-    // Set CORS headers explicitly - always allow the requesting origin if it's quits.cc
-    const requestOrigin = req.headers.origin || '';
-    if (requestOrigin.includes('quits.cc')) {
-      console.log('Setting CORS headers for origin:', requestOrigin);
-      res.header('Access-Control-Allow-Origin', requestOrigin); // Use exactly the requesting origin
-      res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
-      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
-      res.header('Access-Control-Allow-Credentials', 'true');
-    }
     
     if (!code) {
       return res.status(400).json({ error: 'Missing authorization code' });
@@ -473,12 +474,17 @@ router.post('/google/callback/direct2', express.urlencoded({ extended: true }), 
 router.options('/google/callback/direct2', (req: Request, res: Response) => {
   const requestOrigin = req.headers.origin || '';
   
+  console.log('OPTIONS preflight request for direct2:', {
+    origin: requestOrigin,
+    method: req.method,
+    headers: req.headers
+  });
+  
   // Allow both www and non-www domains
   if (requestOrigin.includes('quits.cc')) {
-    console.log('Setting preflight CORS headers for origin:', requestOrigin);
-    res.header('Access-Control-Allow-Origin', requestOrigin); // Exactly match requesting origin
-    res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+    res.header('Access-Control-Allow-Origin', requestOrigin);
+    res.header('Access-Control-Allow-Methods', 'POST, OPTIONS, GET');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept');
     res.header('Access-Control-Allow-Credentials', 'true');
     res.status(200).send();
   } else {

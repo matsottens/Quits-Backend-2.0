@@ -60,6 +60,20 @@ app.use(cors({
 }));
 app.use(express.json());
 
+// Add debugging middleware for all requests
+app.use((req, res, next) => {
+  console.log('Request received:', {
+    method: req.method,
+    url: req.url,
+    origin: req.headers.origin,
+    referer: req.headers.referer,
+    contentType: req.headers['content-type']
+  });
+  
+  // Continue with request processing
+  next();
+});
+
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/email', emailRoutes);
