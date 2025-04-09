@@ -41,10 +41,9 @@ app.use(cors({
     // Log all origins for debugging
     console.log('Received request from origin:', origin);
     
-    // Allow all quits.cc domains (with or without www)
+    // Explicitly check for both www and non-www quits.cc domains
     if (
-      corsOrigins.indexOf(origin) !== -1 || 
-      origin.match(/^https?:\/\/(www\.)?quits\.cc(:\d+)?$/) ||
+      corsOrigins.includes(origin) || 
       origin === 'https://www.quits.cc' ||
       origin === 'https://quits.cc'
     ) {

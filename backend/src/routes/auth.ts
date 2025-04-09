@@ -315,20 +315,22 @@ router.get('/google/callback/jsonp', async (req: Request, res: Response) => {
 // Direct form-based callback endpoint with redirect back (CSP-friendly)
 router.post('/google/callback/direct2', express.urlencoded({ extended: true }), async (req: Request, res: Response) => {
   try {
-    const { code, origin, requestId } = req.body;
+    const { code, origin, requestId, redirectUri: providedRedirectUri } = req.body;
     
     console.log('Direct form callback received v2:', {
       hasCode: !!code,
       origin: origin || 'not provided',
-      requestId: requestId || 'not provided'
+      requestId: requestId || 'not provided',
+      providedRedirectUri: providedRedirectUri || 'not provided'
     });
     
-    // Set CORS headers explicitly - allow both www and non-www versions
+    // Set CORS headers explicitly - always allow the requesting origin if it's quits.cc
     const requestOrigin = req.headers.origin || '';
     if (requestOrigin.includes('quits.cc')) {
-      res.header('Access-Control-Allow-Origin', requestOrigin);
+      console.log('Setting CORS headers for origin:', requestOrigin);
+      res.header('Access-Control-Allow-Origin', requestOrigin); // Use exactly the requesting origin
       res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
-      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
       res.header('Access-Control-Allow-Credentials', 'true');
     }
     
@@ -338,32 +340,39 @@ router.post('/google/callback/direct2', express.urlencoded({ extended: true }), 
     
     // Process the same way as regular callback
     try {
-      // Create redirect URI that matches the origin
+      // Use the provided redirect URI if available, otherwise construct one
       let redirectUri;
       
-      // Handle various origin scenarios
-      if (!origin) {
-        // If no origin provided, try to determine from headers
-        const headerOrigin = req.headers.origin || '';
-        const referer = req.headers.referer || '';
-        
-        if (headerOrigin.includes('www.quits.cc')) {
-          redirectUri = 'https://www.quits.cc/auth/callback';
-        } else if (headerOrigin.includes('quits.cc')) {
-          redirectUri = 'https://quits.cc/auth/callback';
-        } else if (referer.includes('www.quits.cc')) {
-          redirectUri = 'https://www.quits.cc/auth/callback';
-        } else if (referer.includes('quits.cc')) {
-          redirectUri = 'https://quits.cc/auth/callback';
-        } else if (headerOrigin.includes('localhost')) {
-          redirectUri = `${headerOrigin}/auth/callback`;
-        } else {
-          // Default fallback
-          redirectUri = process.env.GOOGLE_REDIRECT_URI || 'https://quits.cc/auth/callback';
-        }
+      if (providedRedirectUri) {
+        // Use the redirect URI provided by the client
+        redirectUri = providedRedirectUri;
       } else {
-        // Use the provided origin
-        redirectUri = `${origin}/auth/callback`;
+        // Handle various origin scenarios as fallback
+        if (!origin) {
+          // If no origin provided, try to determine from headers
+          const headerOrigin = req.headers.origin || '';
+          const referer = req.headers.referer || '';
+          
+          if (headerOrigin.includes('www.quits.cc')) {
+            redirectUri = 'https://quits.cc/auth/callback'; // Always use the registered URI
+          } else if (headerOrigin.includes('quits.cc')) {
+            redirectUri = 'https://quits.cc/auth/callback';
+          } else if (referer.includes('www.quits.cc')) {
+            redirectUri = 'https://quits.cc/auth/callback';
+          } else if (referer.includes('quits.cc')) {
+            redirectUri = 'https://quits.cc/auth/callback';
+          } else if (headerOrigin.includes('localhost')) {
+            redirectUri = `${headerOrigin}/auth/callback`;
+          } else {
+            // Default fallback
+            redirectUri = process.env.GOOGLE_REDIRECT_URI || 'https://quits.cc/auth/callback';
+          }
+        } else {
+          // Use the provided origin, but normalize it if needed
+          redirectUri = origin.includes('www.quits.cc') 
+            ? 'https://quits.cc/auth/callback' 
+            : `${origin}/auth/callback`;
+        }
       }
       
       console.log('Using redirect URI for direct callback v2:', redirectUri);
@@ -466,12 +475,14 @@ router.options('/google/callback/direct2', (req: Request, res: Response) => {
   
   // Allow both www and non-www domains
   if (requestOrigin.includes('quits.cc')) {
-    res.header('Access-Control-Allow-Origin', requestOrigin);
+    console.log('Setting preflight CORS headers for origin:', requestOrigin);
+    res.header('Access-Control-Allow-Origin', requestOrigin); // Exactly match requesting origin
     res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
     res.header('Access-Control-Allow-Credentials', 'true');
     res.status(200).send();
   } else {
+    console.log('Blocking preflight request from non-allowed origin:', requestOrigin);
     res.status(403).send();
   }
 });
