@@ -323,6 +323,15 @@ router.post('/google/callback/direct2', express.urlencoded({ extended: true }), 
       requestId: requestId || 'not provided'
     });
     
+    // Set CORS headers explicitly - allow both www and non-www versions
+    const requestOrigin = req.headers.origin || '';
+    if (requestOrigin.includes('quits.cc')) {
+      res.header('Access-Control-Allow-Origin', requestOrigin);
+      res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
+      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      res.header('Access-Control-Allow-Credentials', 'true');
+    }
+    
     if (!code) {
       return res.status(400).json({ error: 'Missing authorization code' });
     }
@@ -417,6 +426,22 @@ router.post('/google/callback/direct2', express.urlencoded({ extended: true }), 
   } catch (error: any) {
     console.error('Direct form route v2 error:', error);
     return res.status(500).json({ error: 'Server error during authentication' });
+  }
+});
+
+// Add CORS preflight handler for direct2 endpoint
+router.options('/google/callback/direct2', (req: Request, res: Response) => {
+  const requestOrigin = req.headers.origin || '';
+  
+  // Allow both www and non-www domains
+  if (requestOrigin.includes('quits.cc')) {
+    res.header('Access-Control-Allow-Origin', requestOrigin);
+    res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.status(200).send();
+  } else {
+    res.status(403).send();
   }
 });
 
