@@ -339,13 +339,44 @@ router.post('/google/callback/direct2', express.urlencoded({ extended: true }), 
     // Process the same way as regular callback
     try {
       // Create redirect URI that matches the origin
-      const redirectUri = origin?.includes('www.')
-        ? `${origin}/auth/callback`
-        : origin?.includes('localhost')
-          ? `${origin}/auth/callback` 
-          : 'https://quits.cc/auth/callback';
+      let redirectUri;
+      
+      // Handle various origin scenarios
+      if (!origin) {
+        // If no origin provided, try to determine from headers
+        const headerOrigin = req.headers.origin || '';
+        const referer = req.headers.referer || '';
+        
+        if (headerOrigin.includes('www.quits.cc')) {
+          redirectUri = 'https://www.quits.cc/auth/callback';
+        } else if (headerOrigin.includes('quits.cc')) {
+          redirectUri = 'https://quits.cc/auth/callback';
+        } else if (referer.includes('www.quits.cc')) {
+          redirectUri = 'https://www.quits.cc/auth/callback';
+        } else if (referer.includes('quits.cc')) {
+          redirectUri = 'https://quits.cc/auth/callback';
+        } else if (headerOrigin.includes('localhost')) {
+          redirectUri = `${headerOrigin}/auth/callback`;
+        } else {
+          // Default fallback
+          redirectUri = process.env.GOOGLE_REDIRECT_URI || 'https://quits.cc/auth/callback';
+        }
+      } else {
+        // Use the provided origin
+        redirectUri = `${origin}/auth/callback`;
+      }
       
       console.log('Using redirect URI for direct callback v2:', redirectUri);
+      console.log('Request headers:', {
+        origin: req.headers.origin,
+        referer: req.headers.referer,
+        host: req.headers.host
+      });
+      console.log('Google OAuth environment variables:', {
+        CLIENT_ID: process.env.GOOGLE_CLIENT_ID ? 'Set' : 'Not set',
+        CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET ? 'Set' : 'Not set',
+        REDIRECT_URI_ENV: process.env.GOOGLE_REDIRECT_URI || 'Not set'
+      });
       
       const tokenExchangeOauth2Client = new google.auth.OAuth2(
         process.env.GOOGLE_CLIENT_ID,
