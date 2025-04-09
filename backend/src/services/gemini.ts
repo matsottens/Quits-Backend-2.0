@@ -1,34 +1,43 @@
-import { VertexAI } from '@google-cloud/vertexai';
+import { VertexAI, HarmCategory, HarmBlockThreshold } from '@google-cloud/vertexai';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-if (!process.env.GOOGLE_CLOUD_PROJECT) {
-  throw new Error('Missing GOOGLE_CLOUD_PROJECT in environment variables');
+const geminiApiKey = process.env.GEMINI_API_KEY;
+const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.VERTEX_PROJECT_ID;
+const location = process.env.GOOGLE_CLOUD_LOCATION || process.env.VERTEX_LOCATION;
+
+if (!geminiApiKey) {
+  console.warn('Missing Gemini API key (GEMINI_API_KEY) in environment variables. Gemini features will be disabled.');
+  // Optionally throw error if Gemini is critical
+  // throw new Error('Missing Gemini API key in environment variables'); 
 }
 
-if (!process.env.GOOGLE_CLOUD_LOCATION) {
-  throw new Error('Missing GOOGLE_CLOUD_LOCATION in environment variables');
+if (!projectId || !location) {
+  throw new Error('Missing Google Cloud Project ID or Location for Vertex AI');
 }
 
-if (!process.env.GEMINI_API_KEY) {
-  throw new Error('Missing GEMINI_API_KEY in environment variables');
+let vertex_ai: VertexAI | null = null;
+if (geminiApiKey) { // Only initialize if API key exists
+    vertex_ai = new VertexAI({ project: projectId, location: location });
 }
 
-// Initialize Vertex AI with project and location
-const vertexAI = new VertexAI({
-  project: process.env.GOOGLE_CLOUD_PROJECT,
-  location: process.env.GOOGLE_CLOUD_LOCATION,
-  apiEndpoint: 'us-central1-aiplatform.googleapis.com',
-  credentials: {
-    client_email: process.env.GEMINI_API_KEY,
-  }
-});
+const model = 'gemini-1.5-flash-001'; 
 
-// Get the model
-const model = vertexAI.preview.getGenerativeModel({
-  model: 'gemini-pro',
-});
+const generativeModel = vertex_ai
+  ? vertex_ai.getGenerativeModel({
+      model: model,
+      // The following parameters are optional
+      // They are added here for demonstration purposes
+      safetySettings: [
+        { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+        { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+        { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+        { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+      ],
+      generationConfig: { maxOutputTokens: 8192, temperature: 1, topP: 0.95 },
+    })
+  : null;
 
 interface SubscriptionAnalysis {
   isSubscription: boolean;
@@ -44,68 +53,75 @@ interface SubscriptionAnalysis {
 
 /**
  * Summarize email content and extract subscription details
- * @param emailContent The raw email content to summarize
+ * @param rawEmailContent The raw email content to summarize
  * @returns The structured summary with subscription details
  */
-export async function summarizeEmail(emailContent: string): Promise<SubscriptionAnalysis> {
-  try {
-    const prompt = `
-      Analyze the following email content and extract subscription details.
-      Focus on identifying recurring payments, subscriptions, memberships, or services.
-      
-      Rules:
-      1. Look for key indicators like "subscription", "recurring payment", "membership", "billing", etc.
-      2. Extract specific amounts, currencies, and billing frequencies.
-      3. Try to find the next billing date if mentioned.
-      4. Assign a confidence score (0-1) based on how certain you are this is a subscription.
-      5. If you're not sure it's a subscription, set isSubscription to false.
-      
-      Email content:
-      ${emailContent}
-      
-      Return a JSON object with these fields:
-      {
-        "isSubscription": boolean,
-        "serviceName": string (name of the service/company),
-        "subscriptionType": string (e.g., "streaming", "software", "membership"),
-        "amount": number (just the number, no currency),
-        "currency": string (e.g., "USD", "EUR"),
-        "billingFrequency": string (e.g., "monthly", "yearly"),
-        "nextBillingDate": string (YYYY-MM-DD format if found),
-        "confidence": number (0-1),
-        "error": string (if not a subscription or error occurred)
-      }
-    `;
+export async function summarizeEmail(rawEmailContent: string): Promise<SubscriptionAnalysis> {
+  if (!generativeModel) {
+    console.error('Gemini model not initialized. Cannot summarize email.');
+    return { isSubscription: false, error: 'Gemini service not available' };
+  }
 
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const text = await response.text();
+  const prompt = `
+    Analyze the following email content to determine if it relates to a subscription service.
+    If it is a subscription, extract the following details: service name, price (amount and currency), billing frequency (e.g., monthly, yearly), and the next billing date (if available). 
+    Format the output as a JSON object.
+    If the email is not about a subscription, return a JSON object with "isSubscription": false.
     
-    try {
-      const parsed = JSON.parse(text);
-      return {
-        isSubscription: Boolean(parsed.isSubscription),
-        serviceName: parsed.serviceName,
-        subscriptionType: parsed.subscriptionType,
-        amount: typeof parsed.amount === 'number' ? parsed.amount : parseFloat(parsed.amount),
-        currency: parsed.currency,
-        billingFrequency: parsed.billingFrequency,
-        nextBillingDate: parsed.nextBillingDate,
-        confidence: parsed.confidence,
-        error: parsed.error
-      };
-    } catch (error) {
-      console.error('Failed to parse Gemini response:', error);
-      return {
-        isSubscription: false,
-        error: 'Failed to parse subscription details'
-      };
+    JSON Output Structure for Subscription:
+    {
+      "isSubscription": true,
+      "serviceName": "Example Service",
+      "price": 10.99,
+      "currency": "USD",
+      "billingFrequency": "monthly", 
+      "nextBillingDate": "YYYY-MM-DD" // or null if not found
     }
-  } catch (error) {
-    console.error('Gemini API error:', error);
-    return {
-      isSubscription: false,
-      error: 'Failed to analyze email content'
-    };
+    
+    JSON Output Structure for Non-Subscription:
+    {
+      "isSubscription": false
+    }
+    
+    Email Content:
+    --- START EMAIL CONTENT ---
+    ${rawEmailContent}
+    --- END EMAIL CONTENT ---
+    
+    JSON Output:
+  `;
+
+  try {
+    const req = { contents: [{ role: 'user', parts: [{ text: prompt }] }] };
+    const streamingResp = await generativeModel.generateContentStream(req);
+    
+    // Aggregate the response text
+    let aggregatedResponseText = '';
+    for await (const item of streamingResp.stream) {
+      if (item.candidates && item.candidates[0].content?.parts) {
+          const partText = item.candidates[0].content.parts[0].text;
+          if (partText) {
+             aggregatedResponseText += partText;
+          }
+      }
+    }
+    
+    // Attempt to parse the aggregated JSON string
+    try {
+        const cleanedJsonString = aggregatedResponseText
+          .replace(/^\s*```json\s*/, '') // Remove leading ```json
+          .replace(/\s*```\s*$/, ''); // Remove trailing ```
+        
+        const result = JSON.parse(cleanedJsonString);
+        return result;
+    } catch (parseError) {
+        console.error('Failed to parse Gemini JSON response:', parseError);
+        console.error('Raw Gemini Response Text:', aggregatedResponseText); 
+        return { isSubscription: false, error: 'Failed to parse analysis result', rawOutput: aggregatedResponseText };
+    }
+
+  } catch (error: any) {
+    console.error('Error calling Gemini API:', error);
+    return { isSubscription: false, error: 'Failed to analyze email', details: error.message };
   }
 } 

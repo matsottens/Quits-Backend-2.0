@@ -11,11 +11,22 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
 
 // Middleware
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+      "connect-src": ["'self'", clientUrl, 'https://*.google.com', 'https://*.googleapis.com', 'https://*.supabase.co'], 
+      "frame-src": ["'self'", 'https://accounts.google.com/'], // Allow Google sign-in frames
+      "script-src": ["'self'", "'unsafe-inline'"], // Adjust as needed, unsafe-inline might be needed for some libraries
+      "img-src": ["'self'", "data:", "https:"] // Allow images from self, data URLs, and https
+    }
+  }
+}));
 app.use(cors({
-  origin: [process.env.CLIENT_URL || 'http://localhost:5173', 'https://quits.cc'],
+  origin: [clientUrl, 'https://quits.cc', 'https://www.quits.cc'], // Allow both www and non-www
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']

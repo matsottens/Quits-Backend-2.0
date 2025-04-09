@@ -1,5 +1,5 @@
-import express, { Request, Response } from 'express';
-import { google } from 'googleapis';
+import express, { Request, Response, NextFunction } from 'express';
+import { google, gmail_v1 } from 'googleapis';
 import { oauth2Client, gmail } from '../config/google.js';
 import { summarizeEmail } from '../services/gemini.js';
 import { extractSubscriptionDetails } from '../services/subscription.js';
@@ -17,56 +17,65 @@ router.use((req, res, next) => {
 });
 
 // Start email scanning
-router.post('/scan', authenticateUser, async (req: AuthRequest, res) => {
+router.post('/scan', async (req: AuthRequest, res) => {
   try {
-    // Get user's access token
-    const { data: tokens, error: tokenError } = await supabase
-      .from('user_tokens')
-      .select('access_token')
-      .eq('user_id', req.user?.id)
-      .single();
-
-    if (tokenError || !tokens?.access_token) {
-      return res.status(401).json({ error: 'No Gmail access token found' });
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ error: 'User not authenticated' });
     }
 
-    // Set credentials
-    oauth2Client.setCredentials({ access_token: tokens.access_token });
+    // Get user's access token from Supabase (assuming it's stored)
+    const { data: tokenData, error: tokenError } = await supabase
+      .from('user_tokens') // Adjust table name if different
+      .select('access_token')
+      .eq('user_id', userId)
+      .single();
 
-    // Get list of emails (limit to last 50 for now)
-    const { data: emails } = await gmail.users.messages.list({
+    if (tokenError || !tokenData?.access_token) {
+      console.error('Token fetch error:', tokenError);
+      return res.status(401).json({ error: 'Gmail access token not found or error fetching it.' });
+    }
+
+    // Set credentials for this request
+    oauth2Client.setCredentials({ access_token: tokenData.access_token });
+
+    // Get list of emails (limit for testing)
+    const listResponse = await gmail.users.messages.list({
       userId: 'me',
-      maxResults: 50,
-      q: 'subject:(subscription OR receipt OR invoice OR payment OR billing)'
+      maxResults: 50, // Adjust as needed
+      q: 'subject:(subscription OR receipt OR invoice OR payment OR billing)' // Example query
     });
 
-    if (!emails.messages) {
-      return res.json({ subscriptions: [] });
+    const messages = listResponse.data.messages;
+    if (!messages || messages.length === 0) {
+      return res.json({ status: 'completed', message: 'No relevant emails found.', subscriptions: [] });
     }
 
     // Store scan status in database
     const { error: scanError } = await supabase
       .from('email_scans')
-      .insert({
-        user_id: req.user?.id,
-        status: 'in_progress',
-        total_emails: emails.messages.length,
-        processed_emails: 0
-      });
+      .upsert({ user_id: userId, status: 'in_progress', total_emails: messages.length, processed_emails: 0 }, { onConflict: 'user_id' })
+      .select();
 
     if (scanError) {
-      console.error('Error creating scan record:', scanError);
+      console.error('Error creating/updating scan record:', scanError);
+      // Decide if this is critical - maybe continue anyway?
     }
 
-    // Process each email in the background
-    processEmails(req.user?.id!, emails.messages);
+    // Process emails in the background (no await here)
+    processEmails(userId, messages);
 
-    res.json({ 
+    res.json({
       status: 'started',
-      total_emails: emails.messages.length
+      message: `Email scan started for ${messages.length} emails.`,
+      total_emails: messages.length
     });
   } catch (error) {
     console.error('Error starting email scan:', error);
+    // Update scan status to failed if possible
+    if (req.user?.id) {
+        await supabase.from('email_scans').update({ status: 'failed' }).eq('user_id', req.user.id);
+    }
     res.status(500).json({ error: 'Failed to start email scan' });
   }
 });
@@ -172,118 +181,161 @@ router.post('/suggestions/:id/confirm', authenticateUser, async (req: AuthReques
 });
 
 // Helper function to process emails in the background
-async function processEmails(userId: string, messages: any[]) {
-  try {
-    let processedCount = 0;
+async function processEmails(userId: string, messages: gmail_v1.Schema$Message[]) {
+  console.log(`Processing ${messages.length} emails for user ${userId}...`);
+  let processedCount = 0;
+  let suggestionCount = 0;
 
-    for (const message of messages) {
+  const scanUpdateInterval = setInterval(async () => {
+    await supabase
+      .from('email_scans')
+      .update({ processed_emails: processedCount })
+      .eq('user_id', userId);
+  }, 5000); // Update DB every 5 seconds
+
+  try {
+    for (const messagePart of messages) {
+      if (!messagePart.id) continue;
       try {
-        // Get email content
-        const email = await gmail.users.messages.get({
+        // Get full email content
+        const emailResponse = await gmail.users.messages.get({
           userId: 'me',
-          id: message.id
+          id: messagePart.id,
+          format: 'full' // Get full details including headers and payload
         });
 
-        const content = extractEmailContent(email.data);
-        if (!content) continue;
+        const emailData = emailResponse.data;
+        const content = extractEmailContent(emailData);
+        if (!content) {
+            processedCount++;
+            continue;
+        }
 
         // Analyze with Gemini
         const analysis = await summarizeEmail(content);
-        
-        if (analysis.isSubscription) {
-          // Store suggestion
-          await supabase
+
+        if (analysis && analysis.isSubscription) {
+          // Store suggestion in DB
+          const { error } = await supabase
             .from('subscription_suggestions')
             .insert({
               user_id: userId,
-              email_id: message.id,
+              email_id: messagePart.id,
               name: analysis.serviceName,
-              price: analysis.amount,
+              price: analysis.price,
               currency: analysis.currency,
               billing_frequency: analysis.billingFrequency,
-              next_billing_date: analysis.nextBillingDate,
-              confidence: analysis.confidence || 0.8,
-              email_subject: email.data.payload?.headers?.find((h: any) => h.name === 'Subject')?.value,
-              email_date: email.data.internalDate
+              next_billing_date: analysis.nextBillingDate || null,
+              status: 'pending' // Default status
             });
+          if (error) {
+            console.error(`Error saving suggestion for email ${messagePart.id}:`, error);
+          } else {
+            suggestionCount++;
+          }
         }
-
-        // Update progress
         processedCount++;
-        await supabase
-          .from('email_scans')
-          .update({ 
-            processed_emails: processedCount,
-            status: processedCount === messages.length ? 'complete' : 'in_progress'
-          })
-          .eq('user_id', userId);
-
-      } catch (error) {
-        console.error('Error processing email:', error);
-        continue;
+      } catch (err: any) {
+        processedCount++; // Count as processed even if error occurred
+        console.error(`Error processing email ${messagePart.id}:`, err.message);
+        // Handle specific errors e.g., rate limits, token expiry
+        if (err.code === 401 || err.code === 403) {
+            // Token might be invalid, stop processing or refresh
+            console.error('Auth error during email processing, stopping scan.');
+            await supabase.from('email_scans').update({ status: 'failed', error_message: 'Gmail token expired or invalid' }).eq('user_id', userId);
+            break; // Stop the loop
+        }
+        // Add a small delay to avoid hitting rate limits too quickly after an error
+        await new Promise(resolve => setTimeout(resolve, 500)); 
       }
     }
-  } catch (error) {
-    console.error('Error in background processing:', error);
-    // Update scan status to error
+  } finally {
+    clearInterval(scanUpdateInterval); // Stop the interval timer
+    // Final update to scan status
     await supabase
       .from('email_scans')
-      .update({ status: 'error' })
+      .update({ processed_emails: processedCount, status: 'completed' })
       .eq('user_id', userId);
+    console.log(`Finished processing emails for user ${userId}. Processed: ${processedCount}, Suggestions found: ${suggestionCount}`);
   }
 }
 
-// Helper function to extract email content
-function extractEmailContent(message: any): string | null {
-  if (!message.payload) return null;
-  
-  let content = '';
-  
-  function extractFromParts(parts: any[]) {
-    if (!parts) return;
-    
+// Extracts email body content (plaintext preferrably)
+function extractEmailContent(message: gmail_v1.Schema$Message): string | null {
+  const payload = message.payload;
+  if (!payload) return null;
+
+  // Function to decode base64url
+  const decodeBase64 = (data: string): string => Buffer.from(data, 'base64url').toString('utf8');
+
+  // Recursive function to find the text/plain part
+  function findPlainTextPart(parts: gmail_v1.Schema$MessagePart[]): string | null {
     for (const part of parts) {
       if (part.mimeType === 'text/plain' && part.body?.data) {
-        content += Buffer.from(part.body.data, 'base64').toString('utf-8');
-      } else if (part.parts) {
-        extractFromParts(part.parts);
+        return decodeBase64(part.body.data);
+      }
+      if (part.parts) {
+        const text = findPlainTextPart(part.parts);
+        if (text) return text;
       }
     }
+    return null;
   }
   
-  if (message.payload.parts) {
-    extractFromParts(message.payload.parts);
-  } else if (message.payload.body?.data) {
-    content = Buffer.from(message.payload.body.data, 'base64').toString('utf-8');
+    // Recursive function to find the text/html part as fallback
+  function findHtmlTextPart(parts: gmail_v1.Schema$MessagePart[]): string | null {
+    for (const part of parts) {
+      if (part.mimeType === 'text/html' && part.body?.data) {
+        return decodeBase64(part.body.data);
+      }
+      if (part.parts) {
+        const text = findHtmlTextPart(part.parts);
+        if (text) return text;
+      }
+    }
+    return null;
+  }
+
+  // Check top-level payload first
+  if (payload.mimeType === 'text/plain' && payload.body?.data) {
+    return decodeBase64(payload.body.data);
   }
   
-  return content;
+    if (payload.mimeType === 'text/html' && payload.body?.data) {
+    return decodeBase64(payload.body.data); // Fallback if top level is HTML
+  }
+
+  // If multipart, search through parts
+  if (payload.parts) {
+    const plainText = findPlainTextPart(payload.parts);
+    if (plainText) return plainText;
+    // Fallback to HTML if plain text not found
+    const htmlText = findHtmlTextPart(payload.parts);
+     if (htmlText) return htmlText; // Consider stripping HTML tags here
+  }
+
+  // Fallback for non-multipart emails with just body data
+  if (payload.body?.data) {
+     // Determine mimeType if possible, assume text/plain or text/html as a last resort
+      return decodeBase64(payload.body.data);
+  }
+
+  return null; // No suitable content found
 }
 
-/**
- * Test endpoint to verify Gemini service is working
- */
+// Test route for Gemini summarization (no auth needed for this specific test route)
 router.post('/test-gemini', async (req: Request, res: Response) => {
   try {
     const { emailContent } = req.body;
-    
     if (!emailContent) {
-      return res.status(400).json({ error: 'Email content is required' });
+      return res.status(400).json({ error: 'Missing emailContent in request body' });
     }
-    
-    console.log('Testing Gemini service with sample email content');
-    const result = await summarizeEmail(emailContent);
-    
-    return res.json({
-      success: true,
-      result
-    });
-  } catch (error) {
-    console.error('Error testing Gemini service:', error);
-    return res.status(500).json({ 
-      error: 'Failed to test Gemini service',
-      details: error instanceof Error ? error.message : String(error)
-    });
+
+    const analysis = await summarizeEmail(emailContent);
+    res.json(analysis);
+  } catch (error: any) {
+    console.error('Error testing Gemini:', error);
+    res.status(500).json({ error: 'Failed to test Gemini summarization', details: error.message });
   }
 });
 
