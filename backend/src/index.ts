@@ -38,16 +38,26 @@ app.use(cors({
     // Allow requests with no origin (like mobile apps, curl requests, etc)
     if (!origin) return callback(null, true);
     
-    if (corsOrigins.indexOf(origin) !== -1 || origin.match(/https?:\/\/(www\.)?quits\.cc$/)) {
+    // Log all origins for debugging
+    console.log('Received request from origin:', origin);
+    
+    // Allow all quits.cc domains (with or without www)
+    if (
+      corsOrigins.indexOf(origin) !== -1 || 
+      origin.match(/^https?:\/\/(www\.)?quits\.cc(:\d+)?$/) ||
+      origin === 'https://www.quits.cc' ||
+      origin === 'https://quits.cc'
+    ) {
+      console.log('Origin allowed by CORS:', origin);
       callback(null, true);
     } else {
-      console.log('Blocked by CORS:', origin);
+      console.log('Origin blocked by CORS:', origin);
       callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'Referer']
 }));
 app.use(express.json());
 

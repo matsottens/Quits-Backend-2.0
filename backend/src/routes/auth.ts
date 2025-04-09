@@ -14,7 +14,11 @@ router.get('/google', (req: Request, res: Response) => {
   try {
     // Dynamically set the redirect URI based on the request origin
     const origin = req.headers.origin || process.env.CLIENT_URL || 'http://localhost:5173';
+    console.log('OAuth URL generator called with origin:', origin);
+    
+    // Use the same origin format (www or non-www) for consistency
     const redirectUri = `${origin}/auth/callback`;
+    console.log('Using redirect URI:', redirectUri);
 
     // Create a new OAuth2 client instance for this request to set the specific redirect URI
     // This is important if the base oauth2Client doesn't have a redirect URI set
@@ -27,8 +31,10 @@ router.get('/google', (req: Request, res: Response) => {
     const url = requestSpecificOauth2Client.generateAuthUrl({
       access_type: 'offline',
       scope: SCOPES,
-      prompt: 'consent' // Force consent screen for refresh token
+      prompt: 'consent', // Force consent screen for refresh token
+      include_granted_scopes: true
     });
+    
     res.json({ url });
   } catch (error) {
     console.error('Error generating auth URL:', error);
@@ -209,6 +215,9 @@ router.get('/google/callback', async (req: Request, res: Response) => {
 router.get('/google/callback/jsonp', async (req: Request, res: Response) => {
   try {
     const { code, callback } = req.query;
+    const origin = req.headers.origin || '';
+    
+    console.log('JSONP endpoint called with origin:', origin);
     
     if (!callback || typeof callback !== 'string') {
       return res.status(400).json({ error: 'Callback parameter is required for JSONP' });
@@ -220,16 +229,21 @@ router.get('/google/callback/jsonp', async (req: Request, res: Response) => {
     
     console.log('JSONP callback received with code:', code.substring(0, 10) + '...');
     
-    // Set CORS headers explicitly
-    res.header('Access-Control-Allow-Origin', '*'); 
+    // Set CORS headers explicitly - allow both www and non-www
+    res.header('Access-Control-Allow-Origin', origin.includes('quits.cc') ? origin : '*'); 
     res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
     res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
-    res.header('Content-Type', 'application/javascript');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('Content-Type', 'application/javascript; charset=utf-8');
     
     // Process the same way as the regular callback
     try {
       // Create redirect URI that matches the one used for the initial authorization
-      const redirectUri = 'https://quits.cc/auth/callback'; // Use the non-www version for consistency
+      const redirectUri = origin.includes('www.quits.cc') 
+        ? 'https://www.quits.cc/auth/callback' 
+        : 'https://quits.cc/auth/callback';
+      
+      console.log('Using redirect URI for JSONP token exchange:', redirectUri);
       
       const tokenExchangeOauth2Client = new google.auth.OAuth2(
         process.env.GOOGLE_CLIENT_ID,
