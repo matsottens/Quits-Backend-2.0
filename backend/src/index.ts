@@ -21,6 +21,34 @@ const corsOrigins = [
 console.log('CORS Origins configured:', corsOrigins);
 console.log('CLIENT_URL from env:', process.env.CLIENT_URL);
 
+// Configure CORS properly for all routes
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  
+  // Log the origin for debugging
+  console.log('Request with origin:', origin);
+  
+  // Allow requests with no origin (like mobile apps, curl, etc)
+  if (!origin) return next();
+  
+  // Set appropriate CORS headers for allowed origins
+  if (corsOrigins.includes(origin) || 
+      origin === 'https://www.quits.cc' || 
+      origin === 'https://quits.cc') {
+    res.header('Access-Control-Allow-Origin', origin); // Dynamically set to the requesting origin
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+    
+    // Handle preflight requests
+    if (req.method === 'OPTIONS') {
+      return res.status(200).end();
+    }
+  }
+  
+  next();
+});
+
 // Middleware
 app.use(helmet({
   contentSecurityPolicy: {
@@ -33,31 +61,16 @@ app.use(helmet({
     }
   }
 }));
+
+// This cors middleware will be skipped when our custom handler above has already sent a response for OPTIONS
 app.use(cors({
   origin: function(origin, callback) {
-    // Allow requests with no origin (like mobile apps, curl requests, etc)
-    if (!origin) return callback(null, true);
-    
-    // Log all origins for debugging
-    console.log('Received request from origin:', origin);
-    
-    // Explicitly check for both www and non-www quits.cc domains
-    if (
-      corsOrigins.includes(origin) || 
-      origin === 'https://www.quits.cc' ||
-      origin === 'https://quits.cc'
-    ) {
-      console.log('Origin allowed by CORS:', origin);
-      callback(null, true);
-    } else {
-      console.log('Origin blocked by CORS:', origin);
-      callback(new Error('Not allowed by CORS'));
-    }
+    // Already handled by our custom middleware
+    callback(null, true);
   },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'Referer']
+  credentials: true
 }));
+
 app.use(express.json());
 
 // Add debugging middleware for all requests
@@ -65,6 +78,8 @@ app.use((req, res, next) => {
   console.log('Request received:', {
     method: req.method,
     url: req.url,
+    path: req.path,
+    originalUrl: req.originalUrl,
     origin: req.headers.origin,
     referer: req.headers.referer,
     contentType: req.headers['content-type']

@@ -9,6 +9,15 @@ import { upsertUser } from '../services/database.js';
 
 const router = express.Router();
 
+// Simple test endpoint to verify that routes are reachable
+router.get('/test', (req: Request, res: Response) => {
+  res.json({
+    message: 'Auth routes are working properly!',
+    origin: req.headers.origin,
+    time: new Date().toISOString()
+  });
+});
+
 // Get Google OAuth URL
 router.get('/google', (req: Request, res: Response) => {
   try {
@@ -315,16 +324,6 @@ router.get('/google/callback/jsonp', async (req: Request, res: Response) => {
 // Direct form-based callback endpoint with redirect back (CSP-friendly)
 router.post('/google/callback/direct2', express.urlencoded({ extended: true }), async (req: Request, res: Response) => {
   try {
-    // Handle CORS for all requests to this endpoint, regardless of request method
-    const requestOrigin = req.headers.origin || '';
-    // Always allow quits.cc domains with or without www
-    if (requestOrigin.includes('quits.cc')) {
-      res.header('Access-Control-Allow-Origin', requestOrigin);
-      res.header('Access-Control-Allow-Methods', 'POST, OPTIONS, GET');
-      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept');
-      res.header('Access-Control-Allow-Credentials', 'true');
-    }
-
     const { code, origin, requestId, redirectUri: providedRedirectUri } = req.body;
     
     console.log('Direct form callback received v2:', {
@@ -332,7 +331,7 @@ router.post('/google/callback/direct2', express.urlencoded({ extended: true }), 
       origin: origin || 'not provided',
       requestId: requestId || 'not provided',
       providedRedirectUri: providedRedirectUri || 'not provided',
-      actualRequestOrigin: requestOrigin
+      actualRequestOrigin: req.headers.origin || 'no request origin'
     });
     
     if (!code) {
@@ -467,29 +466,6 @@ router.post('/google/callback/direct2', express.urlencoded({ extended: true }), 
   } catch (error: any) {
     console.error('Direct form route v2 error:', error);
     return res.status(500).json({ error: 'Server error during authentication' });
-  }
-});
-
-// Add CORS preflight handler for direct2 endpoint
-router.options('/google/callback/direct2', (req: Request, res: Response) => {
-  const requestOrigin = req.headers.origin || '';
-  
-  console.log('OPTIONS preflight request for direct2:', {
-    origin: requestOrigin,
-    method: req.method,
-    headers: req.headers
-  });
-  
-  // Allow both www and non-www domains
-  if (requestOrigin.includes('quits.cc')) {
-    res.header('Access-Control-Allow-Origin', requestOrigin);
-    res.header('Access-Control-Allow-Methods', 'POST, OPTIONS, GET');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept');
-    res.header('Access-Control-Allow-Credentials', 'true');
-    res.status(200).send();
-  } else {
-    console.log('Blocking preflight request from non-allowed origin:', requestOrigin);
-    res.status(403).send();
   }
 });
 
