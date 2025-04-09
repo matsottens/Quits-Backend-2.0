@@ -324,10 +324,7 @@ router.post('/google/callback/direct2', express.urlencoded({ extended: true }), 
     });
     
     if (!code) {
-      // Redirect back with error
-      return res.redirect(`${origin}/#auth_data=${encodeURIComponent(JSON.stringify({
-        error: 'Missing authorization code'
-      }))}`);
+      return res.status(400).json({ error: 'Missing authorization code' });
     }
     
     // Process the same way as regular callback
@@ -358,10 +355,7 @@ router.post('/google/callback/direct2', express.urlencoded({ extended: true }), 
       const userInfo = userInfoResponse.data;
       
       if (!userInfo.id || !userInfo.email) {
-        // Redirect back with error
-        return res.redirect(`${origin}/#auth_data=${encodeURIComponent(JSON.stringify({
-          error: 'Failed to retrieve user info'
-        }))}`);
+        return res.status(400).json({ error: 'Failed to retrieve user info' });
       }
       
       // Create or update user
@@ -389,8 +383,17 @@ router.post('/google/callback/direct2', express.urlencoded({ extended: true }), 
       const appTokenPayload = { id: user.id, email: user.email };
       const appToken = generateToken(appTokenPayload);
       
-      // Prepare auth response data
-      const authResponse = {
+      // Set the token as a secure, HTTP-only cookie
+      res.cookie('auth_token', appToken, {
+        httpOnly: true,
+        secure: true,
+        sameSite: 'lax',
+        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+      });
+      
+      // Additionally return the token and user data in the response
+      return res.json({
+        success: true,
         token: appToken,
         user: {
           id: user.id,
@@ -399,10 +402,7 @@ router.post('/google/callback/direct2', express.urlencoded({ extended: true }), 
           picture: user.picture
         },
         requestId: requestId
-      };
-      
-      // Redirect back to the client with auth data
-      return res.redirect(`${origin}/#auth_data=${encodeURIComponent(JSON.stringify(authResponse))}`);
+      });
     } catch (error: any) {
       console.error('Direct auth callback v2 error:', error.message);
       
@@ -412,21 +412,11 @@ router.post('/google/callback/direct2', express.urlencoded({ extended: true }), 
         errorMessage = 'Redirect URI mismatch. Please try again.';
       }
       
-      // Redirect back with error
-      return res.redirect(`${origin}/#auth_data=${encodeURIComponent(JSON.stringify({
-        error: errorMessage
-      }))}`);
+      return res.status(400).json({ error: errorMessage });
     }
   } catch (error: any) {
     console.error('Direct form route v2 error:', error);
-    
-    // Get the origin from the request if possible
-    const origin = req.body?.origin || 'https://www.quits.cc';
-    
-    // Redirect back with generic error
-    return res.redirect(`${origin}/#auth_data=${encodeURIComponent(JSON.stringify({
-      error: 'Server error during authentication'
-    }))}`);
+    return res.status(500).json({ error: 'Server error during authentication' });
   }
 });
 
