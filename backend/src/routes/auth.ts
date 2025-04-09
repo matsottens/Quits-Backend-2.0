@@ -18,6 +18,16 @@ router.get('/test', (req: Request, res: Response) => {
   });
 });
 
+// Add a simple test endpoint specifically for testing the direct2 route
+router.post('/google/callback/direct2-test', (req: Request, res: Response) => {
+  res.json({
+    message: 'Direct2 test route is accessible!',
+    origin: req.headers.origin,
+    body: req.body,
+    time: new Date().toISOString()
+  });
+});
+
 // Get Google OAuth URL
 router.get('/google', (req: Request, res: Response) => {
   try {
@@ -322,7 +332,7 @@ router.get('/google/callback/jsonp', async (req: Request, res: Response) => {
 });
 
 // Direct form-based callback endpoint with redirect back (CSP-friendly)
-router.post('/google/callback/direct2', express.urlencoded({ extended: true }), async (req: Request, res: Response) => {
+router.post('/google/callback/direct2', async (req: Request, res: Response) => {
   try {
     const { code, origin, requestId, redirectUri: providedRedirectUri } = req.body;
     
@@ -522,6 +532,17 @@ router.post('/logout', authenticateUser, async (req: AuthRequest, res: Response)
         console.error('Logout error:', error);
         res.status(500).json({ error: 'Logout failed' });
     }
+});
+
+// Catch-all route to help with debugging
+router.all('*', (req: Request, res: Response) => {
+  console.log('Hit fallback route:', req.originalUrl);
+  res.status(404).json({ 
+    error: "Route not found, but hit the auth router", 
+    path: req.originalUrl,
+    method: req.method,
+    timestamp: new Date().toISOString()
+  });
 });
 
 export default router; 

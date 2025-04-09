@@ -5,7 +5,6 @@ import dotenv from 'dotenv';
 import authRoutes from './routes/auth.js';
 import emailRoutes from './routes/email.js';
 import subscriptionRoutes from './routes/subscription.js';
-import { Request, Response, NextFunction } from 'express';
 
 // Load environment variables
 dotenv.config();
@@ -22,24 +21,24 @@ const corsOrigins = [
 console.log('CORS Origins configured:', corsOrigins);
 console.log('CLIENT_URL from env:', process.env.CLIENT_URL);
 
-// Configure CORS properly for all routes
+// Configure custom CORS middleware - fixes origin mismatch between www and non-www
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   
   // Log the origin for debugging
   console.log('Request with origin:', origin);
   
-  // Allow requests with no origin (like mobile apps, curl, etc)
+  // Allow requests with no origin
   if (!origin) return next();
   
-  // Set appropriate CORS headers for allowed origins
+  // Check if the origin is allowed
   if (corsOrigins.includes(origin) || 
       origin === 'https://www.quits.cc' || 
       origin === 'https://quits.cc') {
-    res.header('Access-Control-Allow-Origin', origin); // Dynamically set to the requesting origin
-    res.header('Access-Control-Allow-Credentials', 'true');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
     
     // Handle preflight requests
     if (req.method === 'OPTIONS') {
@@ -49,34 +48,6 @@ app.use((req, res, next) => {
   
   next();
 });
-
-// Create a separate CORS middleware function to handle OPTIONS requests
-const handleCors: express.RequestHandler = (req, res, next) => {
-  const origin = req.headers.origin;
-  
-  // Allow requests with no origin (like mobile apps, curl, etc)
-  if (!origin) return next();
-  
-  // Set appropriate CORS headers for allowed origins
-  if (corsOrigins.includes(origin) || 
-      origin === 'https://www.quits.cc' || 
-      origin === 'https://quits.cc') {
-    res.header('Access-Control-Allow-Origin', origin); // Dynamically set to the requesting origin
-    res.header('Access-Control-Allow-Credentials', 'true');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-    
-    // Handle preflight requests
-    if (req.method === 'OPTIONS') {
-      return res.status(200).end();
-    }
-  }
-  
-  next();
-};
-
-// Use the properly typed middleware function
-app.use(handleCors);
 
 // Middleware
 app.use(helmet({
@@ -92,6 +63,7 @@ app.use(helmet({
 }));
 
 app.use(express.json());
+app.use(express.urlencoded({ extended: true })); // Important for parsing application/x-www-form-urlencoded
 
 // Add debugging middleware for all requests
 app.use((req, res, next) => {
