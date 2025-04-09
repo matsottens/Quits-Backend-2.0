@@ -312,23 +312,22 @@ router.get('/google/callback/jsonp', async (req: Request, res: Response) => {
   }
 });
 
-// Direct form-based callback endpoint for maximum compatibility
-router.post('/google/callback/direct', express.urlencoded({ extended: true }), async (req: Request, res: Response) => {
+// Direct form-based callback endpoint with redirect back (CSP-friendly)
+router.post('/google/callback/direct2', express.urlencoded({ extended: true }), async (req: Request, res: Response) => {
   try {
-    const { code, origin, messageId } = req.body;
+    const { code, origin, requestId } = req.body;
     
-    console.log('Direct form callback received:', {
+    console.log('Direct form callback received v2:', {
       hasCode: !!code,
       origin: origin || 'not provided',
-      messageId: messageId || 'not provided'
+      requestId: requestId || 'not provided'
     });
     
     if (!code) {
-      return res.send(`
-        <script>
-          parent.handleError("Missing authorization code");
-        </script>
-      `);
+      // Redirect back with error
+      return res.redirect(`${origin}/#auth_data=${encodeURIComponent(JSON.stringify({
+        error: 'Missing authorization code'
+      }))}`);
     }
     
     // Process the same way as regular callback
@@ -340,7 +339,7 @@ router.post('/google/callback/direct', express.urlencoded({ extended: true }), a
           ? `${origin}/auth/callback` 
           : 'https://quits.cc/auth/callback';
       
-      console.log('Using redirect URI for direct callback:', redirectUri);
+      console.log('Using redirect URI for direct callback v2:', redirectUri);
       
       const tokenExchangeOauth2Client = new google.auth.OAuth2(
         process.env.GOOGLE_CLIENT_ID,
@@ -359,11 +358,10 @@ router.post('/google/callback/direct', express.urlencoded({ extended: true }), a
       const userInfo = userInfoResponse.data;
       
       if (!userInfo.id || !userInfo.email) {
-        return res.send(`
-          <script>
-            parent.handleError("Failed to retrieve user info");
-          </script>
-        `);
+        // Redirect back with error
+        return res.redirect(`${origin}/#auth_data=${encodeURIComponent(JSON.stringify({
+          error: 'Failed to retrieve user info'
+        }))}`);
       }
       
       // Create or update user
@@ -399,17 +397,14 @@ router.post('/google/callback/direct', express.urlencoded({ extended: true }), a
           email: user.email,
           name: user.name,
           picture: user.picture
-        }
+        },
+        requestId: requestId
       };
       
-      // Send response via JavaScript that posts a message to the parent window
-      return res.send(`
-        <script>
-          parent.handleAuth(${JSON.stringify(authResponse)});
-        </script>
-      `);
+      // Redirect back to the client with auth data
+      return res.redirect(`${origin}/#auth_data=${encodeURIComponent(JSON.stringify(authResponse))}`);
     } catch (error: any) {
-      console.error('Direct auth callback error:', error.message);
+      console.error('Direct auth callback v2 error:', error.message);
       
       let errorMessage = error.message;
       // Make the error message more user-friendly if needed
@@ -417,19 +412,21 @@ router.post('/google/callback/direct', express.urlencoded({ extended: true }), a
         errorMessage = 'Redirect URI mismatch. Please try again.';
       }
       
-      return res.send(`
-        <script>
-          parent.handleError(${JSON.stringify(errorMessage)});
-        </script>
-      `);
+      // Redirect back with error
+      return res.redirect(`${origin}/#auth_data=${encodeURIComponent(JSON.stringify({
+        error: errorMessage
+      }))}`);
     }
   } catch (error: any) {
-    console.error('Direct form route error:', error);
-    return res.send(`
-      <script>
-        parent.handleError("Server error during authentication");
-      </script>
-    `);
+    console.error('Direct form route v2 error:', error);
+    
+    // Get the origin from the request if possible
+    const origin = req.body?.origin || 'https://www.quits.cc';
+    
+    // Redirect back with generic error
+    return res.redirect(`${origin}/#auth_data=${encodeURIComponent(JSON.stringify({
+      error: 'Server error during authentication'
+    }))}`);
   }
 });
 
