@@ -312,6 +312,127 @@ router.get('/google/callback/jsonp', async (req: Request, res: Response) => {
   }
 });
 
+// Direct form-based callback endpoint for maximum compatibility
+router.post('/google/callback/direct', express.urlencoded({ extended: true }), async (req: Request, res: Response) => {
+  try {
+    const { code, origin, messageId } = req.body;
+    
+    console.log('Direct form callback received:', {
+      hasCode: !!code,
+      origin: origin || 'not provided',
+      messageId: messageId || 'not provided'
+    });
+    
+    if (!code) {
+      return res.send(`
+        <script>
+          parent.handleError("Missing authorization code");
+        </script>
+      `);
+    }
+    
+    // Process the same way as regular callback
+    try {
+      // Create redirect URI that matches the origin
+      const redirectUri = origin?.includes('www.')
+        ? `${origin}/auth/callback`
+        : origin?.includes('localhost')
+          ? `${origin}/auth/callback` 
+          : 'https://quits.cc/auth/callback';
+      
+      console.log('Using redirect URI for direct callback:', redirectUri);
+      
+      const tokenExchangeOauth2Client = new google.auth.OAuth2(
+        process.env.GOOGLE_CLIENT_ID,
+        process.env.GOOGLE_CLIENT_SECRET,
+        redirectUri
+      );
+      
+      const { tokens } = await tokenExchangeOauth2Client.getToken(code);
+      tokenExchangeOauth2Client.setCredentials(tokens);
+      
+      // Get user info
+      const oauth2 = google.oauth2('v2');
+      const userInfoResponse = await oauth2.userinfo.get({
+        auth: tokenExchangeOauth2Client,
+      });
+      const userInfo = userInfoResponse.data;
+      
+      if (!userInfo.id || !userInfo.email) {
+        return res.send(`
+          <script>
+            parent.handleError("Failed to retrieve user info");
+          </script>
+        `);
+      }
+      
+      // Create or update user
+      const user = await upsertUser({
+        id: userInfo.id,
+        email: userInfo.email,
+        name: userInfo.name,
+        picture: userInfo.picture,
+        verified_email: userInfo.verified_email
+      });
+      
+      // Store tokens
+      await supabase
+        .from('user_tokens')
+        .upsert({
+          user_id: user.id,
+          provider: 'google',
+          access_token: tokens.access_token,
+          refresh_token: tokens.refresh_token,
+          expires_at: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,
+          scopes: tokens.scope
+        }, { onConflict: 'user_id, provider' });
+      
+      // Generate app token
+      const appTokenPayload = { id: user.id, email: user.email };
+      const appToken = generateToken(appTokenPayload);
+      
+      // Prepare auth response data
+      const authResponse = {
+        token: appToken,
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          picture: user.picture
+        }
+      };
+      
+      // Send response via JavaScript that posts a message to the parent window
+      return res.send(`
+        <script>
+          parent.handleAuth(${JSON.stringify(authResponse)});
+        </script>
+      `);
+    } catch (error: any) {
+      console.error('Direct auth callback error:', error.message);
+      
+      let errorMessage = error.message;
+      // Make the error message more user-friendly if needed
+      if (error.message?.includes('redirect_uri_mismatch')) {
+        errorMessage = 'Redirect URI mismatch. Please try again.';
+      }
+      
+      return res.send(`
+        <script>
+          parent.handleError(${JSON.stringify(errorMessage)});
+        </script>
+      `);
+    }
+  } catch (error: any) {
+    console.error('Direct form route error:', error);
+    return res.send(`
+      <script>
+        parent.handleError("Server error during authentication");
+      </script>
+    `);
+  }
+});
+
 // Get user profile (Protected Route)
 router.get('/me', authenticateUser, async (req: AuthRequest, res: Response) => {
   try {
