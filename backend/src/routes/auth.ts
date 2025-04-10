@@ -358,9 +358,18 @@ router.get('/google/callback/jsonp', async (req: Request, res: Response) => {
 // Direct form-based callback endpoint with redirect back (CSP-friendly)
 router.post('/google/callback/direct2', async (req: Request, res: Response) => {
   try {
-    console.log('Direct2 route hit with body:', req.body);
+    const origin = req.headers.origin;
+    console.log('Direct2 route hit with origin:', origin);
     
-    // Log CORS headers
+    // Ensure CORS headers are set (redundant with global middleware, but belt-and-suspenders approach)
+    if (origin && (origin.includes('quits.cc') || origin.includes('localhost'))) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+    
+    console.log('Direct2 route hit with body:', req.body);
     console.log('Response headers at route start:', res.getHeaders());
     
     // Simple success response - no processing for now
@@ -380,7 +389,18 @@ router.post('/google/callback/direct2', async (req: Request, res: Response) => {
 // Create another version of the direct2 route to try as a fallback
 router.post('/google/callback/direct-alt', express.urlencoded({ extended: true }), async (req: Request, res: Response) => {
   try {
-    const { code, origin, requestId, redirectUri: providedRedirectUri } = req.body;
+    const origin = req.headers.origin;
+    console.log('Direct-alt route hit with origin:', origin);
+    
+    // Ensure CORS headers are set (redundant with global middleware, but belt-and-suspenders approach)
+    if (origin && (origin.includes('quits.cc') || origin.includes('localhost'))) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+    
+    const { code, origin: bodyOrigin, requestId, redirectUri: providedRedirectUri } = req.body;
     
     console.log('Direct-alt fallback route hit with body:', req.body);
     
@@ -456,6 +476,54 @@ router.post('/logout', authenticateUser, async (req: AuthRequest, res: Response)
         console.error('Logout error:', error);
         res.status(500).json({ error: 'Logout failed' });
     }
+});
+
+// Handle OPTIONS requests for the direct2 endpoint
+router.options('/google/callback/direct2', (req: Request, res: Response) => {
+  const origin = req.headers.origin;
+  console.log('OPTIONS request for direct2 with origin:', origin);
+  
+  // Always set CORS headers for OPTIONS requests
+  if (origin && (origin.includes('quits.cc') || origin.includes('localhost'))) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
+  
+  return res.status(200).end();
+});
+
+// Handle OPTIONS requests for the direct-alt endpoint
+router.options('/google/callback/direct-alt', (req: Request, res: Response) => {
+  const origin = req.headers.origin;
+  console.log('OPTIONS request for direct-alt with origin:', origin);
+  
+  // Always set CORS headers for OPTIONS requests
+  if (origin && (origin.includes('quits.cc') || origin.includes('localhost'))) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
+  
+  return res.status(200).end();
+});
+
+// Handle OPTIONS requests for the direct2-test endpoint
+router.options('/google/callback/direct2-test', (req: Request, res: Response) => {
+  const origin = req.headers.origin;
+  console.log('OPTIONS request for direct2-test with origin:', origin);
+  
+  // Always set CORS headers for OPTIONS requests
+  if (origin && (origin.includes('quits.cc') || origin.includes('localhost'))) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
+  
+  return res.status(200).end();
 });
 
 // Catch-all route to help with debugging
