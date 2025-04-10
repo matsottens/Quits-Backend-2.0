@@ -18,6 +18,30 @@ router.get('/test', (req: Request, res: Response) => {
   });
 });
 
+// Add a direct route for testing direct2 endpoint
+router.post('/google/callback/direct2-test', (req: Request, res: Response) => {
+  console.log('Direct2-test route hit with body:', req.body);
+  res.json({
+    message: 'Direct2-test route is accessible!',
+    origin: req.headers.origin,
+    body: req.body,
+    headers: req.headers,
+    time: new Date().toISOString()
+  });
+});
+
+// Add a direct route for GET requests to test CORS
+router.get('/google/callback/direct2-test', (req: Request, res: Response) => {
+  console.log('GET Direct2-test route hit with query:', req.query);
+  res.json({
+    message: 'GET Direct2-test route is accessible!',
+    origin: req.headers.origin,
+    query: req.query,
+    headers: req.headers,
+    time: new Date().toISOString()
+  });
+});
+
 // Add a simple test endpoint specifically for testing the direct2 route
 router.post('/google/callback/direct2-test', (req: Request, res: Response) => {
   res.json({
@@ -334,147 +358,47 @@ router.get('/google/callback/jsonp', async (req: Request, res: Response) => {
 // Direct form-based callback endpoint with redirect back (CSP-friendly)
 router.post('/google/callback/direct2', async (req: Request, res: Response) => {
   try {
-    const { code, origin, requestId, redirectUri: providedRedirectUri } = req.body;
+    console.log('Direct2 route hit with body:', req.body);
     
-    console.log('Direct form callback received v2:', {
-      hasCode: !!code,
-      origin: origin || 'not provided',
-      requestId: requestId || 'not provided',
-      providedRedirectUri: providedRedirectUri || 'not provided',
-      actualRequestOrigin: req.headers.origin || 'no request origin'
+    // Log CORS headers
+    console.log('Response headers at route start:', res.getHeaders());
+    
+    // Simple success response - no processing for now
+    return res.json({
+      success: true,
+      message: 'Direct2 route is accessible and working!',
+      origin: req.headers.origin,
+      body: req.body,
+      time: new Date().toISOString()
     });
-    
-    if (!code) {
-      return res.status(400).json({ error: 'Missing authorization code' });
-    }
-    
-    // Process the same way as regular callback
-    try {
-      // Use the provided redirect URI if available, otherwise construct one
-      let redirectUri;
-      
-      if (providedRedirectUri) {
-        // Use the redirect URI provided by the client
-        redirectUri = providedRedirectUri;
-      } else {
-        // Handle various origin scenarios as fallback
-        if (!origin) {
-          // If no origin provided, try to determine from headers
-          const headerOrigin = req.headers.origin || '';
-          const referer = req.headers.referer || '';
-          
-          if (headerOrigin.includes('www.quits.cc')) {
-            redirectUri = 'https://quits.cc/auth/callback'; // Always use the registered URI
-          } else if (headerOrigin.includes('quits.cc')) {
-            redirectUri = 'https://quits.cc/auth/callback';
-          } else if (referer.includes('www.quits.cc')) {
-            redirectUri = 'https://quits.cc/auth/callback';
-          } else if (referer.includes('quits.cc')) {
-            redirectUri = 'https://quits.cc/auth/callback';
-          } else if (headerOrigin.includes('localhost')) {
-            redirectUri = `${headerOrigin}/auth/callback`;
-          } else {
-            // Default fallback
-            redirectUri = process.env.GOOGLE_REDIRECT_URI || 'https://quits.cc/auth/callback';
-          }
-        } else {
-          // Use the provided origin, but normalize it if needed
-          redirectUri = origin.includes('www.quits.cc') 
-            ? 'https://quits.cc/auth/callback' 
-            : `${origin}/auth/callback`;
-        }
-      }
-      
-      console.log('Using redirect URI for direct callback v2:', redirectUri);
-      console.log('Request headers:', {
-        origin: req.headers.origin,
-        referer: req.headers.referer,
-        host: req.headers.host
-      });
-      console.log('Google OAuth environment variables:', {
-        CLIENT_ID: process.env.GOOGLE_CLIENT_ID ? 'Set' : 'Not set',
-        CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET ? 'Set' : 'Not set',
-        REDIRECT_URI_ENV: process.env.GOOGLE_REDIRECT_URI || 'Not set'
-      });
-      
-      const tokenExchangeOauth2Client = new google.auth.OAuth2(
-        process.env.GOOGLE_CLIENT_ID,
-        process.env.GOOGLE_CLIENT_SECRET,
-        redirectUri
-      );
-      
-      const { tokens } = await tokenExchangeOauth2Client.getToken(code);
-      tokenExchangeOauth2Client.setCredentials(tokens);
-      
-      // Get user info
-      const oauth2 = google.oauth2('v2');
-      const userInfoResponse = await oauth2.userinfo.get({
-        auth: tokenExchangeOauth2Client,
-      });
-      const userInfo = userInfoResponse.data;
-      
-      if (!userInfo.id || !userInfo.email) {
-        return res.status(400).json({ error: 'Failed to retrieve user info' });
-      }
-      
-      // Create or update user
-      const user = await upsertUser({
-        id: userInfo.id,
-        email: userInfo.email,
-        name: userInfo.name,
-        picture: userInfo.picture,
-        verified_email: userInfo.verified_email
-      });
-      
-      // Store tokens
-      await supabase
-        .from('user_tokens')
-        .upsert({
-          user_id: user.id,
-          provider: 'google',
-          access_token: tokens.access_token,
-          refresh_token: tokens.refresh_token,
-          expires_at: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,
-          scopes: tokens.scope
-        }, { onConflict: 'user_id, provider' });
-      
-      // Generate app token
-      const appTokenPayload = { id: user.id, email: user.email };
-      const appToken = generateToken(appTokenPayload);
-      
-      // Set the token as a secure, HTTP-only cookie
-      res.cookie('auth_token', appToken, {
-        httpOnly: true,
-        secure: true,
-        sameSite: 'lax',
-        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-      });
-      
-      // Additionally return the token and user data in the response
-      return res.json({
-        success: true,
-        token: appToken,
-        user: {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          picture: user.picture
-        },
-        requestId: requestId
-      });
-    } catch (error: any) {
-      console.error('Direct auth callback v2 error:', error.message);
-      
-      let errorMessage = error.message;
-      // Make the error message more user-friendly if needed
-      if (error.message?.includes('redirect_uri_mismatch')) {
-        errorMessage = 'Redirect URI mismatch. Please try again.';
-      }
-      
-      return res.status(400).json({ error: errorMessage });
-    }
   } catch (error: any) {
     console.error('Direct form route v2 error:', error);
+    return res.status(500).json({ error: 'Server error during authentication' });
+  }
+});
+
+// Create another version of the direct2 route to try as a fallback
+router.post('/google/callback/direct-alt', express.urlencoded({ extended: true }), async (req: Request, res: Response) => {
+  try {
+    const { code, origin, requestId, redirectUri: providedRedirectUri } = req.body;
+    
+    console.log('Direct-alt fallback route hit with body:', req.body);
+    
+    // Simple success response - no processing for now
+    return res.json({
+      success: true,
+      message: 'Direct-alt fallback route is working!',
+      token: 'sample-token-for-testing',
+      user: {
+        id: 'sample-id',
+        email: 'sample@example.com',
+        name: 'Sample User',
+        picture: 'https://example.com/sample.jpg'
+      },
+      time: new Date().toISOString()
+    });
+  } catch (error: any) {
+    console.error('Direct-alt fallback route error:', error);
     return res.status(500).json({ error: 'Server error during authentication' });
   }
 });

@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import authRoutes from './routes/auth.js';
 import emailRoutes from './routes/email.js';
 import subscriptionRoutes from './routes/subscription.js';
+import { Request, Response, NextFunction } from 'express';
 
 // Load environment variables
 dotenv.config();
@@ -21,35 +22,54 @@ const corsOrigins = [
 console.log('CORS Origins configured:', corsOrigins);
 console.log('CLIENT_URL from env:', process.env.CLIENT_URL);
 
-// Middleware to handle CORS for all routes - this should be the FIRST middleware
-app.use((req, res, next) => {
-  try {
-    const origin = req.headers.origin;
-    console.log(`Request from origin: ${origin || 'unknown'}`);
+// Configure explicit CORS middleware
+const corsMiddleware = cors({
+  origin: function(origin, callback) {
+    // Allow requests with no origin (like mobile apps, curl requests)
+    if (!origin) return callback(null, true);
     
-    // Set CORS headers for all requests
-    // Send the exact same origin back in the header to satisfy browser security
-    if (origin) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Access-Control-Allow-Credentials', 'true');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-      
-      // Log all headers for debugging
-      console.log('Response headers:', res.getHeaders());
+    console.log(`Request from origin: ${origin}`);
+    
+    // Allow all quits.cc domains (with or without www) - crucial for authentication
+    if (corsOrigins.includes(origin) || 
+        origin === 'https://www.quits.cc' || 
+        origin === 'https://quits.cc') {
+      console.log(`Allowing origin: ${origin}`);
+      callback(null, origin);
+    } else {
+      console.log(`Blocking origin: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
     }
-    
-    // Handle preflight requests
-    if (req.method === 'OPTIONS') {
-      console.log('Received OPTIONS request - responding with 204');
-      return res.status(204).end();
-    }
-    
-    next();
-  } catch (error) {
-    console.error('Error in CORS middleware:', error);
-    next();
-  }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization'],
+  maxAge: 86400 // 24 hours in seconds
+});
+
+// Apply the CORS middleware to all routes
+app.use(corsMiddleware);
+
+// Handle preflight OPTIONS requests separately for more control
+app.options('*', (req: Request, res: Response) => {
+  console.log('Received OPTIONS request - responding with 204');
+  res.status(204).end();
+});
+
+// Add debugging middleware for all requests
+app.use((req: Request, res: Response, next: NextFunction) => {
+  console.log('Request received:', {
+    method: req.method,
+    url: req.url,
+    path: req.path,
+    originalUrl: req.originalUrl,
+    origin: req.headers.origin,
+    referer: req.headers.referer,
+    contentType: req.headers['content-type']
+  });
+  
+  // Continue with request processing
+  next();
 });
 
 // Middleware
@@ -68,29 +88,13 @@ app.use(helmet({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true })); // Important for parsing application/x-www-form-urlencoded
 
-// Add debugging middleware for all requests
-app.use((req, res, next) => {
-  console.log('Request received:', {
-    method: req.method,
-    url: req.url,
-    path: req.path,
-    originalUrl: req.originalUrl,
-    origin: req.headers.origin,
-    referer: req.headers.referer,
-    contentType: req.headers['content-type']
-  });
-  
-  // Continue with request processing
-  next();
-});
-
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/email', emailRoutes);
 app.use('/api/subscription', subscriptionRoutes);
 
 // Health check endpoint
-app.get('/api/health', (req, res) => {
+app.get('/api/health', (req: Request, res: Response) => {
   res.status(200).json({ status: 'ok', message: 'Server is running' });
 });
 
