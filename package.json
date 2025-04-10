@@ -9,7 +9,7 @@
     "build:frontend": "cd frontend && npm run build",
     "build:backend": "cd backend && npm run build",
     "build:all": "npm run build:frontend && npm run build:backend",
-    "vercel-build": "echo 'Running Vercel build' && npm run build:frontend && npm run build:backend",
+    "build": "echo 'Root build script - Vercel uses builds config instead'",
     "dev:frontend": "cd frontend && npm run dev",
     "dev:backend": "cd backend && npm run test-dev",
     "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\""
