@@ -6,8 +6,32 @@ import { upsertUser } from '../services/database.js';
 
 // Emergency proxy route that can be registered directly in index.ts
 export const handleGoogleProxy = async (req: Request, res: Response) => {
+  console.log('=================================================================');
   console.log('[PROXY] Google proxy endpoint hit:', req.path);
+  console.log('[PROXY] Full URL:', req.protocol + '://' + req.get('host') + req.originalUrl);
   console.log('[PROXY] Query params:', JSON.stringify(req.query));
+  console.log('[PROXY] Headers:', JSON.stringify(req.headers, null, 2));
+  console.log('[PROXY] Request origin:', req.headers.origin);
+  console.log('=================================================================');
+  
+  // Set proper CORS headers to match the exact requesting origin
+  const origin = req.headers.origin || '';
+  if (origin && (origin.includes('quits.cc') || origin.includes('localhost'))) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+    console.log('[PROXY] Set CORS headers for origin:', origin);
+  }
+  
+  // Log environment variables (redact secrets)
+  console.log('[PROXY] Environment check:', {
+    NODE_ENV: process.env.NODE_ENV,
+    PORT: process.env.PORT,
+    hasGoogleClientId: !!process.env.GOOGLE_CLIENT_ID,
+    hasGoogleClientSecret: !!process.env.GOOGLE_CLIENT_SECRET,
+    hasJwtSecret: !!process.env.JWT_SECRET
+  });
   
   const code = req.query.code;
   

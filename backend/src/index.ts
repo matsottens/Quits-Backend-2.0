@@ -30,11 +30,16 @@ app.use(cors({
     // Allow requests with no origin (like mobile apps, curl requests)
     if (!origin) return callback(null, true);
     
-    // Allow quits.cc domains and localhost
+    // Log original request origin for debugging
+    console.log('CORS request from origin:', origin);
+    
+    // Allow quits.cc domains (both www and non-www) and localhost
     if (origin.includes('quits.cc') || origin.includes('localhost')) {
-      return callback(null, origin);
+      console.log('CORS allowed for origin:', origin);
+      return callback(null, origin); // Return exactly the requesting origin
     }
     
+    console.log('CORS denied for origin:', origin);
     callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
@@ -52,6 +57,19 @@ app.use((req, res, next) => {
     host: req.headers.host,
   });
   
+  // For OPTIONS requests (CORS preflight), ensure we set the right headers
+  if (req.method === 'OPTIONS') {
+    const origin = req.headers.origin;
+    if (origin && (origin.includes('quits.cc') || origin.includes('localhost'))) {
+      res.header('Access-Control-Allow-Origin', origin);
+      res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+      res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+      res.header('Access-Control-Allow-Credentials', 'true');
+      res.header('Access-Control-Max-Age', '86400'); // 24 hours
+      return res.status(204).end();
+    }
+  }
+  
   next();
 });
 
@@ -67,8 +85,27 @@ app.use(express.urlencoded({ extended: true })); // Important for parsing applic
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Emergency Google OAuth proxy routes - these MUST work
-app.get('/api/google-proxy', (req: Request, res: Response) => handleGoogleProxy(req, res));
-app.post('/api/google-proxy', (req: Request, res: Response) => handleGoogleProxy(req, res));
+// Add extensive logging to help debug any issues
+app.get('/api/google-proxy', (req: Request, res: Response) => {
+  console.log('[INDEX] /api/google-proxy endpoint hit');
+  return handleGoogleProxy(req, res);
+});
+
+app.post('/api/google-proxy', (req: Request, res: Response) => {
+  console.log('[INDEX] /api/google-proxy POST endpoint hit');
+  return handleGoogleProxy(req, res);
+});
+
+// Add a simple test endpoint to verify the server is responding
+app.get('/api/test', (req: Request, res: Response) => {
+  console.log('[INDEX] Test endpoint hit');
+  res.json({ 
+    status: 'ok', 
+    message: 'Test endpoint is working',
+    time: new Date().toISOString(),
+    origin: req.headers.origin || 'none'
+  });
+});
 
 // Serve the test OAuth page
 app.get('/test-oauth', (req, res) => {
