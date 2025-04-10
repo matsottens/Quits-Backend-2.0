@@ -21,32 +21,35 @@ const corsOrigins = [
 console.log('CORS Origins configured:', corsOrigins);
 console.log('CLIENT_URL from env:', process.env.CLIENT_URL);
 
-// Configure custom CORS middleware - fixes origin mismatch between www and non-www
+// Middleware to handle CORS for all routes - this should be the FIRST middleware
 app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  
-  // Log the origin for debugging
-  console.log('Request with origin:', origin);
-  
-  // Allow requests with no origin
-  if (!origin) return next();
-  
-  // Check if the origin is allowed
-  if (corsOrigins.includes(origin) || 
-      origin === 'https://www.quits.cc' || 
-      origin === 'https://quits.cc') {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  try {
+    const origin = req.headers.origin;
+    console.log(`Request from origin: ${origin || 'unknown'}`);
+    
+    // Set CORS headers for all requests
+    // Send the exact same origin back in the header to satisfy browser security
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+      
+      // Log all headers for debugging
+      console.log('Response headers:', res.getHeaders());
+    }
     
     // Handle preflight requests
     if (req.method === 'OPTIONS') {
-      return res.status(200).end();
+      console.log('Received OPTIONS request - responding with 204');
+      return res.status(204).end();
     }
+    
+    next();
+  } catch (error) {
+    console.error('Error in CORS middleware:', error);
+    next();
   }
-  
-  next();
 });
 
 // Middleware
