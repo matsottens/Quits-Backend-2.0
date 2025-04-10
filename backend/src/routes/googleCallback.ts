@@ -78,11 +78,12 @@ export const handleGoogleCallback = async (req: Request, res: Response) => {
     let origin = req.headers.origin || req.headers.referer?.split('/auth/callback')[0] || process.env.CLIENT_URL || 'http://localhost:5173';
     
     // Normalize the origin to handle both www and non-www versions
-    if (origin.includes('quits.cc')) {
-      // For Google OAuth, we need to use the registered redirect URI
-      const originalOrigin = origin;
+    if (origin.includes('www.quits.cc')) {
+      origin = 'https://www.quits.cc'; 
+    } else if (origin.includes('api.quits.cc')) {
+      origin = 'https://api.quits.cc';
+    } else {
       origin = 'https://quits.cc';
-      console.log(`Normalized origin from ${originalOrigin} to ${origin} for Google OAuth`);
     }
     
     const redirectUri = `${origin}/auth/callback`;
