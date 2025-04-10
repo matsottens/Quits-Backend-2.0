@@ -8,6 +8,9 @@
   ],
   "routes": [
     { "src": "/api/(.*)", "dest": "/api/serverless.js" },
+    { "src": "/google-proxy(.*)", "dest": "/api/serverless.js" },
+    { "src": "/auth/google/callback(.*)", "dest": "/api/serverless.js" },
+    { "src": "/google/callback(.*)", "dest": "/api/serverless.js" },
     { "src": "/(.*)", "dest": "/frontend/$1" }
   ]
 } 
