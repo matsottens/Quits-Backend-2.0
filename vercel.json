@@ -4,18 +4,10 @@
   "installCommand": null,
   "builds": [
     { "src": "frontend/package.json", "use": "@vercel/vite" },
-    { "src": "api/**/*.js", "use": "@vercel/node" }
+    { "src": "api/serverless.js", "use": "@vercel/node" }
   ],
   "routes": [
-    { "src": "/api/csp-bypass", "dest": "/api/csp-bypass.js" },
-    { "src": "/api/google-proxy", "dest": "/api/google-proxy.js" },
-    { "src": "/api/auth/google/callback", "dest": "/api/auth/google/callback.js" },
-    { "src": "/auth/google/callback", "dest": "/api/auth/google/callback.js" },
-    { "src": "/google/callback", "dest": "/api/auth/google/callback.js" },
-    { "src": "/api/health", "dest": "/api/health.js" },
-    { "src": "/api/test", "dest": "/api/test.js" },
-    { "src": "/api/auth/google", "dest": "/api/auth/google/index.js" },
-    { "src": "/api", "dest": "/api/index.js" },
+    { "src": "/api/(.*)", "dest": "/api/serverless.js" },
     { "src": "/(.*)", "dest": "/frontend/$1" }
   ]
 } 
