@@ -29,15 +29,15 @@ export const handleGoogleCallback = async (req: Request, res: Response) => {
     });
 
     // Set CORS headers for all responses
-    const origin = req.headers.origin || '';
-    if (origin && (origin.includes('quits.cc') || origin.includes('localhost'))) {
-      res.header('Access-Control-Allow-Origin', origin);
+    const corsOrigin = req.headers.origin || '';
+    if (corsOrigin && (corsOrigin.includes('quits.cc') || corsOrigin.includes('localhost'))) {
+      res.header('Access-Control-Allow-Origin', corsOrigin);
       res.header('Access-Control-Allow-Credentials', 'true');
       res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
       res.header('Access-Control-Allow-Headers', 'Content-Type, Accept, Authorization');
-      console.log('CORS headers set for origin:', origin);
+      console.log('CORS headers set for origin:', corsOrigin);
     } else {
-      console.log('No CORS headers set - unknown origin:', origin);
+      console.log('No CORS headers set - unknown origin:', corsOrigin);
     }
 
     // Handle JSONP callback if provided (for alternative auth methods)
@@ -75,18 +75,18 @@ export const handleGoogleCallback = async (req: Request, res: Response) => {
     }
 
     // Determine the redirect URI used by the client for this specific request
-    let origin = req.headers.origin || req.headers.referer?.split('/auth/callback')[0] || process.env.CLIENT_URL || 'http://localhost:5173';
+    let redirectBase = req.headers.origin || req.headers.referer?.split('/auth/callback')[0] || process.env.CLIENT_URL || 'http://localhost:5173';
     
     // Normalize the origin to handle both www and non-www versions
-    if (origin.includes('www.quits.cc')) {
-      origin = 'https://www.quits.cc'; 
-    } else if (origin.includes('api.quits.cc')) {
-      origin = 'https://api.quits.cc';
+    if (redirectBase.includes('www.quits.cc')) {
+      redirectBase = 'https://www.quits.cc'; 
+    } else if (redirectBase.includes('api.quits.cc')) {
+      redirectBase = 'https://api.quits.cc';
     } else {
-      origin = 'https://quits.cc';
+      redirectBase = 'https://quits.cc';
     }
     
-    const redirectUri = `${origin}/auth/callback`;
+    const redirectUri = `${redirectBase}/auth/callback`;
 
     console.log(`Using redirect URI for token exchange: ${redirectUri}`);
 
