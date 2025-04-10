@@ -9,11 +9,10 @@
     "build:frontend": "cd frontend && npm run build",
     "build:backend": "cd backend && npm run build",
     "build:all": "npm run build:frontend && npm run build:backend",
-    "build": "npm run build:all",
+    "vercel-build": "echo 'Running Vercel build' && npm run build:frontend && npm run build:backend",
     "dev:frontend": "cd frontend && npm run dev",
     "dev:backend": "cd backend && npm run test-dev",
-    "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\"",
-    "vercel-build": "npm run build:all"
+    "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\""
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.4",

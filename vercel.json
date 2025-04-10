@@ -1,15 +1,11 @@
 {
   "version": 2,
-  "buildCommand": "npm run build:all",
-  "installCommand": "npm install && npm run install:all",
+  "buildCommand": null,
+  "installCommand": null,
   "builds": [
     {
       "src": "frontend/package.json",
       "use": "@vercel/vite"
-    },
-    {
-      "src": "backend/package.json",
-      "use": "@vercel/node"
     },
     {
       "src": "api/**/*.js",
