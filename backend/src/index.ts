@@ -8,6 +8,7 @@ import authRoutes from './routes/auth.js';
 import emailRoutes from './routes/email.js';
 import subscriptionRoutes from './routes/subscription.js';
 import { Request, Response } from 'express';
+import { handleGoogleCallback } from './routes/googleCallback.js';
 
 // Load environment variables
 dotenv.config();
@@ -63,31 +64,6 @@ app.use(express.urlencoded({ extended: true })); // Important for parsing applic
 
 // Serve static files from the public directory
 app.use(express.static(path.join(__dirname, 'public')));
-
-// Create a Google OAuth callback handler
-const handleGoogleCallback = async (req: Request, res: Response) => {
-  console.log('===========================================================');
-  console.log('GOOGLE CALLBACK HANDLER CALLED');
-  console.log('===========================================================');
-  console.log('Request URL:', req.url);
-  console.log('Request path:', req.path);
-  console.log('Full URL:', req.protocol + '://' + req.get('host') + req.originalUrl);
-  console.log('Query params:', JSON.stringify(req.query, null, 2));
-  
-  const code = req.query.code;
-  if (!code) {
-    return res.status(400).json({ error: 'Missing authorization code' });
-  }
-  
-  // In a real implementation, we'd exchange the code for tokens here
-  // For now, let's redirect to test-oauth.html with a mock token
-  const redirectUrl = req.query.redirect_uri || 
-                     req.headers.referer || 
-                     `${req.protocol}://${req.get('host')}/test-oauth.html`;
-                     
-  console.log('Redirecting to:', `${redirectUrl}?token=mock-token-for-debugging`);
-  return res.redirect(`${redirectUrl}?token=mock-token-for-debugging`);
-};
 
 // Serve the test OAuth page
 app.get('/test-oauth', (req, res) => {
