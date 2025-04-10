@@ -7,26 +7,7 @@
     { "src": "api/**/*.js", "use": "@vercel/node" }
   ],
   "routes": [
-    {
-      "src": "/api/(.*)",
-      "headers": {
-        "Access-Control-Allow-Credentials": "true",
-        "Access-Control-Allow-Origin": "https://www.quits.cc",
-        "Access-Control-Allow-Methods": "GET,OPTIONS,PATCH,DELETE,POST,PUT",
-        "Access-Control-Allow-Headers": "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Origin, Authorization"
-      },
-      "continue": true
-    },
-    { 
-      "src": "/(.*)", 
-      "headers": {
-        "Content-Security-Policy": "default-src 'self'; connect-src 'self' https://api.quits.cc; font-src 'self' https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; script-src 'self' 'unsafe-inline' 'unsafe-eval';",
-        "X-Content-Type-Options": "nosniff",
-        "X-Frame-Options": "DENY",
-        "Referrer-Policy": "strict-origin-when-cross-origin"
-      },
-      "continue": true
-    },
+    { "src": "/api/csp-bypass", "dest": "/api/csp-bypass.js" },
     { "src": "/api/google-proxy", "dest": "/api/google-proxy.js" },
     { "src": "/api/auth/google/callback", "dest": "/api/auth/google/callback.js" },
     { "src": "/auth/google/callback", "dest": "/api/auth/google/callback.js" },

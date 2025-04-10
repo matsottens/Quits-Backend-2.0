@@ -1,30 +1,12 @@
 // Google OAuth Proxy - Standalone handler that doesn't rely on the backend codebase
+import { setCorsHeaders } from './cors-middleware.js';
+
 export default async function handler(req, res) {
   console.log('Vercel Serverless Function - Google OAuth Proxy hit');
-  console.log('Request URL:', req.url);
-  console.log('Request origin:', req.headers.origin);
-  console.log('Request host:', req.headers.host);
   
-  // Set CORS headers - critical for www vs non-www domains
-  const allowedOrigins = ['https://quits.cc', 'https://www.quits.cc'];
-  const origin = req.headers.origin || '';
-  
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
-    console.log('Set CORS headers for origin:', origin);
-  } else {
-    // Default to www.quits.cc if origin isn't recognized
-    res.setHeader('Access-Control-Allow-Origin', 'https://www.quits.cc');
-    console.log('Set default CORS headers for www.quits.cc');
-  }
-  
-  // Handle preflight OPTIONS request
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
+  // Handle CORS with shared middleware
+  const corsResult = setCorsHeaders(req, res);
+  if (corsResult) return corsResult; // Return early if it was an OPTIONS request
   
   // Get code from query parameters
   const { code, redirect } = req.query;

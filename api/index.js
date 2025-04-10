@@ -1,22 +1,9 @@
+import { setCorsHeaders } from './cors-middleware.js';
+
 export default function handler(req, res) {
-  // Set CORS headers
-  const allowedOrigins = ['https://quits.cc', 'https://www.quits.cc'];
-  const origin = req.headers.origin || '';
-  
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept');
-  } else {
-    // Default to www.quits.cc if origin isn't recognized
-    res.setHeader('Access-Control-Allow-Origin', 'https://www.quits.cc');
-  }
-  
-  // Handle preflight OPTIONS request
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
+  // Handle CORS with shared middleware
+  const corsResult = setCorsHeaders(req, res);
+  if (corsResult) return corsResult; // Return early if it was an OPTIONS request
   
   // Return basic API info
   res.status(200).json({
@@ -24,7 +11,7 @@ export default function handler(req, res) {
     version: '1.0.0',
     status: 'online',
     timestamp: new Date().toISOString(),
-    origin: origin || 'none',
+    origin: req.headers.origin || 'none',
     endpoints: [
       '/api/health',
       '/api/test',

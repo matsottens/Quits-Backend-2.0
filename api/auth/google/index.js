@@ -1,21 +1,10 @@
+import { setCorsHeaders } from '../../cors-middleware.js';
 import { google } from 'googleapis';
 
 export default function handler(req, res) {
-  console.log('Vercel Serverless Function - Google OAuth URL generator hit');
-  
-  // Set CORS headers
-  const origin = req.headers.origin || '';
-  if (origin) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept');
-  }
-  
-  // Handle preflight OPTIONS request
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
+  // Handle CORS with shared middleware
+  const corsResult = setCorsHeaders(req, res);
+  if (corsResult) return corsResult; // Return early if it was an OPTIONS request
   
   try {
     // Get authorization URL
