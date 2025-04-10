@@ -358,31 +358,45 @@ router.get('/google/callback/jsonp', async (req: Request, res: Response) => {
 // Direct form-based callback endpoint with redirect back (CSP-friendly)
 router.post('/google/callback/direct2', async (req: Request, res: Response) => {
   try {
-    const origin = req.headers.origin;
+    const origin = req.headers.origin || '';
     console.log('Direct2 route hit with origin:', origin);
     
-    // Ensure CORS headers are set (redundant with global middleware, but belt-and-suspenders approach)
-    if (origin && (origin.includes('quits.cc') || origin.includes('localhost'))) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    // Always allow www.quits.cc and quits.cc - this is crucial
+    if (origin.includes('quits.cc')) {
+      console.log('Setting CORS headers for origin:', origin);
+      // Set CORS headers very explicitly
+      res.header('Access-Control-Allow-Origin', origin);
+      res.header('Access-Control-Allow-Credentials', 'true');
+      res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+      res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+    } else {
+      console.warn('Request from unknown origin:', origin);
     }
     
-    console.log('Direct2 route hit with body:', req.body);
-    console.log('Response headers at route start:', res.getHeaders());
-    
-    // Simple success response - no processing for now
-    return res.json({
-      success: true,
-      message: 'Direct2 route is accessible and working!',
-      origin: req.headers.origin,
+    // Force logging of request details
+    console.log('Request details:', {
+      headers: req.headers,
       body: req.body,
-      time: new Date().toISOString()
+      responseHeaders: res.getHeaders()
+    });
+    
+    // Mock successful authentication response
+    return res.status(200).json({
+      success: true,
+      message: 'Direct2 authentication successful',
+      token: 'mock-auth-token-' + Date.now(),
+      user: {
+        id: 'mock-user-id',
+        email: 'mock-user@example.com',
+        name: 'Mock User'
+      }
     });
   } catch (error: any) {
-    console.error('Direct form route v2 error:', error);
-    return res.status(500).json({ error: 'Server error during authentication' });
+    console.error('Error in direct2 endpoint:', error);
+    return res.status(500).json({
+      error: 'Internal server error',
+      message: error.message
+    });
   }
 });
 
@@ -480,17 +494,25 @@ router.post('/logout', authenticateUser, async (req: AuthRequest, res: Response)
 
 // Handle OPTIONS requests for the direct2 endpoint
 router.options('/google/callback/direct2', (req: Request, res: Response) => {
-  const origin = req.headers.origin;
+  const origin = req.headers.origin || '';
   console.log('OPTIONS request for direct2 with origin:', origin);
   
-  // Always set CORS headers for OPTIONS requests
-  if (origin && (origin.includes('quits.cc') || origin.includes('localhost'))) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  // Always allow www.quits.cc and quits.cc origins
+  if (origin.includes('quits.cc')) {
+    console.log('Setting CORS headers for OPTIONS request with origin:', origin);
+    // Set CORS headers very explicitly
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  } else {
+    console.warn('OPTIONS request from unknown origin:', origin);
   }
   
+  // Log all headers
+  console.log('Response headers for OPTIONS:', res.getHeaders());
+  
+  // Always respond with 200 OK for OPTIONS
   return res.status(200).end();
 });
 

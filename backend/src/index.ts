@@ -62,15 +62,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
 // Middleware
 app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      ...helmet.contentSecurityPolicy.getDefaultDirectives(),
-      "connect-src": ["'self'", 'https://quits.cc', 'https://www.quits.cc', 'https://*.google.com', 'https://*.googleapis.com', 'https://*.supabase.co'], 
-      "frame-src": ["'self'", 'https://accounts.google.com/'], // Allow Google sign-in frames
-      "script-src": ["'self'", "'unsafe-inline'"], // Adjust as needed, unsafe-inline might be needed for some libraries
-      "img-src": ["'self'", "data:", "https:"] // Allow images from self, data URLs, and https
-    }
-  }
+  contentSecurityPolicy: false, // Disable CSP temporarily for debugging
 }));
 
 app.use(express.json());
@@ -80,6 +72,36 @@ app.use(express.urlencoded({ extended: true })); // Important for parsing applic
 app.use('/api/auth', authRoutes);
 app.use('/api/email', emailRoutes);
 app.use('/api/subscription', subscriptionRoutes);
+
+// CORS test endpoint at the root level
+app.get('/cors-test', (req: Request, res: Response) => {
+  const origin = req.headers.origin;
+  console.log('CORS Test Request:', {
+    origin,
+    headers: req.headers
+  });
+
+  // Set CORS headers directly on this response
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
+
+  // Return all the headers that were set
+  res.json({
+    message: 'CORS Test Success',
+    origin: origin,
+    headers_sent: {
+      cors: res.getHeader('Access-Control-Allow-Origin'),
+      methods: res.getHeader('Access-Control-Allow-Methods'),
+      allowHeaders: res.getHeader('Access-Control-Allow-Headers'),
+      credentials: res.getHeader('Access-Control-Allow-Credentials')
+    },
+    time: new Date().toISOString()
+  });
+});
 
 // Health check endpoint
 app.get('/api/health', (req: Request, res: Response) => {
