@@ -88,18 +88,26 @@ router.get('/google', (req: Request, res: Response) => {
 // Handle Google OAuth callback
 router.get('/google/callback', async (req: Request, res: Response) => {
   try {
-    const { code, error: oauthError, callback } = req.query;
+    const { code, error: oauthError, callback, redirect } = req.query;
 
-    // Handle JSONP callback if provided (for alternative auth methods)
-    const isJsonp = typeof callback === 'string' && callback.length > 0;
-
-    // Log details for debugging
     console.log('Auth callback request received:', {
       origin: req.headers.origin,
       referer: req.headers.referer,
-      isJsonp,
-      hasCode: !!code
+      hasCode: !!code,
+      hasRedirect: !!redirect
     });
+
+    // Set CORS headers for all responses
+    const origin = req.headers.origin || '';
+    if (origin && origin.includes('quits.cc')) {
+      res.header('Access-Control-Allow-Origin', origin);
+      res.header('Access-Control-Allow-Credentials', 'true');
+      res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.header('Access-Control-Allow-Headers', 'Content-Type, Accept, Authorization');
+    }
+
+    // Handle JSONP callback if provided (for alternative auth methods)
+    const isJsonp = typeof callback === 'string' && callback.length > 0;
 
     if (oauthError) {
         console.error('Google OAuth Error on callback:', oauthError);
@@ -109,8 +117,11 @@ router.get('/google/callback', async (req: Request, res: Response) => {
         }
         
         // Redirect back to frontend with error
-        const clientRedirectUrl = req.headers.referer?.split('?')[0] || process.env.CLIENT_URL || 'http://localhost:5173';
-        return res.redirect(`${clientRedirectUrl.replace('/auth/callback','/login')}?error=google_oauth_failed&details=${oauthError}`);
+        const redirectUrl = typeof redirect === 'string' && redirect.length > 0
+          ? redirect
+          : req.headers.referer?.split('?')[0] || process.env.CLIENT_URL || 'http://localhost:5173';
+          
+        return res.redirect(`${redirectUrl.replace('/auth/callback','/login')}?error=google_oauth_failed&details=${oauthError}`);
     }
 
     if (!code || typeof code !== 'string') {
@@ -120,8 +131,11 @@ router.get('/google/callback', async (req: Request, res: Response) => {
         return res.send(`${callback}({"error": "missing_code"})`);
       }
       
-      const clientRedirectUrl = req.headers.referer?.split('?')[0] || process.env.CLIENT_URL || 'http://localhost:5173';
-      return res.redirect(`${clientRedirectUrl.replace('/auth/callback','/login')}?error=missing_code`);
+      const redirectUrl = typeof redirect === 'string' && redirect.length > 0
+        ? redirect
+        : req.headers.referer?.split('?')[0] || process.env.CLIENT_URL || 'http://localhost:5173';
+        
+      return res.redirect(`${redirectUrl.replace('/auth/callback','/login')}?error=missing_code`);
     }
 
     // Determine the redirect URI used by the client for this specific request
@@ -130,8 +144,8 @@ router.get('/google/callback', async (req: Request, res: Response) => {
     
     // Normalize the origin to handle both www and non-www versions
     if (origin.includes('quits.cc')) {
-      // Allow both formats - the Google OAuth registration should have both formats registered
-      origin = origin.replace('https://www.quits.cc', 'https://quits.cc');
+      // For Google OAuth, we need to use the registered redirect URI
+      origin = 'https://quits.cc';
     }
     
     const redirectUri = `${origin}/auth/callback`;
@@ -139,7 +153,6 @@ router.get('/google/callback', async (req: Request, res: Response) => {
     console.log(`Using redirect URI for token exchange: ${redirectUri}`);
 
     // Create a new OAuth2 client instance FOR TOKEN EXCHANGE
-    // It *must* use the same redirect_uri as the initial auth request
     const tokenExchangeOauth2Client = new google.auth.OAuth2(
         process.env.GOOGLE_CLIENT_ID,
         process.env.GOOGLE_CLIENT_SECRET,
@@ -150,7 +163,7 @@ router.get('/google/callback', async (req: Request, res: Response) => {
     const { tokens } = await tokenExchangeOauth2Client.getToken(code as string);
     console.log('Tokens received:', tokens.access_token ? 'Yes (access token)' : 'No', tokens.refresh_token ? 'Yes (refresh token)' : 'No');
     
-    // *** Important: Set credentials on the client for subsequent API calls ***
+    // Set credentials on the client for subsequent API calls
     tokenExchangeOauth2Client.setCredentials(tokens);
 
     // Get user info from Google
@@ -165,7 +178,7 @@ router.get('/google/callback', async (req: Request, res: Response) => {
         throw new Error('Failed to retrieve user ID or email from Google.');
     }
 
-    // Create or update user in Supabase database
+    // Create or update user in database
     const user = await upsertUser({
         id: userInfo.id,
         email: userInfo.email,
@@ -175,27 +188,25 @@ router.get('/google/callback', async (req: Request, res: Response) => {
     });
     console.log('User upserted in DB:', user.email);
 
-    // Store tokens securely (e.g., associated with the user ID in Supabase)
-    // Important for accessing Google APIs later (like Gmail)
+    // Store tokens securely
     const { error: tokenStoreError } = await supabase
-      .from('user_tokens') // Ensure this table exists
+      .from('user_tokens')
       .upsert({
           user_id: user.id,
           provider: 'google',
           access_token: tokens.access_token,
-          refresh_token: tokens.refresh_token, // Store refresh token!
+          refresh_token: tokens.refresh_token, 
           expires_at: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,
           scopes: tokens.scope
-      }, { onConflict: 'user_id, provider' } ); // Upsert based on user_id and provider
+      }, { onConflict: 'user_id, provider' });
 
     if (tokenStoreError) {
         console.error('Error storing user tokens:', tokenStoreError);
-        // Decide how critical this is - maybe proceed but log?
     }
 
     // Generate JWT token for your application's session
     const appTokenPayload = { id: user.id, email: user.email };
-    const appToken = generateToken(appTokenPayload); // Use your JWT generation logic
+    const appToken = generateToken(appTokenPayload);
 
     console.log('App token generated.');
     
@@ -226,9 +237,13 @@ router.get('/google/callback', async (req: Request, res: Response) => {
       });
     }
     
-    // Otherwise, redirect user back to the frontend (traditional OAuth flow)
-    const clientRedirectUrl = redirectUri.replace('/auth/callback', '/dashboard'); // Or determine based on state param
-    // Include the app token in the redirect URL (or use cookies/session)
+    // Otherwise, redirect user back to the frontend with the token
+    // Use the redirect parameter if provided, otherwise determine based on referer
+    const clientRedirectUrl = typeof redirect === 'string' && redirect.length > 0
+      ? redirect
+      : redirectUri.replace('/auth/callback', '/dashboard'); // Default fallback
+      
+    // Include the app token in the redirect URL
     return res.redirect(`${clientRedirectUrl}?token=${appToken}`);
 
   } catch (error: any) {
@@ -240,9 +255,13 @@ router.get('/google/callback', async (req: Request, res: Response) => {
       return res.send(`${callback}({"error": "auth_failed", "message": ${JSON.stringify(error.message)}})`);
     }
     
+    // Get redirect URL
+    const redirect = req.query.redirect;
+    const clientOrigin = typeof redirect === 'string' && redirect.length > 0
+      ? redirect
+      : req.headers.origin || process.env.CLIENT_URL || 'http://localhost:5173';
+      
     // Redirect back to frontend login with a generic error
-    // Avoid exposing too much detail to the client
-    const clientOrigin = req.headers.origin || process.env.CLIENT_URL || 'http://localhost:5173';
     const loginUrl = `${clientOrigin}/login`;
     let errorCode = 'google_auth_failed';
     if (error.response?.data?.error === 'redirect_uri_mismatch') {
