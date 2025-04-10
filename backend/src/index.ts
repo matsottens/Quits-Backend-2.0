@@ -13,62 +13,50 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
-const corsOrigins = [
-  clientUrl, 
-  'https://quits.cc', 
-  'https://www.quits.cc'
-];
 
-console.log('CORS Origins configured:', corsOrigins);
 console.log('CLIENT_URL from env:', process.env.CLIENT_URL);
 
-// Configure explicit CORS middleware
-const corsMiddleware = cors({
-  origin: function(origin, callback) {
-    // Allow requests with no origin (like mobile apps, curl requests)
-    if (!origin) return callback(null, true);
-    
-    console.log(`Request from origin: ${origin}`);
-    
-    // Allow all quits.cc domains (with or without www) - crucial for authentication
-    if (corsOrigins.includes(origin) || 
-        origin === 'https://www.quits.cc' || 
-        origin === 'https://quits.cc') {
-      console.log(`Allowing origin: ${origin}`);
-      callback(null, origin);
-    } else {
-      console.log(`Blocking origin: ${origin}`);
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization'],
-  maxAge: 86400 // 24 hours in seconds
-});
-
-// Apply the CORS middleware to all routes
-app.use(corsMiddleware);
-
-// Handle preflight OPTIONS requests separately for more control
-app.options('*', (req: Request, res: Response) => {
-  console.log('Received OPTIONS request - responding with 204');
-  res.status(204).end();
-});
-
-// Add debugging middleware for all requests
+// Simple CORS middleware - no fancy configuration, just set the headers directly
 app.use((req: Request, res: Response, next: NextFunction) => {
-  console.log('Request received:', {
+  const origin = req.headers.origin;
+  
+  console.log(`Request from origin: ${origin || 'unknown'}`);
+  
+  // Always allow the requesting origin if it's from quits.cc (with or without www)
+  if (origin && (origin.includes('quits.cc') || origin.includes('localhost'))) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
+  
+  // Handle preflight OPTIONS requests
+  if (req.method === 'OPTIONS') {
+    console.log('Handling OPTIONS preflight request');
+    return res.status(200).end();
+  }
+  
+  next();
+});
+
+// Debug middleware to log request headers and CORS headers
+app.use((req: Request, res: Response, next: NextFunction) => {
+  console.log('Request details:', {
     method: req.method,
     url: req.url,
     path: req.path,
-    originalUrl: req.originalUrl,
     origin: req.headers.origin,
-    referer: req.headers.referer,
-    contentType: req.headers['content-type']
+    host: req.headers.host,
   });
   
-  // Continue with request processing
+  // Log the response headers that were set
+  console.log('Response headers:', {
+    cors: res.getHeader('Access-Control-Allow-Origin'),
+    methods: res.getHeader('Access-Control-Allow-Methods'),
+    headers: res.getHeader('Access-Control-Allow-Headers'),
+    credentials: res.getHeader('Access-Control-Allow-Credentials')
+  });
+  
   next();
 });
 
@@ -77,7 +65,7 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       ...helmet.contentSecurityPolicy.getDefaultDirectives(),
-      "connect-src": ["'self'", ...corsOrigins, 'https://*.google.com', 'https://*.googleapis.com', 'https://*.supabase.co'], 
+      "connect-src": ["'self'", 'https://quits.cc', 'https://www.quits.cc', 'https://*.google.com', 'https://*.googleapis.com', 'https://*.supabase.co'], 
       "frame-src": ["'self'", 'https://accounts.google.com/'], // Allow Google sign-in frames
       "script-src": ["'self'", "'unsafe-inline'"], // Adjust as needed, unsafe-inline might be needed for some libraries
       "img-src": ["'self'", "data:", "https:"] // Allow images from self, data URLs, and https
