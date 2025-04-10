@@ -85,12 +85,15 @@ router.get('/google', (req: Request, res: Response) => {
   }
 });
 
-// Handle Google OAuth callback
-router.get('/google/callback', async (req: Request, res: Response) => {
+// Handle Google OAuth callback - explicitly catch all possible URL patterns
+router.get('*/google/callback', async (req: Request, res: Response) => {
   try {
+    console.log('Attempting to handle callback with path:', req.path);
     const { code, error: oauthError, callback, redirect } = req.query;
 
     console.log('Auth callback request received:', {
+      path: req.path,
+      originalUrl: req.originalUrl,
       origin: req.headers.origin,
       referer: req.headers.referer,
       hasCode: !!code,
@@ -99,7 +102,7 @@ router.get('/google/callback', async (req: Request, res: Response) => {
 
     // Set CORS headers for all responses
     const origin = req.headers.origin || '';
-    if (origin && origin.includes('quits.cc')) {
+    if (origin && (origin.includes('quits.cc') || origin.includes('localhost'))) {
       res.header('Access-Control-Allow-Origin', origin);
       res.header('Access-Control-Allow-Credentials', 'true');
       res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
