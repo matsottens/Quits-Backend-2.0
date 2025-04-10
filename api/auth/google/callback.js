@@ -3,15 +3,22 @@ export default async function handler(req, res) {
   console.log('Vercel Serverless Function - Google OAuth Callback hit');
   console.log('Request URL:', req.url);
   console.log('Request origin:', req.headers.origin);
+  console.log('Request host:', req.headers.host);
   
-  // Set CORS headers for the specific origin
+  // Set CORS headers for the specific origin - ensure we handle www.quits.cc
+  const allowedOrigins = ['https://quits.cc', 'https://www.quits.cc'];
   const origin = req.headers.origin || '';
-  if (origin) {
+  
+  if (allowedOrigins.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
     console.log('Set CORS headers for origin:', origin);
+  } else {
+    // Default to www.quits.cc if origin isn't recognized
+    res.setHeader('Access-Control-Allow-Origin', 'https://www.quits.cc');
+    console.log('Set default CORS headers for www.quits.cc');
   }
   
   // Handle preflight OPTIONS request

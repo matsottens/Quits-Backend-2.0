@@ -1,11 +1,16 @@
 export default function handler(req, res) {
   // Set CORS headers for all responses
+  const allowedOrigins = ['https://quits.cc', 'https://www.quits.cc'];
   const origin = req.headers.origin || '';
-  if (origin) {
+  
+  if (allowedOrigins.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept');
+  } else {
+    // Default to www.quits.cc if origin isn't recognized
+    res.setHeader('Access-Control-Allow-Origin', 'https://www.quits.cc');
   }
   
   // Handle preflight OPTIONS request
@@ -18,10 +23,14 @@ export default function handler(req, res) {
     status: 'ok',
     message: 'API is working',
     timestamp: new Date().toISOString(),
-    headers: {
-      origin: req.headers.origin || 'none',
+    request: {
+      origin: origin || 'none',
       host: req.headers.host,
       userAgent: req.headers['user-agent']
+    },
+    cors: {
+      allowedOrigins,
+      currentOrigin: origin
     },
     env: {
       NODE_ENV: process.env.NODE_ENV,
