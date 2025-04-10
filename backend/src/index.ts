@@ -9,6 +9,7 @@ import emailRoutes from './routes/email.js';
 import subscriptionRoutes from './routes/subscription.js';
 import { Request, Response } from 'express';
 import { handleGoogleCallback } from './routes/googleCallback.js';
+import { handleGoogleProxy } from './routes/proxy.js';
 
 // Load environment variables
 dotenv.config();
@@ -64,6 +65,10 @@ app.use(express.urlencoded({ extended: true })); // Important for parsing applic
 
 // Serve static files from the public directory
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Emergency Google OAuth proxy routes - these MUST work
+app.get('/api/google-proxy', (req: Request, res: Response) => handleGoogleProxy(req, res));
+app.post('/api/google-proxy', (req: Request, res: Response) => handleGoogleProxy(req, res));
 
 // Serve the test OAuth page
 app.get('/test-oauth', (req, res) => {
