@@ -2,14 +2,19 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import authRoutes from './routes/auth.js';
 import emailRoutes from './routes/email.js';
 import subscriptionRoutes from './routes/subscription.js';
-import { Request, Response, NextFunction } from 'express';
-import { handleGoogleCallback } from './routes/googleCallback.js';
+import { Request, Response } from 'express';
 
 // Load environment variables
 dotenv.config();
+
+// __dirname is not defined in ES module scope
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -17,28 +22,23 @@ const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
 
 console.log('CLIENT_URL from env:', process.env.CLIENT_URL);
 
-// Simple CORS middleware - no fancy configuration, just set the headers directly
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  
-  console.log(`Request from origin: ${origin || 'unknown'}`);
-  
-  // Always allow the requesting origin if it's from quits.cc (with or without www)
-  if (origin && (origin.includes('quits.cc') || origin.includes('localhost'))) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-  }
-  
-  // Handle preflight OPTIONS requests
-  if (req.method === 'OPTIONS') {
-    console.log('Handling OPTIONS preflight request');
-    return res.status(200).end();
-  }
-  
-  next();
-});
+// Configure CORS with the cors package
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps, curl requests)
+    if (!origin) return callback(null, true);
+    
+    // Allow quits.cc domains and localhost
+    if (origin.includes('quits.cc') || origin.includes('localhost')) {
+      return callback(null, origin);
+    }
+    
+    callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization']
+}));
 
 // Debug middleware to log request headers and CORS headers
 app.use((req, res, next) => {
@@ -48,14 +48,6 @@ app.use((req, res, next) => {
     path: req.path,
     origin: req.headers.origin,
     host: req.headers.host,
-  });
-  
-  // Log the response headers that were set
-  console.log('Response headers:', {
-    cors: res.getHeader('Access-Control-Allow-Origin'),
-    methods: res.getHeader('Access-Control-Allow-Methods'),
-    headers: res.getHeader('Access-Control-Allow-Headers'),
-    credentials: res.getHeader('Access-Control-Allow-Credentials')
   });
   
   next();
@@ -69,8 +61,58 @@ app.use(helmet({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true })); // Important for parsing application/x-www-form-urlencoded
 
-// Special direct route to handle Google callback directly
-app.get('/api/auth/google/callback', (req, res) => handleGoogleCallback(req, res));
+// Serve static files from the public directory
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Create a Google OAuth callback handler
+const handleGoogleCallback = async (req: Request, res: Response) => {
+  console.log('===========================================================');
+  console.log('GOOGLE CALLBACK HANDLER CALLED');
+  console.log('===========================================================');
+  console.log('Request URL:', req.url);
+  console.log('Request path:', req.path);
+  console.log('Full URL:', req.protocol + '://' + req.get('host') + req.originalUrl);
+  console.log('Query params:', JSON.stringify(req.query, null, 2));
+  
+  const code = req.query.code;
+  if (!code) {
+    return res.status(400).json({ error: 'Missing authorization code' });
+  }
+  
+  // In a real implementation, we'd exchange the code for tokens here
+  // For now, let's redirect to test-oauth.html with a mock token
+  const redirectUrl = req.query.redirect_uri || 
+                     req.headers.referer || 
+                     `${req.protocol}://${req.get('host')}/test-oauth.html`;
+                     
+  console.log('Redirecting to:', `${redirectUrl}?token=mock-token-for-debugging`);
+  return res.redirect(`${redirectUrl}?token=mock-token-for-debugging`);
+};
+
+// Serve the test OAuth page
+app.get('/test-oauth', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'test-oauth.html'));
+});
+
+// Special direct routes to handle Google callback - register all possible patterns
+app.get('/api/auth/google/callback', (req: Request, res: Response) => {
+  handleGoogleCallback(req, res);
+});
+
+app.get('/auth/google/callback', (req: Request, res: Response) => {
+  handleGoogleCallback(req, res);
+});
+
+// Also handle root-level callback (no /api prefix, no /auth prefix)
+app.get('/google/callback', (req: Request, res: Response) => {
+  handleGoogleCallback(req, res);
+});
+
+// Catch-all pattern to handle any path with google/callback at the end
+app.get('*/google/callback', (req: Request, res: Response) => {
+  console.log('Wildcard route matched for Google callback:', req.path);
+  handleGoogleCallback(req, res);
+});
 
 // Normal routes
 app.use('/api/auth', authRoutes);
@@ -85,24 +127,10 @@ app.get('/cors-test', (req, res) => {
     headers: req.headers
   });
 
-  // Set CORS headers directly on this response
-  if (origin) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-  }
-
   // Return all the headers that were set
   res.json({
     message: 'CORS Test Success',
     origin: origin,
-    headers_sent: {
-      cors: res.getHeader('Access-Control-Allow-Origin'),
-      methods: res.getHeader('Access-Control-Allow-Methods'),
-      allowHeaders: res.getHeader('Access-Control-Allow-Headers'),
-      credentials: res.getHeader('Access-Control-Allow-Credentials')
-    },
     time: new Date().toISOString()
   });
 });
@@ -115,4 +143,5 @@ app.get('/api/health', (req, res) => {
 // Start server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  console.log(`Test OAuth page available at: http://localhost:${PORT}/test-oauth.html`);
 }); 
