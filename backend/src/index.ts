@@ -6,6 +6,7 @@ import authRoutes from './routes/auth.js';
 import emailRoutes from './routes/email.js';
 import subscriptionRoutes from './routes/subscription.js';
 import { Request, Response, NextFunction } from 'express';
+import { handleGoogleCallback } from './routes/googleCallback.js';
 
 // Load environment variables
 dotenv.config();
@@ -17,7 +18,7 @@ const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
 console.log('CLIENT_URL from env:', process.env.CLIENT_URL);
 
 // Simple CORS middleware - no fancy configuration, just set the headers directly
-app.use((req: Request, res: Response, next: NextFunction) => {
+app.use((req, res, next) => {
   const origin = req.headers.origin;
   
   console.log(`Request from origin: ${origin || 'unknown'}`);
@@ -40,7 +41,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 });
 
 // Debug middleware to log request headers and CORS headers
-app.use((req: Request, res: Response, next: NextFunction) => {
+app.use((req, res, next) => {
   console.log('Request details:', {
     method: req.method,
     url: req.url,
@@ -68,13 +69,16 @@ app.use(helmet({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true })); // Important for parsing application/x-www-form-urlencoded
 
-// Routes
+// Special direct route to handle Google callback directly
+app.get('/api/auth/google/callback', (req, res) => handleGoogleCallback(req, res));
+
+// Normal routes
 app.use('/api/auth', authRoutes);
 app.use('/api/email', emailRoutes);
 app.use('/api/subscription', subscriptionRoutes);
 
 // CORS test endpoint at the root level
-app.get('/cors-test', (req: Request, res: Response) => {
+app.get('/cors-test', (req, res) => {
   const origin = req.headers.origin;
   console.log('CORS Test Request:', {
     origin,
@@ -104,7 +108,7 @@ app.get('/cors-test', (req: Request, res: Response) => {
 });
 
 // Health check endpoint
-app.get('/api/health', (req: Request, res: Response) => {
+app.get('/api/health', (req, res) => {
   res.status(200).json({ status: 'ok', message: 'Server is running' });
 });
 
