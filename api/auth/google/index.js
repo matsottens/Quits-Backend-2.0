@@ -2,12 +2,18 @@ import { setCorsHeaders } from '../../cors-middleware.js';
 import { google } from 'googleapis';
 
 export default function handler(req, res) {
+  console.log('Google Auth Initialization handler called');
+  console.log('Full URL:', req.url);
+  console.log('Method:', req.method);
+  console.log('Headers:', req.headers.origin);
+  
   // Handle CORS with shared middleware
   const corsResult = setCorsHeaders(req, res);
   if (corsResult) return corsResult; // Return early if it was an OPTIONS request
   
   try {
-    // Get authorization URL
+    // CRITICAL: This redirect URI must match EXACTLY what's registered in Google Console
+    // and what's used in the callback handler
     const redirectUri = 'https://quits.cc/auth/callback';
     console.log('Using redirect URI:', redirectUri);
     
@@ -29,13 +35,21 @@ export default function handler(req, res) {
       access_type: 'offline',
       scope: scopes,
       prompt: 'consent',
-      include_granted_scopes: true
+      include_granted_scopes: true,
+      // Pass along the original origin in state to ensure proper redirect
+      state: req.headers.origin || 'https://www.quits.cc'
     });
+    
+    console.log('Generated auth URL:', url);
     
     // Send URL to client
     res.status(200).json({ url });
   } catch (error) {
     console.error('Error generating auth URL:', error);
-    res.status(500).json({ error: 'Failed to generate auth URL' });
+    res.status(500).json({ 
+      error: 'Failed to generate auth URL',
+      message: error.message,
+      details: process.env.NODE_ENV === 'production' ? undefined : error.stack
+    });
   }
 } 

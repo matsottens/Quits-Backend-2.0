@@ -23,13 +23,21 @@ export default function handler(req, res) {
   console.log('Query params:', req.query);
   
   // CRITICAL: Set CORS headers to match the exact requesting origin
-  const origin = req.headers.origin || 'https://www.quits.cc';
-  res.setHeader('Access-Control-Allow-Origin', origin);
+  const origin = req.headers.origin;
+  
+  // Allow both www and non-www domains for quits.cc and localhost for development
+  if (origin && (origin.includes('quits.cc') || origin.includes('localhost'))) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    console.log('Setting CORS header - Access-Control-Allow-Origin:', origin);
+  } else {
+    // Default fallback if no origin header
+    res.setHeader('Access-Control-Allow-Origin', 'https://www.quits.cc');
+    console.log('Setting default CORS header - Access-Control-Allow-Origin: https://www.quits.cc');
+  }
+  
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, X-Requested-With');
-  
-  console.log('Setting CORS header - Access-Control-Allow-Origin:', origin);
   
   // Handle preflight OPTIONS request
   if (req.method === 'OPTIONS') {
@@ -46,7 +54,7 @@ export default function handler(req, res) {
   
   console.log('Checking path matches...');
   
-  // Check if path includes each endpoint
+  // Check if path includes each endpoint - be very flexible with path matching
   const isGoogleProxy = 
     path === '/api/google-proxy' || 
     path === 'api/google-proxy' || 
@@ -58,7 +66,9 @@ export default function handler(req, res) {
     path === 'api/auth/google/callback' || 
     path === '/auth/google/callback' ||
     path === '/google/callback' ||
-    path.includes('/google/callback');
+    path === '/auth/callback' ||
+    path.includes('/google/callback') ||
+    path.includes('/auth/callback');
   
   const isAuthCallback =
     path === '/auth/callback' ||
@@ -132,28 +142,41 @@ export default function handler(req, res) {
     }
   }
   
-  // Google callback endpoint
-  if (isGoogleCallback) {
-    console.log('Handling Google callback request');
-    const redirectUrl = req.query.redirect || 'https://www.quits.cc/dashboard';
-    console.log('Redirecting to:', redirectUrl);
-    return res.redirect(`${redirectUrl}?token=mock-token-for-testing-${Date.now()}`);
-  }
-  
-  // General auth callback endpoint
-  if (isAuthCallback) {
-    console.log('Handling auth callback request');
-    const code = req.query.code;
+  // Google/Auth callback endpoint - Handle both general auth callback and specific Google callback
+  if (isGoogleCallback || isAuthCallback) {
+    console.log('Handling Auth/Google callback request');
+    
+    // Get the code and state from query parameters
+    const { code, state } = req.query;
+    
     if (!code) {
-      return res.status(400).json({ error: 'Missing code parameter' });
+      console.log('Missing authorization code');
+      return res.status(400).json({ error: 'Missing authorization code' });
+    }
+    
+    // If we have state parameter with origin info, use it for redirect
+    // Otherwise default to www version
+    let redirectDomain = 'https://www.quits.cc';
+    
+    if (state && (state.includes('quits.cc') || state.includes('localhost'))) {
+      redirectDomain = state;
+      console.log('Using origin from state:', redirectDomain);
+    }
+    
+    // Ensure no trailing slash
+    if (redirectDomain.endsWith('/')) {
+      redirectDomain = redirectDomain.slice(0, -1);
     }
     
     // Generate a mock token
     const token = "mock-token-auth-callback-" + Date.now();
     console.log('Generated mock token:', token);
     
-    // Always redirect to www version
-    return res.redirect(`https://www.quits.cc/dashboard?token=${token}`);
+    // Redirect to the appropriate domain
+    const redirectUrl = `${redirectDomain}/dashboard?token=${token}`;
+    console.log('Redirecting to:', redirectUrl);
+    
+    return res.redirect(redirectUrl);
   }
   
   // Catch-all route for any other API endpoint

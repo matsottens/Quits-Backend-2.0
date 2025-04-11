@@ -3,6 +3,10 @@ import { setCorsHeaders } from '../../cors-middleware.js';
 
 export default async function handler(req, res) {
   console.log('Vercel Serverless Function - Google OAuth Callback hit');
+  console.log('Full URL:', req.url);
+  console.log('Method:', req.method);
+  console.log('Headers:', JSON.stringify(req.headers, null, 2));
+  console.log('Query params:', req.query);
   
   // Handle CORS with shared middleware
   const corsResult = setCorsHeaders(req, res);
@@ -12,6 +16,7 @@ export default async function handler(req, res) {
   const { code, redirect } = req.query;
   
   if (!code) {
+    console.log('Error: Missing authorization code');
     return res.status(400).json({ error: 'Missing authorization code' });
   }
   
@@ -19,7 +24,18 @@ export default async function handler(req, res) {
     // Google OAuth configuration
     const { google } = await import('googleapis');
     
-    // Use exactly the URI registered in Google Console
+    // IMPORTANT: Use exactly the same redirectUri in multiple places:
+    // 1. What's registered in Google Console
+    // 2. In the auth index.js file
+    // 3. Here in the callback
+    
+    // Support multiple redirect URI formats depending on what's registered in Google Console
+    // The most likely ones are:
+    // - https://quits.cc/auth/callback (no www, shorter)
+    // - https://www.quits.cc/auth/callback (with www)
+    // - https://quits.cc/api/auth/google/callback (API path)
+    
+    // CRITICAL: This must match EXACTLY what's registered in Google Console
     const redirectUri = 'https://quits.cc/auth/callback';
     console.log('Using redirect URI:', redirectUri);
     
@@ -31,16 +47,19 @@ export default async function handler(req, res) {
     );
     
     // Exchange code for tokens
+    console.log('Exchanging code for tokens...');
     const { tokens } = await oauth2Client.getToken(code);
-    console.log('Tokens received');
+    console.log('Tokens received successfully');
     
     // Get user info
     oauth2Client.setCredentials(tokens);
     const oauth2 = google.oauth2('v2');
+    console.log('Fetching user info...');
     const userInfoResponse = await oauth2.userinfo.get({
       auth: oauth2Client,
     });
     const userInfo = userInfoResponse.data;
+    console.log('User info received:', userInfo.email);
     
     if (!userInfo.id || !userInfo.email) {
       throw new Error('Failed to retrieve user information');
@@ -59,6 +78,7 @@ export default async function handler(req, res) {
     
     // Return JSON or redirect based on the request
     if (req.headers.accept?.includes('application/json')) {
+      console.log('Returning JSON response');
       return res.json({
         success: true,
         token,
@@ -72,7 +92,9 @@ export default async function handler(req, res) {
     }
     
     // Redirect to the dashboard with the token
+    // Always use www version for the redirect to maintain consistency
     const redirectUrl = redirect || 'https://www.quits.cc/dashboard';
+    console.log('Redirecting to:', redirectUrl);
     return res.redirect(`${redirectUrl}?token=${token}`);
     
   } catch (error) {
