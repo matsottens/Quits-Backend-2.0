@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gmail Token Extractor</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .container {
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        button {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 4px 2px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+        .success {
+            color: green;
+            font-weight: bold;
+        }
+        .error {
+            color: red;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>Gmail API Token Extractor</h1>
+    
+    <div class="container">
+        <h2>Method 1: Get Token with Google OAuth Playground</h2>
+        <p>Follow these steps to get a Gmail API token:</p>
+        <ol>
+            <li>Go to <a href="https://developers.google.com/oauthplayground/" target="_blank">Google OAuth Playground</a></li>
+            <li>In the left panel, scroll down and select "Gmail API v1" and choose <code>https://www.googleapis.com/auth/gmail.readonly</code> scope</li>
+            <li>Click "Authorize APIs" and complete the OAuth flow with your Google account</li>
+            <li>On the next screen, click "Exchange authorization code for tokens"</li>
+            <li>Copy the "Access token" value from the response</li>
+            <li>Add it to your <code>.env</code> file as <code>TEST_GMAIL_ACCESS_TOKEN=your-token-here</code></li>
+        </ol>
+    </div>
+
+    <div class="container">
+        <h2>Method 2: Extract Token from Chrome Local Storage</h2>
+        <p>If you've already authorized the app, you can try to extract the token:</p>
+        
+        <button id="checkLocalStorage">Check Browser Storage for Token</button>
+        <div id="tokenResult"></div>
+    </div>
+
+    <div class="container">
+        <h2>Test Your Token</h2>
+        <p>Enter your Gmail API token below to test if it works:</p>
+        <input type="text" id="tokenInput" placeholder="Enter your Gmail API token" style="width: 100%; padding: 8px; margin-bottom: 10px;">
+        <button id="testToken">Test Token</button>
+        <div id="testResult" style="margin-top: 10px;"></div>
+    </div>
+
+    <script>
+        document.getElementById('checkLocalStorage').addEventListener('click', async function() {
+            const resultDiv = document.getElementById('tokenResult');
+            resultDiv.innerHTML = '<p>Checking for tokens in local storage...</p>';
+            
+            try {
+                // Check local storage for tokens
+                const possibleKeys = [
+                    'google_token',
+                    'access_token',
+                    'gmail_token',
+                    'token',
+                    'auth_token',
+                    'user_tokens'
+                ];
+                
+                let tokenFound = false;
+                let tokenValue = '';
+                
+                for (const key of possibleKeys) {
+                    const item = localStorage.getItem(key);
+                    if (item) {
+                        try {
+                            const parsed = JSON.parse(item);
+                            if (parsed && (parsed.access_token || parsed.token)) {
+                                tokenValue = parsed.access_token || parsed.token;
+                                tokenFound = true;
+                                
+                                resultDiv.innerHTML = `
+                                    <p class="success">Token found in localStorage[${key}]!</p>
+                                    <p>Token Value:</p>
+                                    <pre>${tokenValue}</pre>
+                                    <button id="copyToken">Copy Token</button>
+                                    <p>Paste this in your .env file as TEST_GMAIL_ACCESS_TOKEN=your-token</p>
+                                `;
+                                
+                                document.getElementById('copyToken').addEventListener('click', function() {
+                                    navigator.clipboard.writeText(tokenValue)
+                                        .then(() => alert('Token copied to clipboard!'))
+                                        .catch(err => alert('Error copying token: ' + err));
+                                });
+                                
+                                break;
+                            }
+                        } catch (e) {
+                            console.log(`Error parsing ${key}:`, e);
+                        }
+                    }
+                }
+                
+                if (!tokenFound) {
+                    resultDiv.innerHTML = `
+                        <p class="error">No token found in local storage.</p>
+                        <p>Try logging in to the app first, or use the OAuth Playground method.</p>
+                    `;
+                }
+                
+            } catch (error) {
+                resultDiv.innerHTML = `<p class="error">Error checking storage: ${error.message}</p>`;
+            }
+        });
+        
+        document.getElementById('testToken').addEventListener('click', async function() {
+            const token = document.getElementById('tokenInput').value.trim();
+            const resultDiv = document.getElementById('testResult');
+            
+            if (!token) {
+                resultDiv.innerHTML = '<p class="error">Please enter a token to test</p>';
+                return;
+            }
+            
+            resultDiv.innerHTML = '<p>Testing token...</p>';
+            
+            try {
+                // Test the token with a simple Gmail API call
+                const response = await fetch('https://www.googleapis.com/gmail/v1/users/me/profile', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    resultDiv.innerHTML = `
+                        <p class="success">Token is valid!</p>
+                        <p>Email: ${data.emailAddress}</p>
+                        <p>Add this token to your .env file:</p>
+                        <pre>TEST_GMAIL_ACCESS_TOKEN=${token}</pre>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `
+                        <p class="error">Token is invalid</p>
+                        <p>Error: ${data.error?.message || 'Unknown error'}</p>
+                    `;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<p class="error">Error testing token: ${error.message}</p>`;
+            }
+        });
+    </script>
+</body>
+</html> 
