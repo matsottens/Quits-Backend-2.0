@@ -15,33 +15,26 @@ export default async function handler(req, res) {
     return corsResult; // Return early if it was an OPTIONS request
   }
   
-  // Get code from query parameters
+  // Extract the authorization code, redirect URI, and state from query parameters
   const { code, redirect } = req.query;
   
   if (!code) {
-    console.log('Error: Missing authorization code');
-    return res.status(400).json({ 
+    console.log('Error: No authorization code provided in request');
+    return res.status(400).json({
       error: 'Missing authorization code',
-      errorDetail: 'The code parameter is required for Google authentication' 
+      details: 'The code parameter is required'
     });
   }
+  
+  console.log(`Code received: ${code.substring(0, 10)}...`);
   
   try {
     // Check if environment variables for Google OAuth are set
     if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
       console.log('Error: Missing Google OAuth credentials in environment variables');
-      
-      // For development/testing, return mock data if credentials aren't available
-      console.log('Generating mock authentication response');
-      return res.status(200).json({
-        success: true,
-        token: "mock-token-for-testing-" + Date.now(),
-        user: {
-          id: "123",
-          email: "user@example.com",
-          name: "Test User",
-          picture: "https://example.com/avatar.jpg"
-        }
+      return res.status(500).json({
+        error: 'Server misconfiguration',
+        details: 'OAuth credentials are not configured'
       });
     }
     
@@ -82,10 +75,11 @@ export default async function handler(req, res) {
     const jwt = await import('jsonwebtoken');
     const token = jwt.sign(
       { 
-        id: userInfo.id,
+        sub: userInfo.id,
         email: userInfo.email,
-        name: userInfo.name,
-        picture: userInfo.picture
+        name: userInfo.name || '',
+        picture: userInfo.picture || '',
+        iat: Math.floor(Date.now() / 1000)
       },
       process.env.JWT_SECRET || 'your-jwt-secret-key',
       { expiresIn: '7d' }

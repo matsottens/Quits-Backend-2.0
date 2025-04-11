@@ -1,31 +1,57 @@
 {
   "version": 2,
-  "buildCommand": null,
-  "installCommand": null,
-  "builds": [
-    { "src": "frontend/package.json", "use": "@vercel/vite" },
-    { "src": "api/serverless.js", "use": "@vercel/node" },
-    { "src": "api/auth-callback.js", "use": "@vercel/node" },
-    { "src": "api/google-proxy.js", "use": "@vercel/node" }
-  ],
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
   "routes": [
-    { "src": "/auth/callback", "dest": "/api/auth-callback.js" },
-    { "src": "/api/auth/google/callback", "dest": "/api/auth-callback.js" },
-    { "src": "/callback", "dest": "/api/auth-callback.js" },
-    { "src": "/api/google-proxy", "dest": "/api/google-proxy.js" },
-    { "src": "/google-proxy", "dest": "/api/google-proxy.js" },
-    { "src": "/api/(.*)", "dest": "/api/serverless.js" },
-    { "src": "/(.*)", "dest": "/frontend/$1" }
-  ],
-  "headers": [
     {
-      "source": "/(.*)",
-      "headers": [
-        { "key": "Access-Control-Allow-Credentials", "value": "true" },
-        { "key": "Access-Control-Allow-Origin", "value": "*" },
-        { "key": "Access-Control-Allow-Methods", "value": "GET,OPTIONS,PATCH,DELETE,POST,PUT" },
-        { "key": "Access-Control-Allow-Headers", "value": "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization" }
-      ]
+      "src": "/api/(.*)",
+      "dest": "/api/$1"
+    },
+    {
+      "src": "/auth/callback",
+      "dest": "/index.html"
+    },
+    {
+      "src": "/dashboard",
+      "dest": "/index.html"
+    },
+    {
+      "src": "/login",
+      "dest": "/index.html"
+    },
+    {
+      "src": "/settings",
+      "dest": "/index.html"
+    },
+    {
+      "src": "/subscription/:id",
+      "dest": "/index.html"
+    },
+    {
+      "src": "/subscriptions",
+      "dest": "/index.html"
+    },
+    {
+      "src": "/scan",
+      "dest": "/index.html"
+    },
+    {
+      "src": "/",
+      "dest": "/index.html"
+    },
+    {
+      "src": "/assets/(.*)",
+      "dest": "/assets/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/index.html"
     }
-  ]
+  ],
+  "env": {
+    "VITE_API_URL": "https://api.quits.cc",
+    "VITE_SUPABASE_URL": "@supabase_url",
+    "VITE_SUPABASE_ANON_KEY": "@supabase_anon_key",
+    "VITE_GOOGLE_CLIENT_ID": "@google_client_id"
+  }
 } 
