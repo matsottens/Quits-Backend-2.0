@@ -4,9 +4,8 @@ export default function handler(req, res) {
   console.log('Full URL:', req.url);
   console.log('Method:', req.method);
   console.log('Query params:', req.query);
-  console.log('Headers:', JSON.stringify(req.headers, null, 2));
   
-  // Set CORS headers to allow requests from all origins
+  // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -30,15 +29,12 @@ export default function handler(req, res) {
   
   console.log('Received auth code from Google');
   
-  // For this implementation, generate a simple token
-  // In a real implementation, you would exchange the code for access/refresh tokens
-  const token = `quits-token-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+  // Generate a simple token
+  const token = `quits-token-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
   console.log('Generated token:', token);
   
-  // Determine if this is a JSON or HTML request
-  const acceptsJson = req.headers.accept && req.headers.accept.includes('application/json');
-  
-  if (acceptsJson) {
+  // If JSON is requested, return JSON
+  if (req.headers.accept && req.headers.accept.includes('application/json')) {
     console.log('Returning JSON response');
     return res.status(200).json({
       success: true,
@@ -51,9 +47,8 @@ export default function handler(req, res) {
     });
   }
   
-  // If the frontend is on the same host as this callback,
-  // we can simply render the success page with a script to store the token
-  console.log('Rendering HTML success page');
+  // Otherwise return a simple HTML page
+  console.log('Returning HTML response');
   
   const html = `
   <!DOCTYPE html>
@@ -64,84 +59,69 @@ export default function handler(req, res) {
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
       body {
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-        line-height: 1.6;
-        color: #333;
-        max-width: 500px;
-        margin: 0 auto;
-        padding: 20px;
+        font-family: system-ui, -apple-system, sans-serif;
         text-align: center;
+        margin: 0;
+        padding: 20px;
+        color: #333;
       }
       .card {
-        background: white;
-        border-radius: 8px;
-        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        max-width: 500px;
+        margin: 40px auto;
         padding: 30px;
-        margin: 30px 0;
+        border-radius: 8px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        background-color: white;
       }
-      h1 {
-        color: #4a5568;
-        margin-bottom: 16px;
-      }
+      h1 { color: #2563eb; margin-bottom: 16px; }
+      p { margin-bottom: 24px; line-height: 1.5; }
       .spinner {
         display: inline-block;
-        width: 50px;
-        height: 50px;
-        border: 3px solid rgba(0, 0, 0, 0.1);
+        width: 40px;
+        height: 40px;
+        border: 3px solid rgba(37,99,235,0.3);
         border-radius: 50%;
-        border-top-color: #3498db;
-        animation: spin 1s ease-in-out infinite;
+        border-top-color: #2563eb;
+        animation: spin 1s linear infinite;
         margin-bottom: 20px;
       }
-      @keyframes spin {
-        to { transform: rotate(360deg); }
-      }
-      .btn {
-        display: inline-block;
-        background-color: #3498db;
+      @keyframes spin { to { transform: rotate(360deg); } }
+      button {
+        background-color: #2563eb;
         color: white;
-        padding: 10px 15px;
-        border-radius: 4px;
-        text-decoration: none;
-        margin-top: 20px;
         border: none;
-        cursor: pointer;
+        padding: 12px 24px;
+        border-radius: 4px;
         font-size: 16px;
+        cursor: pointer;
         transition: background-color 0.2s;
       }
-      .btn:hover {
-        background-color: #2980b9;
-      }
+      button:hover { background-color: #1d4ed8; }
     </style>
   </head>
   <body>
     <div class="card">
       <div class="spinner"></div>
-      <h1>Authentication Successful!</h1>
+      <h1>Authentication Successful</h1>
       <p>You have been successfully authenticated with Google.</p>
-      <p>Redirecting you to the dashboard...</p>
-      <button class="btn" id="dashboardBtn">Go to Dashboard</button>
+      <script>
+        // Store the token and redirect
+        localStorage.setItem('quits_auth_token', '${token}');
+        
+        // Also store in original format for compatibility
+        localStorage.setItem('token', '${token}');
+        
+        // Redirect after a short delay
+        setTimeout(() => {
+          window.location.href = '/dashboard';
+        }, 1000);
+      </script>
+      <button onclick="window.location.href='/dashboard'">Go to Dashboard</button>
     </div>
-    
-    <script>
-      // Store the token in localStorage
-      localStorage.setItem('quits_auth_token', '${token}');
-      
-      // Redirect to dashboard 
-      setTimeout(() => {
-        window.location.href = '/dashboard';
-      }, 1500);
-      
-      // Manual redirect button
-      document.getElementById('dashboardBtn').addEventListener('click', () => {
-        window.location.href = '/dashboard';
-      });
-    </script>
   </body>
   </html>
   `;
   
-  // Set content type to HTML and send the response
   res.setHeader('Content-Type', 'text/html');
   return res.status(200).send(html);
 } 

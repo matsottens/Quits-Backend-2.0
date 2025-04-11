@@ -6,18 +6,14 @@
     { "src": "frontend/package.json", "use": "@vercel/vite" },
     { "src": "api/serverless.js", "use": "@vercel/node" },
     { "src": "api/auth-callback.js", "use": "@vercel/node" },
-    { "src": "api/google-proxy.js", "use": "@vercel/node" },
-    { "src": "api/auth/google/callback.js", "use": "@vercel/node" },
-    { "src": "api/auth/google/index.js", "use": "@vercel/node" }
+    { "src": "api/google-proxy.js", "use": "@vercel/node" }
   ],
   "routes": [
     { "src": "/auth/callback", "dest": "/api/auth-callback.js" },
+    { "src": "/api/auth/google/callback", "dest": "/api/auth-callback.js" },
+    { "src": "/callback", "dest": "/api/auth-callback.js" },
     { "src": "/api/google-proxy", "dest": "/api/google-proxy.js" },
     { "src": "/google-proxy", "dest": "/api/google-proxy.js" },
-    { "src": "/api/auth/google/callback", "dest": "/api/auth/google/callback.js" },
-    { "src": "/auth/google/callback", "dest": "/api/auth/google/callback.js" },
-    { "src": "/api/auth/google", "dest": "/api/auth/google/index.js" },
-    { "src": "/auth/google", "dest": "/api/auth/google/index.js" },
     { "src": "/api/(.*)", "dest": "/api/serverless.js" },
     { "src": "/(.*)", "dest": "/frontend/$1" }
   ],
