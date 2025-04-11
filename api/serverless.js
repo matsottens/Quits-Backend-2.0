@@ -92,6 +92,10 @@ export default function handler(req, res) {
     isTestEndpoint
   });
   
+  // Check if Google OAuth credentials are correctly set
+  const hasGoogleCredentials = process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET;
+  console.log('Has Google credentials:', hasGoogleCredentials ? 'Yes' : 'No');
+  
   // Health and test endpoints
   if (isHealthCheck || isTestEndpoint) {
     console.log('Handling health/test request');
@@ -104,6 +108,11 @@ export default function handler(req, res) {
       origin: origin,
       cors: {
         allowOrigin: res.getHeader('Access-Control-Allow-Origin')
+      },
+      envConfig: {
+        hasGoogleClientId: !!process.env.GOOGLE_CLIENT_ID,
+        hasGoogleClientSecret: !!process.env.GOOGLE_CLIENT_SECRET,
+        hasJwtSecret: !!process.env.JWT_SECRET
       }
     });
   }
@@ -120,18 +129,30 @@ export default function handler(req, res) {
         });
       }
       
-      console.log('Generating mock authentication response');
-      // For demonstration, return mock data
-      return res.status(200).json({
-        success: true,
-        token: "mock-token-for-testing-" + Date.now(),
-        user: {
-          id: "123",
-          email: "user@example.com",
-          name: "Test User",
-          picture: "https://example.com/avatar.jpg"
-        }
-      });
+      // If Google credentials are missing, return mock data
+      if (!hasGoogleCredentials) {
+        console.log('No Google credentials found in environment - returning mock data');
+        return res.status(200).json({
+          success: true,
+          token: "mock-token-for-testing-" + Date.now(),
+          user: {
+            id: "123",
+            email: "user@example.com",
+            name: "Test User",
+            picture: "https://example.com/avatar.jpg"
+          }
+        });
+      }
+      
+      // If we have credentials, delegate to the dedicated google-proxy handler
+      // This approach allows the request to be properly processed by the google-proxy.js file
+      console.log('Delegating to google-proxy.js handler');
+      
+      // We can't directly require the module here in serverless, so we'll send a redirect
+      const redirectUrl = `${req.headers.host.includes('localhost') ? 'http://' : 'https://'}${req.headers.host}/api/google-proxy?${new URLSearchParams(req.query).toString()}`;
+      console.log('Redirecting to dedicated handler:', redirectUrl);
+      
+      return res.redirect(307, redirectUrl);
     } catch (error) {
       console.error('Error in Google proxy handler:', error);
       return res.status(500).json({ 
@@ -153,6 +174,17 @@ export default function handler(req, res) {
       console.log('Missing authorization code');
       return res.status(400).json({ error: 'Missing authorization code' });
     }
+    
+    // If we have credentials, redirect to the dedicated handler
+    if (hasGoogleCredentials) {
+      console.log('Delegating to auth/google/callback.js handler');
+      const callbackUrl = `${req.headers.host.includes('localhost') ? 'http://' : 'https://'}${req.headers.host}/api/auth/google/callback?${new URLSearchParams(req.query).toString()}`;
+      console.log('Redirecting to dedicated callback handler:', callbackUrl);
+      
+      return res.redirect(307, callbackUrl);
+    }
+    
+    // If we don't have credentials, handle with mock data
     
     // If we have state parameter with origin info, use it for redirect
     // Otherwise default to www version

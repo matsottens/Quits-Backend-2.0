@@ -5,14 +5,31 @@
   "builds": [
     { "src": "frontend/package.json", "use": "@vercel/vite" },
     { "src": "api/serverless.js", "use": "@vercel/node" },
-    { "src": "api/auth-callback.js", "use": "@vercel/node" }
+    { "src": "api/auth-callback.js", "use": "@vercel/node" },
+    { "src": "api/google-proxy.js", "use": "@vercel/node" },
+    { "src": "api/auth/google/callback.js", "use": "@vercel/node" },
+    { "src": "api/auth/google/index.js", "use": "@vercel/node" }
   ],
   "routes": [
     { "src": "/auth/callback", "dest": "/api/auth-callback.js" },
+    { "src": "/api/google-proxy", "dest": "/api/google-proxy.js" },
+    { "src": "/google-proxy", "dest": "/api/google-proxy.js" },
+    { "src": "/api/auth/google/callback", "dest": "/api/auth/google/callback.js" },
+    { "src": "/auth/google/callback", "dest": "/api/auth/google/callback.js" },
+    { "src": "/api/auth/google", "dest": "/api/auth/google/index.js" },
+    { "src": "/auth/google", "dest": "/api/auth/google/index.js" },
     { "src": "/api/(.*)", "dest": "/api/serverless.js" },
-    { "src": "/google-proxy(.*)", "dest": "/api/serverless.js" },
-    { "src": "/auth/google/callback(.*)", "dest": "/api/serverless.js" },
-    { "src": "/google/callback(.*)", "dest": "/api/serverless.js" },
     { "src": "/(.*)", "dest": "/frontend/$1" }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Credentials", "value": "true" },
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET,OPTIONS,PATCH,DELETE,POST,PUT" },
+        { "key": "Access-Control-Allow-Headers", "value": "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization" }
+      ]
+    }
   ]
 } 
