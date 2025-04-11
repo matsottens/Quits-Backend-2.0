@@ -129,29 +129,14 @@ export default function handler(req, res) {
         });
       }
       
-      // If Google credentials are missing, return mock data
-      if (!hasGoogleCredentials) {
-        console.log('No Google credentials found in environment - returning mock data');
-        return res.status(200).json({
-          success: true,
-          token: "mock-token-for-testing-" + Date.now(),
-          user: {
-            id: "123",
-            email: "user@example.com",
-            name: "Test User",
-            picture: "https://example.com/avatar.jpg"
-          }
-        });
-      }
-      
-      // If we have credentials, delegate to the dedicated google-proxy handler
-      // This approach allows the request to be properly processed by the google-proxy.js file
+      // Always delegate to the dedicated handler regardless of credentials
       console.log('Delegating to google-proxy.js handler');
       
-      // We can't directly require the module here in serverless, so we'll send a redirect
-      const redirectUrl = `${req.headers.host.includes('localhost') ? 'http://' : 'https://'}${req.headers.host}/api/google-proxy?${new URLSearchParams(req.query).toString()}`;
-      console.log('Redirecting to dedicated handler:', redirectUrl);
+      // Use the backend API URL which should have the credentials
+      const backendUrl = 'https://api.quits.cc/api/auth/google/callback';
+      const redirectUrl = backendUrl + '?' + new URLSearchParams(req.query).toString();
       
+      console.log('Redirecting to backend handler:', redirectUrl);
       return res.redirect(307, redirectUrl);
     } catch (error) {
       console.error('Error in Google proxy handler:', error);
@@ -175,40 +160,13 @@ export default function handler(req, res) {
       return res.status(400).json({ error: 'Missing authorization code' });
     }
     
-    // If we have credentials, redirect to the dedicated handler
-    if (hasGoogleCredentials) {
-      console.log('Delegating to auth/google/callback.js handler');
-      const callbackUrl = `${req.headers.host.includes('localhost') ? 'http://' : 'https://'}${req.headers.host}/api/auth/google/callback?${new URLSearchParams(req.query).toString()}`;
-      console.log('Redirecting to dedicated callback handler:', callbackUrl);
-      
-      return res.redirect(307, callbackUrl);
-    }
+    // Always redirect to the backend API
+    console.log('Redirecting to backend API for proper token exchange');
+    const backendUrl = 'https://api.quits.cc/api/auth/google/callback';
+    const callbackUrl = backendUrl + '?' + new URLSearchParams(req.query).toString();
     
-    // If we don't have credentials, handle with mock data
-    
-    // If we have state parameter with origin info, use it for redirect
-    // Otherwise default to www version
-    let redirectDomain = 'https://www.quits.cc';
-    
-    if (state && (state.includes('quits.cc') || state.includes('localhost'))) {
-      redirectDomain = state;
-      console.log('Using origin from state:', redirectDomain);
-    }
-    
-    // Ensure no trailing slash
-    if (redirectDomain.endsWith('/')) {
-      redirectDomain = redirectDomain.slice(0, -1);
-    }
-    
-    // Generate a mock token
-    const token = "mock-token-auth-callback-" + Date.now();
-    console.log('Generated mock token:', token);
-    
-    // Redirect to the appropriate domain
-    const redirectUrl = `${redirectDomain}/dashboard?token=${token}`;
-    console.log('Redirecting to:', redirectUrl);
-    
-    return res.redirect(redirectUrl);
+    console.log('Redirecting to backend handler:', callbackUrl);
+    return res.redirect(307, callbackUrl);
   }
   
   // Catch-all route for any other API endpoint
