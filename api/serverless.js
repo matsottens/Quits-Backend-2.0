@@ -50,12 +50,19 @@ export default function handler(req, res) {
   const isGoogleProxy = 
     path === '/api/google-proxy' || 
     path === 'api/google-proxy' || 
-    path === '/google-proxy';
+    path === '/google-proxy' ||
+    path.includes('google-proxy');
     
   const isGoogleCallback = 
     path === '/api/auth/google/callback' || 
     path === 'api/auth/google/callback' || 
+    path === '/auth/google/callback' ||
+    path === '/google/callback' ||
     path.includes('/google/callback');
+  
+  const isAuthCallback =
+    path === '/auth/callback' ||
+    path === 'auth/callback';
     
   const isHealthCheck = 
     path === '/api/health' || 
@@ -70,6 +77,7 @@ export default function handler(req, res) {
   console.log('Path matching results:', {
     isGoogleProxy,
     isGoogleCallback,
+    isAuthCallback,
     isHealthCheck,
     isTestEndpoint
   });
@@ -130,6 +138,22 @@ export default function handler(req, res) {
     const redirectUrl = req.query.redirect || 'https://www.quits.cc/dashboard';
     console.log('Redirecting to:', redirectUrl);
     return res.redirect(`${redirectUrl}?token=mock-token-for-testing-${Date.now()}`);
+  }
+  
+  // General auth callback endpoint
+  if (isAuthCallback) {
+    console.log('Handling auth callback request');
+    const code = req.query.code;
+    if (!code) {
+      return res.status(400).json({ error: 'Missing code parameter' });
+    }
+    
+    // Generate a mock token
+    const token = "mock-token-auth-callback-" + Date.now();
+    console.log('Generated mock token:', token);
+    
+    // Always redirect to www version
+    return res.redirect(`https://www.quits.cc/dashboard?token=${token}`);
   }
   
   // Catch-all route for any other API endpoint

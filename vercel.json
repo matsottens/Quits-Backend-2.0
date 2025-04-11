@@ -4,9 +4,11 @@
   "installCommand": null,
   "builds": [
     { "src": "frontend/package.json", "use": "@vercel/vite" },
-    { "src": "api/serverless.js", "use": "@vercel/node" }
+    { "src": "api/serverless.js", "use": "@vercel/node" },
+    { "src": "api/auth-callback.js", "use": "@vercel/node" }
   ],
   "routes": [
+    { "src": "/auth/callback", "dest": "/api/auth-callback.js" },
     { "src": "/api/(.*)", "dest": "/api/serverless.js" },
     { "src": "/google-proxy(.*)", "dest": "/api/serverless.js" },
     { "src": "/auth/google/callback(.*)", "dest": "/api/serverless.js" },
