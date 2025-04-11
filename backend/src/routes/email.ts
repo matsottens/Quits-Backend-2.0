@@ -17,66 +17,126 @@ router.use((req, res, next) => {
 });
 
 // Start email scanning
-router.post('/scan', async (req: AuthRequest, res) => {
+router.post('/scan', authenticateUser, async (req: Request, res: Response) => {
   try {
     const userId = req.user?.id;
+    
     if (!userId) {
-      return res.status(401).json({ error: 'User not authenticated' });
+      return res.status(401).json({
+        error: 'Unauthorized: User ID is required'
+      });
     }
-
-    // Get user's access token from Supabase (assuming it's stored)
-    const { data: tokenData, error: tokenError } = await supabase
-      .from('user_tokens') // Adjust table name if different
-      .select('access_token')
+    
+    // Extract Gmail token from request headers
+    const gmailToken = req.headers['x-gmail-token'] as string;
+    const useRealData = req.body.useRealData === true;
+    
+    console.log(`Scan requested for user ${userId}`);
+    console.log(`Using real Gmail data: ${useRealData ? 'YES' : 'NO'}`);
+    console.log(`Gmail token available: ${gmailToken ? 'YES' : 'NO'}`);
+    
+    // Check if a scan is already in progress
+    const { data: existingScan, error: checkError } = await supabase
+      .from('email_scans')
+      .select('id, status')
       .eq('user_id', userId)
+      .eq('status', 'in_progress')
       .single();
 
-    if (tokenError || !tokenData?.access_token) {
-      console.error('Token fetch error:', tokenError);
-      return res.status(401).json({ error: 'Gmail access token not found or error fetching it.' });
+    if (checkError && checkError.code !== 'PGRST116') {
+      console.error('Error checking for existing scan:', checkError);
+      return res.status(500).json({
+        error: 'Failed to check existing scan status'
+      });
     }
-
-    // Set credentials for this request
-    oauth2Client.setCredentials({ access_token: tokenData.access_token });
-
-    // Get list of emails (limit for testing)
-    const listResponse = await gmail.users.messages.list({
-      userId: 'me',
-      maxResults: 50, // Adjust as needed
-      q: 'subject:(subscription OR receipt OR invoice OR payment OR billing)' // Example query
-    });
-
-    const messages = listResponse.data.messages;
-    if (!messages || messages.length === 0) {
-      return res.json({ status: 'completed', message: 'No relevant emails found.', subscriptions: [] });
+    
+    if (existingScan) {
+      console.log(`Scan already in progress for user ${userId}`);
+      return res.json({
+        message: 'Scan already in progress',
+        scanId: existingScan.id
+      });
     }
-
-    // Store scan status in database
-    const { error: scanError } = await supabase
+    
+    // Get user's OAuth tokens from database
+    const { data: userTokens, error: tokenError } = await supabase
+      .from('user_tokens')
+      .select('access_token, refresh_token')
+      .eq('user_id', userId)
+      .eq('provider', 'google')
+      .single();
+    
+    if (tokenError) {
+      console.error('Error retrieving user tokens:', tokenError);
+      
+      // If we don't have stored tokens but have a header token, use that
+      if (!gmailToken) {
+        return res.status(400).json({
+          error: 'No OAuth tokens found for user'
+        });
+      }
+      
+      console.log('Using token from request header instead of database');
+    }
+    
+    // Choose the best token source - prefer header token if available
+    const accessToken = gmailToken || userTokens?.access_token;
+    
+    if (!accessToken && useRealData) {
+      return res.status(400).json({
+        error: 'No access token available for Gmail API'
+      });
+    }
+    
+    // Create scan record in database
+    const { data: scanRecord, error: scanError } = await supabase
       .from('email_scans')
-      .upsert({ user_id: userId, status: 'in_progress', total_emails: messages.length, processed_emails: 0 }, { onConflict: 'user_id' })
-      .select();
+      .insert({
+        user_id: userId,
+        status: 'in_progress',
+        started_at: new Date().toISOString(),
+        use_real_data: useRealData,
+        total_emails: 0,
+        processed_emails: 0
+      })
+      .select()
+      .single();
 
     if (scanError) {
-      console.error('Error creating/updating scan record:', scanError);
-      // Decide if this is critical - maybe continue anyway?
+      console.error('Error creating scan record:', scanError);
+      return res.status(500).json({
+        error: 'Failed to create scan record'
+      });
     }
-
-    // Process emails in the background (no await here)
-    processEmails(userId, messages);
-
-    res.json({
-      status: 'started',
-      message: `Email scan started for ${messages.length} emails.`,
-      total_emails: messages.length
+    
+    // Start the background process to scan emails
+    processEmails(userId, scanRecord.id, accessToken, useRealData)
+      .catch(err => {
+        console.error('Background email processing error:', err);
+        supabase
+          .from('email_scans')
+          .update({
+            status: 'failed',
+            error_message: err.message,
+            completed_at: new Date().toISOString()
+          })
+          .eq('id', scanRecord.id)
+          .then(() => {
+            console.log(`Scan ${scanRecord.id} marked as failed due to error`);
+          });
+      });
+    
+    return res.json({
+      message: 'Email scanning started',
+      scanId: scanRecord.id
     });
+    
   } catch (error) {
     console.error('Error starting email scan:', error);
-    // Update scan status to failed if possible
-    if (req.user?.id) {
-        await supabase.from('email_scans').update({ status: 'failed' }).eq('user_id', req.user.id);
-    }
-    res.status(500).json({ error: 'Failed to start email scan' });
+    return res.status(500).json({
+      error: 'Failed to start email scanning',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
   }
 });
 
@@ -181,145 +241,264 @@ router.post('/suggestions/:id/confirm', authenticateUser, async (req: AuthReques
 });
 
 // Helper function to process emails in the background
-async function processEmails(userId: string, messages: gmail_v1.Schema$Message[]) {
-  console.log(`Processing ${messages.length} emails for user ${userId}...`);
+async function processEmails(userId: string, scanId: string, accessToken: string, useRealData: boolean) {
+  console.log(`Processing emails for user ${userId} with scan ID ${scanId}`);
   let processedCount = 0;
   let suggestionCount = 0;
   let failedCount = 0;
+  let totalEmails = 0;
 
+  // Set up interval to update scan status
   const scanUpdateInterval = setInterval(async () => {
     await supabase
       .from('email_scans')
       .update({ 
         processed_emails: processedCount,
         failed_emails: failedCount,
-        detected_subscriptions: suggestionCount
+        detected_subscriptions: suggestionCount,
+        total_emails: totalEmails,
+        updated_at: new Date().toISOString()
       })
-      .eq('user_id', userId);
+      .eq('id', scanId);
   }, 5000); // Update DB every 5 seconds
 
   try {
-    for (const messagePart of messages) {
-      if (!messagePart.id) continue;
-      try {
-        // Get full email content with headers
+    // Set up Gmail API with the access token
+    if (useRealData && accessToken) {
+      console.log('Using real Gmail API with provided token');
+      const oauth2Client = new google.auth.OAuth2();
+      oauth2Client.setCredentials({ access_token: accessToken });
+      
+      // Create Gmail API instance
+      const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+      
+      // Search for subscription-related emails
+      const query = 'subject:(subscription OR receipt OR invoice OR payment OR billing OR renewal)';
+      console.log(`Searching emails with query: ${query}`);
+      
+      const messageList = await gmail.users.messages.list({
+        userId: 'me',
+        maxResults: 50, // Limit for processing
+        q: query
+      });
+      
+      const messages = messageList.data.messages || [];
+      totalEmails = messages.length;
+      
+      // Update total emails count
+      await supabase
+        .from('email_scans')
+        .update({ total_emails: totalEmails })
+        .eq('id', scanId);
+      
+      if (messages.length === 0) {
+        console.log('No matching emails found');
+        
+        // Mark scan as completed
+        await supabase
+          .from('email_scans')
+          .update({
+            status: 'completed',
+            completed_at: new Date().toISOString(),
+            message: 'No subscription emails found'
+          })
+          .eq('id', scanId);
+          
+        clearInterval(scanUpdateInterval);
+        return;
+      }
+      
+      console.log(`Found ${messages.length} potential subscription emails`);
+      
+      // Process each email
+      for (const message of messages) {
+        if (!message.id) continue;
+        
+        try {
+          // Get full message content
         const emailResponse = await gmail.users.messages.get({
           userId: 'me',
-          id: messagePart.id,
-          format: 'full' // Get full details including headers and payload
+            id: message.id,
+            format: 'full'
         });
 
         const emailData = emailResponse.data;
-        
-        // Extract email metadata for better context
-        const headers = emailData.payload?.headers || [];
-        const subject = headers.find(h => h.name === 'Subject')?.value || 'No Subject';
-        const from = headers.find(h => h.name === 'From')?.value || '';
-        const date = headers.find(h => h.name === 'Date')?.value || '';
-        const to = headers.find(h => h.name === 'To')?.value || '';
-        
-        console.log(`Processing email: "${subject}" from ${from}`);
-        
-        // Get the content of the email
-        const content = extractEmailContent(emailData);
-        if (!content) {
-            console.log(`No readable content found in email: ${subject}`);
-            processedCount++;
-            failedCount++;
-            continue;
-        }
-
-        // Add email metadata to provide context for the analysis
-        const emailWithMetadata = `
+          
+          // Extract headers
+          const headers = emailData.payload?.headers || [];
+          const subject = headers.find(h => h.name === 'Subject')?.value || 'No Subject';
+          const from = headers.find(h => h.name === 'From')?.value || 'Unknown Sender';
+          const date = headers.find(h => h.name === 'Date')?.value || new Date().toISOString();
+          
+          // Extract content
+          let content = '';
+          
+          if (emailData.snippet) {
+            content = emailData.snippet;
+          }
+          
+          if (emailData.payload?.body?.data) {
+            // Decode base64 body
+            content = Buffer.from(emailData.payload.body.data, 'base64').toString('utf8');
+          } else if (emailData.payload?.parts) {
+            // Try to find text part
+            for (const part of emailData.payload.parts) {
+              if (part.mimeType === 'text/plain' && part.body?.data) {
+                content = Buffer.from(part.body.data, 'base64').toString('utf8');
+                break;
+              } else if (part.mimeType === 'text/html' && part.body?.data) {
+                // Simple HTML to text conversion
+                const html = Buffer.from(part.body.data, 'base64').toString('utf8');
+                content = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+                break;
+              }
+            }
+          }
+          
+          // Format email for analysis
+          const emailWithMetadata = `
 From: ${from}
-To: ${to}
 Subject: ${subject}
 Date: ${date}
 
 ${content}
-        `;
-
-        // Analyze with Gemini
-        const analysis = await summarizeEmail(emailWithMetadata);
-        
-        // Check if the email contains subscription information
-        if (analysis && analysis.isSubscription) {
-          console.log(`Subscription detected in email "${subject}": ${analysis.serviceName}`);
+          `;
           
-          // Store suggestion in DB
+          // Analyze with Gemini
+          console.log(`Analyzing email: ${subject}`);
+          const analysis = await summarizeEmail(emailWithMetadata);
+          
+          // Save if it's a subscription
+          if (analysis.isSubscription) {
+            console.log(`Subscription detected: ${analysis.serviceName}`);
+            
+            // Save to database
+            const { error } = await supabase
+              .from('subscription_suggestions')
+              .insert({
+                user_id: userId,
+                scan_id: scanId,
+                email_id: message.id,
+                name: analysis.serviceName || 'Unknown Subscription',
+                price: analysis.amount || analysis.price || 0,
+                currency: analysis.currency || 'USD',
+                billing_frequency: analysis.billingFrequency || analysis.billingCycle || 'monthly',
+                confidence: analysis.confidence || 0.5,
+                next_billing_date: analysis.nextBillingDate || null,
+                email_subject: subject,
+                email_from: from,
+                email_date: date
+              });
+              
+            if (error) {
+              console.error(`Error saving suggestion for email ${message.id}:`, error);
+            } else {
+              suggestionCount++;
+            }
+          }
+          
+            processedCount++;
+        } catch (err) {
+          failedCount++;
+          console.error(`Error processing email ${message.id}:`, err instanceof Error ? err.message : err);
+        }
+      }
+    } else {
+      // Use mock implementation if no real data access
+      console.log('Using mock implementation - no real Gmail API access');
+      
+      // Simulate processing delay
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      // Generate mock data 
+      const mockEmails = 20;
+      totalEmails = mockEmails;
+      
+      // Update total emails count
+      await supabase
+        .from('email_scans')
+        .update({ total_emails: totalEmails })
+        .eq('id', scanId);
+      
+      // Mock subscription data
+      const mockSubscriptions = [
+        { service: 'Netflix', price: 15.99, currency: 'USD', frequency: 'monthly' },
+        { service: 'Spotify', price: 9.99, currency: 'USD', frequency: 'monthly' },
+        { service: 'Amazon Prime', price: 139, currency: 'USD', frequency: 'yearly' },
+        { service: 'New York Times', price: 4.99, currency: 'USD', frequency: 'monthly' }
+      ];
+      
+      // Simulate processing emails
+      for (let i = 0; i < mockEmails; i++) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Every 3rd email is a "subscription"
+        if (i % 3 === 0 && mockSubscriptions.length > 0) {
+          const sub = mockSubscriptions.shift();
+          if (sub) {
+            // Insert mock suggestion
           const { error } = await supabase
             .from('subscription_suggestions')
             .insert({
               user_id: userId,
-              email_id: messagePart.id,
-              name: analysis.serviceName || 'Unknown Subscription',
-              price: analysis.amount || analysis.price || 0,
-              currency: analysis.currency || 'USD',
-              billing_frequency: analysis.billingFrequency || analysis.billingCycle || 'monthly',
-              next_billing_date: analysis.nextBillingDate || null,
-              status: 'pending',
-              confidence: analysis.confidence || 0,
-              email_subject: subject,
-              email_from: from,
-              email_date: date
-            });
-            
+                scan_id: scanId,
+                email_id: `mock-${i}`,
+                name: sub.service,
+                price: sub.price,
+                currency: sub.currency,
+                billing_frequency: sub.frequency,
+                confidence: 0.8,
+                next_billing_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+                email_subject: `Your ${sub.service} ${sub.frequency} subscription`,
+                email_from: `billing@${sub.service.toLowerCase().replace(' ', '')}.com`,
+                email_date: new Date().toISOString()
+              });
+              
           if (error) {
-            console.error(`Error saving suggestion for email ${messagePart.id}:`, error);
+              console.error(`Error saving mock suggestion:`, error);
           } else {
             suggestionCount++;
+            }
           }
-        } else {
-          console.log(`No subscription detected in email: "${subject}"`);
         }
         
         processedCount++;
-      } catch (err: any) {
-        processedCount++; // Count as processed even if error occurred
-        failedCount++;
-        
-        console.error(`Error processing email ${messagePart.id}:`, err.message);
-        
-        // Handle specific errors e.g., rate limits, token expiry
-        if (err.code === 401 || err.code === 403) {
-            // Token might be invalid, stop processing or refresh
-            console.error('Auth error during email processing, stopping scan.');
-            await supabase.from('email_scans')
-              .update({ 
-                status: 'failed', 
-                error_message: 'Gmail token expired or invalid' 
-              })
-              .eq('user_id', userId);
-            break; // Stop the loop
-        }
-        
-        // Handle rate limiting
-        if (err.code === 429 || err.message?.includes('rate limit')) {
-          console.log('Rate limit hit, pausing for 10 seconds before continuing');
-          await new Promise(resolve => setTimeout(resolve, 10000));
-        } else {
-          // Add a small delay to avoid hitting rate limits too quickly after an error
-          await new Promise(resolve => setTimeout(resolve, 500));
-        }
       }
     }
-  } finally {
-    clearInterval(scanUpdateInterval); // Stop the interval timer
     
-    // Final update to scan status
+    // Mark scan as completed
     await supabase
       .from('email_scans')
-      .update({ 
-        processed_emails: processedCount, 
+      .update({
         status: 'completed',
+        processed_emails: processedCount,
         failed_emails: failedCount,
         detected_subscriptions: suggestionCount,
-        completed_at: new Date().toISOString()
+        total_emails: totalEmails,
+        completed_at: new Date().toISOString(),
+        message: suggestionCount > 0 ? `Found ${suggestionCount} subscriptions` : 'No subscriptions found'
       })
-      .eq('user_id', userId);
+      .eq('id', scanId);
       
-    console.log(`Finished processing emails for user ${userId}.`);
-    console.log(`Processed: ${processedCount}, Failed: ${failedCount}, Subscriptions found: ${suggestionCount}`);
+    console.log(`Scan completed: ${processedCount} emails processed, ${suggestionCount} subscriptions found`);
+  } catch (error) {
+    console.error('Error processing emails:', error);
+    
+    // Mark scan as failed
+    await supabase
+      .from('email_scans')
+      .update({
+        status: 'failed',
+        processed_emails: processedCount,
+        failed_emails: failedCount,
+        detected_subscriptions: suggestionCount,
+        total_emails: totalEmails,
+        completed_at: new Date().toISOString(),
+        error_message: error instanceof Error ? error.message : 'Unknown error'
+      })
+      .eq('id', scanId);
+  } finally {
+    clearInterval(scanUpdateInterval);
   }
 }
 
@@ -361,7 +540,7 @@ function extractEmailContent(message: gmail_v1.Schema$Message): string | null {
     
     return null;
   }
-
+  
   // Find HTML part if plain text is not available
   function findHtmlTextPart(parts: gmail_v1.Schema$MessagePart[] | undefined): string | null {
     if (!parts) return null;

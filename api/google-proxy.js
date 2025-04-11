@@ -15,7 +15,7 @@ export default async function handler(req, res) {
     return corsResult; // Return early if it was an OPTIONS request
   }
   
-  // Extract the authorization code, redirect URI, and state from query parameters
+  // Extract the authorization code and redirect URI from query parameters
   const { code, redirect } = req.query;
   
   if (!code) {
@@ -34,7 +34,7 @@ export default async function handler(req, res) {
       console.log('Error: Missing Google OAuth credentials in environment variables');
       return res.status(500).json({
         error: 'Server misconfiguration',
-        details: 'OAuth credentials are not configured'
+        details: 'OAuth credentials are not configured properly'
       });
     }
     
@@ -54,8 +54,26 @@ export default async function handler(req, res) {
     
     // Exchange code for tokens
     console.log('Exchanging code for tokens...');
-    const { tokens } = await oauth2Client.getToken(code);
-    console.log('Tokens received successfully');
+    let tokens;
+    try {
+      const tokenResponse = await oauth2Client.getToken(code);
+      tokens = tokenResponse.tokens;
+      console.log('Tokens received successfully');
+    } catch (tokenError) {
+      console.error('Token exchange error:', tokenError);
+      return res.status(400).json({
+        error: 'Token exchange failed',
+        details: tokenError.message
+      });
+    }
+    
+    if (!tokens || !tokens.access_token) {
+      console.error('No tokens received from Google OAuth');
+      return res.status(400).json({
+        error: 'Authentication failed',
+        details: 'No tokens received from Google OAuth'
+      });
+    }
     
     // Get user info
     oauth2Client.setCredentials(tokens);
@@ -79,13 +97,14 @@ export default async function handler(req, res) {
         email: userInfo.email,
         name: userInfo.name || '',
         picture: userInfo.picture || '',
+        gmail_token: tokens.access_token, // Include Gmail token for API access
         iat: Math.floor(Date.now() / 1000)
       },
       process.env.JWT_SECRET || 'your-jwt-secret-key',
       { expiresIn: '7d' }
     );
     
-    console.log('JWT token generated successfully');
+    console.log('JWT token generated successfully with Gmail access included');
     
     // Return JSON or redirect based on the request
     if (req.headers.accept?.includes('application/json')) {
@@ -114,7 +133,6 @@ export default async function handler(req, res) {
     return res.status(500).json({
       error: 'Authentication failed',
       message: error.message,
-      stack: process.env.NODE_ENV === 'production' ? undefined : error.stack,
       details: {
         code: error.code,
         statusCode: error.response?.status,
