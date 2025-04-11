@@ -9,6 +9,7 @@
     "dev": "NODE_ENV=development nodemon --exec ts-node src/index.ts",
     "test-dev": "nodemon src/test-server.js",
     "build": "tsc",
+    "build:email": "tsc src/services/gemini.ts src/services/subscription.ts --outDir dist/services --esModuleInterop --skipLibCheck --target ES2020 --module NodeNext --moduleResolution NodeNext",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
