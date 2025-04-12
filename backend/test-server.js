@@ -9,11 +9,12 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Enable CORS for all routes
+// Enable CORS for all routes with credential support
 app.use(cors({
-  origin: '*', // Allow all origins for testing
+  origin: ['http://localhost:5173', 'https://quits.cc', 'https://www.quits.cc'],
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+  credentials: true // Allow credentials
 }));
 
 // Parse JSON and URL-encoded bodies
@@ -178,20 +179,31 @@ app.get('/auth/google/callback', (req, res) => {
 // Also handle /api/auth/google/callback
 app.get('/api/auth/google/callback', (req, res) => {
   const code = req.query.code;
+  const redirect = req.query.redirect;
   
   if (!code) {
     return res.status(400).json({ error: 'No authorization code provided' });
   }
   
   console.log('=== Google callback received at /api path ===');
-  console.log('Code:', code);
+  console.log('Code:', code.substring(0, 10) + '...');
+  console.log('Redirect:', redirect);
+  
+  // Generate a mock token for testing
+  const token = 'test_' + Math.random().toString(36).substring(2, 15);
   
   // In a real app, you would exchange the code for tokens
-  // For this test, just return success
+  // For this test, just return a token
   res.json({
     success: true,
     message: 'Authorization code received successfully at /api path',
     code_prefix: code.substring(0, 10) + '...',
+    token: token,
+    user: {
+      id: 'test-user-id',
+      email: 'test@example.com',
+      name: 'Test User'
+    },
     timestamp: new Date().toISOString()
   });
 });
