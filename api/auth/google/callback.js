@@ -24,23 +24,26 @@ export default async function handler(req, res) {
     // Google OAuth configuration
     const { google } = await import('googleapis');
     
-    // IMPORTANT: Use exactly the same redirectUri in multiple places:
-    // 1. What's registered in Google Console
-    // 2. In the auth index.js file
-    // 3. Here in the callback
-    
     // Support multiple redirect URI formats depending on what's registered in Google Console
     // The most likely ones are:
     // - https://quits.cc/auth/callback (no www, shorter)
     // - https://www.quits.cc/auth/callback (with www)
-    // - https://quits.cc/api/auth/google/callback (API path)
+    // - https://api.quits.cc/api/auth/google/callback (API path)
     
-    // CRITICAL: This must match EXACTLY what's registered in Google Console
-    const redirectUri = 'https://quits.cc/auth/callback';
-    console.log('Using redirect URI:', redirectUri);
+    // Try multiple redirect URIs to increase the chance of success
+    // The one we use here MUST match one of the URIs registered in Google Console
+    const possibleRedirectUris = [
+      'https://www.quits.cc/auth/callback', // Primary (with www)
+      'https://quits.cc/auth/callback',     // Secondary (without www)
+      'https://api.quits.cc/api/auth/google/callback' // API path (fallback)
+    ];
     
-    // Create OAuth client
-    const oauth2Client = new google.auth.OAuth2(
+    // Start with the primary redirect URI
+    let redirectUri = possibleRedirectUris[0];
+    console.log('Using primary redirect URI:', redirectUri);
+    
+    // Create OAuth client with our primary URI
+    let oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET,
       redirectUri
@@ -48,8 +51,42 @@ export default async function handler(req, res) {
     
     // Exchange code for tokens
     console.log('Exchanging code for tokens...');
-    const { tokens } = await oauth2Client.getToken(code);
-    console.log('Tokens received successfully');
+    let tokens;
+    let exchangeSuccessful = false;
+    let lastError;
+    
+    // Try each redirect URI until one works
+    for (const uri of possibleRedirectUris) {
+      try {
+        // Update the redirect URI for this attempt
+        redirectUri = uri;
+        console.log(`Attempting token exchange with redirect URI: ${redirectUri}`);
+        
+        // Create a new OAuth client with this URI
+        oauth2Client = new google.auth.OAuth2(
+          process.env.GOOGLE_CLIENT_ID,
+          process.env.GOOGLE_CLIENT_SECRET,
+          redirectUri
+        );
+        
+        // Try to exchange the code for tokens
+        const response = await oauth2Client.getToken(code);
+        tokens = response.tokens;
+        console.log('Tokens received successfully with URI:', redirectUri);
+        exchangeSuccessful = true;
+        break; // Exit the loop if successful
+      } catch (error) {
+        lastError = error;
+        console.error(`Token exchange failed with URI ${redirectUri}:`, error.message);
+        // Continue to the next URI
+      }
+    }
+    
+    // If none of the URIs worked, throw the last error
+    if (!exchangeSuccessful) {
+      console.error('All redirect URIs failed. Last error:', lastError?.message);
+      throw lastError || new Error('Failed to exchange authorization code for tokens');
+    }
     
     // Get user info
     oauth2Client.setCredentials(tokens);
