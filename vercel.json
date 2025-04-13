@@ -11,8 +11,8 @@
       "destination": "/api/google-proxy.js"
     },
     {
-      "source": "/api/(.*)",
-      "destination": "https://api.quits.cc/api/$1"
+      "source": "/api/:path(.*)",
+      "destination": "https://api.quits.cc/api/:path"
     },
     {
       "source": "/auth/callback",
@@ -43,15 +43,15 @@
       "destination": "/index.html"
     },
     {
-      "source": "/(.*\\.(js|css|png|jpg|svg|ico|json))",
-      "destination": "/$1"
+      "source": "/:file(.*\\.(js|css|png|jpg|svg|ico|json))",
+      "destination": "/:file"
     },
     {
-      "source": "/assets/(.*)",
-      "destination": "/assets/$1"
+      "source": "/assets/:path(.*)",
+      "destination": "/assets/:path"
     },
     {
-      "source": "/(.*)",
+      "source": "/:path(.*)",
       "destination": "/index.html"
     }
   ],
