@@ -5,54 +5,54 @@
   "github": {
     "silent": true
   },
-  "routes": [
+  "rewrites": [
     {
-      "src": "/api/google-proxy",
-      "dest": "/api/google-proxy.js"
+      "source": "/api/google-proxy",
+      "destination": "/api/google-proxy.js"
     },
     {
-      "src": "/api/(.*)",
-      "dest": "https://api.quits.cc/api/$1"
+      "source": "/api/(.*)",
+      "destination": "https://api.quits.cc/api/$1"
     },
     {
-      "src": "/auth/callback",
-      "dest": "/index.html"
+      "source": "/auth/callback",
+      "destination": "/index.html"
     },
     {
-      "src": "/dashboard",
-      "dest": "/index.html"
+      "source": "/dashboard",
+      "destination": "/index.html"
     },
     {
-      "src": "/scan",
-      "dest": "/index.html"
+      "source": "/scan",
+      "destination": "/index.html"
     },
     {
-      "src": "/login",
-      "dest": "/index.html"
+      "source": "/login",
+      "destination": "/index.html"
     },
     {
-      "src": "/settings",
-      "dest": "/index.html"
+      "source": "/settings",
+      "destination": "/index.html"
     },
     {
-      "src": "/subscription/:id",
-      "dest": "/index.html"
+      "source": "/subscription/:id",
+      "destination": "/index.html"
     },
     {
-      "src": "/subscriptions",
-      "dest": "/index.html"
+      "source": "/subscriptions",
+      "destination": "/index.html"
     },
     {
-      "src": "/(.*\\.(js|css|png|jpg|svg|ico|json))",
-      "dest": "/$1"
+      "source": "/(.*\\.(js|css|png|jpg|svg|ico|json))",
+      "destination": "/$1"
     },
     {
-      "src": "/assets/(.*)",
-      "dest": "/assets/$1"
+      "source": "/assets/(.*)",
+      "destination": "/assets/$1"
     },
     {
-      "src": "/(.*)",
-      "dest": "/index.html"
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ],
   "env": {
