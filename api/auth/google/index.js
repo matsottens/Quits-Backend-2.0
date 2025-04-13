@@ -14,7 +14,7 @@ export default function handler(req, res) {
   try {
     // CRITICAL: This redirect URI must match EXACTLY what's registered in Google Console
     // and what's used in the callback handler
-    const redirectUri = 'https://quits.cc/auth/callback';
+    const redirectUri = 'https://www.quits.cc/auth/callback';
     console.log('Using redirect URI:', redirectUri);
     
     // Create OAuth client

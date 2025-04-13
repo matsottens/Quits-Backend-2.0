@@ -42,7 +42,7 @@ export default async function handler(req, res) {
     const { google } = await import('googleapis');
     
     // CRITICAL: This must match EXACTLY what's registered in Google Console
-    const redirectUri = 'https://quits.cc/auth/callback';
+    const redirectUri = 'https://www.quits.cc/auth/callback';
     console.log('Using redirect URI:', redirectUri);
     
     // Create OAuth client
