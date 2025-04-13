@@ -43,8 +43,32 @@
       "destination": "/index.html"
     },
     {
-      "source": "/:file*(.js|.css|.png|.jpg|.svg|.ico|.json)",
-      "destination": "/:file*"
+      "source": "/:path*.js",
+      "destination": "/:path*.js"
+    },
+    {
+      "source": "/:path*.css",
+      "destination": "/:path*.css"
+    },
+    {
+      "source": "/:path*.png",
+      "destination": "/:path*.png"
+    },
+    {
+      "source": "/:path*.jpg",
+      "destination": "/:path*.jpg"
+    },
+    {
+      "source": "/:path*.svg",
+      "destination": "/:path*.svg"
+    },
+    {
+      "source": "/:path*.ico",
+      "destination": "/:path*.ico"
+    },
+    {
+      "source": "/:path*.json",
+      "destination": "/:path*.json"
     },
     {
       "source": "/assets/:path*",
