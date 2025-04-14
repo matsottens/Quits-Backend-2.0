@@ -92,12 +92,6 @@
       "destination": "/index.html"
     }
   ],
-  "env": {
-    "VITE_API_URL": "https://api.quits.cc",
-    "VITE_SUPABASE_URL": "@supabase_url",
-    "VITE_SUPABASE_ANON_KEY": "@supabase_anon_key",
-    "VITE_GOOGLE_CLIENT_ID": "@google_client_id"
-  },
   "headers": [
     {
       "source": "/(.*)",
