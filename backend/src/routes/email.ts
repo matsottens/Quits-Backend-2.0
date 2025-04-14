@@ -1,244 +1,262 @@
-import express, { Request, Response, NextFunction } from 'express';
+import express, { Request, Response, NextFunction, RequestHandler } from 'express';
 import { google, gmail_v1 } from 'googleapis';
 import { oauth2Client, gmail } from '../config/google.js';
 import { summarizeEmail } from '../services/gemini.js';
 import { extractSubscriptionDetails } from '../services/subscription.js';
 import { authenticateUser, AuthRequest } from '../middleware/auth.js';
 import { supabase } from '../config/supabase.js';
+// import { genAI, generateContent } from '../services/gemini.js';
+// import { Content, Part } from '@google/generative-ai';
 
 const router = express.Router();
 
-// Apply authentication middleware to all routes except test-gemini
-router.use((req, res, next) => {
-  if (req.path === '/test-gemini') {
+// Middleware to check authentication for all email routes
+// except for specific unauthenticated ones
+router.use(((req, res, next) => {
+  // Skip authentication for specific routes
+  if (req.path === '/test' || req.path === '/test-gemini' || req.path === '/process') {
     return next();
   }
+  
+  // Otherwise use the authentication middleware
   return authenticateUser(req, res, next);
-});
+}) as RequestHandler);
 
 // Start email scanning
-router.post('/scan', authenticateUser, async (req: Request, res: Response) => {
-  try {
-    const userId = req.user?.id;
-    
-    if (!userId) {
-      return res.status(401).json({
-        error: 'Unauthorized: User ID is required'
-      });
-    }
-    
-    // Extract Gmail token from request headers
-    const gmailToken = req.headers['x-gmail-token'] as string;
-    const useRealData = req.body.useRealData === true;
-    
-    console.log(`Scan requested for user ${userId}`);
-    console.log(`Using real Gmail data: ${useRealData ? 'YES' : 'NO'}`);
-    console.log(`Gmail token available: ${gmailToken ? 'YES' : 'NO'}`);
-    
-    // Check if a scan is already in progress
-    const { data: existingScan, error: checkError } = await supabase
-      .from('email_scans')
-      .select('id, status')
-      .eq('user_id', userId)
-      .eq('status', 'in_progress')
-      .single();
-
-    if (checkError && checkError.code !== 'PGRST116') {
-      console.error('Error checking for existing scan:', checkError);
-      return res.status(500).json({
-        error: 'Failed to check existing scan status'
-      });
-    }
-    
-    if (existingScan) {
-      console.log(`Scan already in progress for user ${userId}`);
-      return res.json({
-        message: 'Scan already in progress',
-        scanId: existingScan.id
-      });
-    }
-    
-    // Get user's OAuth tokens from database
-    const { data: userTokens, error: tokenError } = await supabase
-      .from('user_tokens')
-      .select('access_token, refresh_token')
-      .eq('user_id', userId)
-      .eq('provider', 'google')
-      .single();
-    
-    if (tokenError) {
-      console.error('Error retrieving user tokens:', tokenError);
+router.post('/scan', 
+  authenticateUser as RequestHandler,
+  async (req: Request, res: Response) => {
+    try {
+      const userId = req.user?.id;
       
-      // If we don't have stored tokens but have a header token, use that
-      if (!gmailToken) {
-        return res.status(400).json({
-          error: 'No OAuth tokens found for user'
+      if (!userId) {
+        return res.status(401).json({
+          error: 'Unauthorized: User ID is required'
         });
       }
       
-      console.log('Using token from request header instead of database');
-    }
-    
-    // Choose the best token source - prefer header token if available
-    const accessToken = gmailToken || userTokens?.access_token;
-    
-    if (!accessToken && useRealData) {
-      return res.status(400).json({
-        error: 'No access token available for Gmail API'
-      });
-    }
-    
-    // Create scan record in database
-    const { data: scanRecord, error: scanError } = await supabase
-      .from('email_scans')
-      .insert({
-        user_id: userId,
-        status: 'in_progress',
-        started_at: new Date().toISOString(),
-        use_real_data: useRealData,
-        total_emails: 0,
-        processed_emails: 0
-      })
-      .select()
-      .single();
-
-    if (scanError) {
-      console.error('Error creating scan record:', scanError);
-      return res.status(500).json({
-        error: 'Failed to create scan record'
-      });
-    }
-    
-    // Start the background process to scan emails
-    processEmails(userId, scanRecord.id, accessToken, useRealData)
-      .catch(err => {
-        console.error('Background email processing error:', err);
-        supabase
-          .from('email_scans')
-          .update({
-            status: 'failed',
-            error_message: err.message,
-            completed_at: new Date().toISOString()
-          })
-          .eq('id', scanRecord.id)
-          .then(() => {
-            console.log(`Scan ${scanRecord.id} marked as failed due to error`);
-          });
-      });
-    
-    return res.json({
-      message: 'Email scanning started',
-      scanId: scanRecord.id
-    });
-    
-  } catch (error) {
-    console.error('Error starting email scan:', error);
-    return res.status(500).json({
-      error: 'Failed to start email scanning',
-      details: error instanceof Error ? error.message : 'Unknown error'
-    });
-  }
-});
-
-// Get scanning status
-router.get('/status', authenticateUser, async (req: AuthRequest, res) => {
-  try {
-    const { data: scan, error } = await supabase
-      .from('email_scans')
-      .select('*')
-      .eq('user_id', req.user?.id)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
-
-    if (error) {
-      return res.status(404).json({ error: 'No scan found' });
-    }
-
-    res.json({
-      status: scan.status,
-      progress: Math.round((scan.processed_emails / scan.total_emails) * 100),
-      total_emails: scan.total_emails,
-      processed_emails: scan.processed_emails
-    });
-  } catch (error) {
-    console.error('Error getting scan status:', error);
-    res.status(500).json({ error: 'Failed to get scan status' });
-  }
-});
-
-// Get subscription suggestions
-router.get('/suggestions', authenticateUser, async (req: AuthRequest, res) => {
-  try {
-    const { data: suggestions, error } = await supabase
-      .from('subscription_suggestions')
-      .select('*')
-      .eq('user_id', req.user?.id)
-      .eq('status', 'pending');
-
-    if (error) {
-      return res.status(500).json({ error: 'Failed to get suggestions' });
-    }
-
-    res.json({ suggestions });
-  } catch (error) {
-    console.error('Error getting suggestions:', error);
-    res.status(500).json({ error: 'Failed to get suggestions' });
-  }
-});
-
-// Confirm or reject a suggestion
-router.post('/suggestions/:id/confirm', authenticateUser, async (req: AuthRequest, res) => {
-  try {
-    const { id } = req.params;
-    const { confirmed } = req.body;
-
-    if (confirmed) {
-      // Get suggestion details
-      const { data: suggestion, error: suggestionError } = await supabase
-        .from('subscription_suggestions')
-        .select('*')
-        .eq('id', id)
+      // Extract Gmail token from request headers
+      const gmailToken = req.headers['x-gmail-token'] as string;
+      const useRealData = req.body.useRealData === true;
+      
+      console.log(`Scan requested for user ${userId}`);
+      console.log(`Using real Gmail data: ${useRealData ? 'YES' : 'NO'}`);
+      console.log(`Gmail token available: ${gmailToken ? 'YES' : 'NO'}`);
+      
+      // Check if a scan is already in progress
+      const { data: existingScan, error: checkError } = await supabase
+        .from('email_scans')
+        .select('id, status')
+        .eq('user_id', userId)
+        .eq('status', 'in_progress')
         .single();
 
-      if (suggestionError) {
-        return res.status(404).json({ error: 'Suggestion not found' });
-      }
-
-      // Add to subscriptions
-      const { error: subscriptionError } = await supabase
-        .from('subscriptions')
-        .insert({
-          user_id: req.user?.id,
-          name: suggestion.name,
-          price: suggestion.price,
-          currency: suggestion.currency,
-          billing_cycle: suggestion.billing_frequency,
-          next_billing_date: suggestion.next_billing_date,
-          email_id: suggestion.email_id
+      if (checkError && checkError.code !== 'PGRST116') {
+        console.error('Error checking for existing scan:', checkError);
+        return res.status(500).json({
+          error: 'Failed to check existing scan status'
         });
-
-      if (subscriptionError) {
-        return res.status(500).json({ error: 'Failed to create subscription' });
       }
+      
+      if (existingScan) {
+        console.log(`Scan already in progress for user ${userId}`);
+        return res.json({
+          message: 'Scan already in progress',
+          scanId: existingScan.id
+        });
+      }
+      
+      // Get user's OAuth tokens from database
+      const { data: userTokens, error: tokenError } = await supabase
+        .from('user_tokens')
+        .select('access_token, refresh_token')
+        .eq('user_id', userId)
+        .eq('provider', 'google')
+        .single();
+      
+      if (tokenError) {
+        console.error('Error retrieving user tokens:', tokenError);
+        
+        // If we don't have stored tokens but have a header token, use that
+        if (!gmailToken) {
+          return res.status(400).json({
+            error: 'No OAuth tokens found for user'
+          });
+        }
+        
+        console.log('Using token from request header instead of database');
+      }
+      
+      // Choose the best token source - prefer header token if available
+      const accessToken = gmailToken || userTokens?.access_token;
+      
+      if (!accessToken && useRealData) {
+        return res.status(400).json({
+          error: 'No access token available for Gmail API'
+        });
+      }
+      
+      // Create scan record in database
+      const { data: scanRecord, error: scanError } = await supabase
+        .from('email_scans')
+        .insert({
+          user_id: userId,
+          status: 'in_progress',
+          started_at: new Date().toISOString(),
+          use_real_data: useRealData,
+          total_emails: 0,
+          processed_emails: 0
+        })
+        .select()
+        .single();
+
+      if (scanError) {
+        console.error('Error creating scan record:', scanError);
+        return res.status(500).json({
+          error: 'Failed to create scan record'
+        });
+      }
+      
+      // Start the background process to scan emails
+      processEmails(userId, scanRecord.id, accessToken, useRealData)
+        .catch(err => {
+          console.error('Background email processing error:', err);
+          supabase
+            .from('email_scans')
+            .update({
+              status: 'failed',
+              error_message: err.message,
+              completed_at: new Date().toISOString()
+            })
+            .eq('id', scanRecord.id)
+            .then(() => {
+              console.log(`Scan ${scanRecord.id} marked as failed due to error`);
+            });
+        });
+      
+      return res.json({
+        message: 'Email scanning started',
+        scanId: scanRecord.id
+      });
+      
+    } catch (error) {
+      console.error('Error starting email scan:', error);
+      return res.status(500).json({
+        error: 'Failed to start email scanning',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
     }
-
-    // Update suggestion status
-    const { error: updateError } = await supabase
-      .from('subscription_suggestions')
-      .update({ status: confirmed ? 'accepted' : 'rejected' })
-      .eq('id', id);
-
-    if (updateError) {
-      return res.status(500).json({ error: 'Failed to update suggestion' });
-    }
-
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Error confirming suggestion:', error);
-    res.status(500).json({ error: 'Failed to confirm suggestion' });
   }
-});
+);
+
+// Get scanning status
+router.get('/status', 
+  authenticateUser as RequestHandler,
+  async (req: AuthRequest, res) => {
+    try {
+      const { data: scan, error } = await supabase
+        .from('email_scans')
+        .select('*')
+        .eq('user_id', req.user?.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (error) {
+        return res.status(404).json({ error: 'No scan found' });
+      }
+
+      res.json({
+        status: scan.status,
+        progress: Math.round((scan.processed_emails / scan.total_emails) * 100),
+        total_emails: scan.total_emails,
+        processed_emails: scan.processed_emails
+      });
+    } catch (error) {
+      console.error('Error getting scan status:', error);
+      res.status(500).json({ error: 'Failed to get scan status' });
+    }
+  }
+);
+
+// Get subscription suggestions
+router.get('/suggestions', 
+  authenticateUser as RequestHandler,
+  async (req: AuthRequest, res) => {
+    try {
+      const { data: suggestions, error } = await supabase
+        .from('subscription_suggestions')
+        .select('*')
+        .eq('user_id', req.user?.id)
+        .eq('status', 'pending');
+
+      if (error) {
+        return res.status(500).json({ error: 'Failed to get suggestions' });
+      }
+
+      res.json({ suggestions });
+    } catch (error) {
+      console.error('Error getting suggestions:', error);
+      res.status(500).json({ error: 'Failed to get suggestions' });
+    }
+  }
+);
+
+// Confirm or reject a suggestion
+router.post('/suggestions/:id/confirm', 
+  authenticateUser as RequestHandler,
+  async (req: AuthRequest, res) => {
+    try {
+      const { id } = req.params;
+      const { confirmed } = req.body;
+
+      if (confirmed) {
+        // Get suggestion details
+        const { data: suggestion, error: suggestionError } = await supabase
+          .from('subscription_suggestions')
+          .select('*')
+          .eq('id', id)
+          .single();
+
+        if (suggestionError) {
+          return res.status(404).json({ error: 'Suggestion not found' });
+        }
+
+        // Add to subscriptions
+        const { error: subscriptionError } = await supabase
+          .from('subscriptions')
+          .insert({
+            user_id: req.user?.id,
+            name: suggestion.name,
+            price: suggestion.price,
+            currency: suggestion.currency,
+            billing_cycle: suggestion.billing_frequency,
+            next_billing_date: suggestion.next_billing_date,
+            email_id: suggestion.email_id
+          });
+
+        if (subscriptionError) {
+          return res.status(500).json({ error: 'Failed to create subscription' });
+        }
+      }
+
+      // Update suggestion status
+      const { error: updateError } = await supabase
+        .from('subscription_suggestions')
+        .update({ status: confirmed ? 'accepted' : 'rejected' })
+        .eq('id', id);
+
+      if (updateError) {
+        return res.status(500).json({ error: 'Failed to update suggestion' });
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error confirming suggestion:', error);
+      res.status(500).json({ error: 'Failed to confirm suggestion' });
+    }
+  }
+);
 
 // Helper function to process emails in the background
 async function processEmails(userId: string, scanId: string, accessToken: string, useRealData: boolean) {
@@ -603,7 +621,7 @@ function extractEmailContent(message: gmail_v1.Schema$Message): string | null {
 }
 
 // Test route for Gemini summarization (no auth needed for this specific test route)
-router.post('/test-gemini', async (req: Request, res: Response) => {
+router.post('/test-gemini', (async (req: Request, res: Response) => {
   try {
     const { emailContent } = req.body;
     if (!emailContent) {
@@ -646,12 +664,12 @@ router.post('/test-gemini', async (req: Request, res: Response) => {
       stack: process.env.NODE_ENV !== 'production' ? error.stack : undefined
     });
   }
-});
+}) as RequestHandler);
 
 /**
  * Process an email and extract subscription details
  */
-router.post('/process', async (req: Request, res: Response) => {
+router.post('/process', (async (req: Request, res: Response) => {
   try {
     const { emailContent } = req.body;
     
@@ -672,7 +690,7 @@ router.post('/process', async (req: Request, res: Response) => {
       details: error instanceof Error ? error.message : String(error)
     });
   }
-});
+}) as RequestHandler);
 
 // Test API connection (no auth required)
 router.get('/test-connection', (req: Request, res: Response) => {

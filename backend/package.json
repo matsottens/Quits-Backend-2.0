@@ -5,10 +5,10 @@
   "main": "dist/index.js",
   "type": "module",
   "scripts": {
+    "dev": "nodemon",
     "start": "node dist/index.js",
-    "dev": "NODE_ENV=development nodemon --exec ts-node src/index.ts",
     "test-dev": "nodemon src/test-server.js",
-    "build": "tsc && cp package.json dist/",
+    "build": "ttsc --skipLibCheck && cp package.json dist/",
     "build:email": "tsc src/services/gemini.ts src/services/subscription.ts --outDir dist/services --esModuleInterop --skipLibCheck --target ES2020 --module NodeNext --moduleResolution NodeNext",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -35,6 +35,8 @@
     "@types/node": "^22.14.0",
     "nodemon": "^3.1.9",
     "ts-node": "^10.9.2",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "ttypescript": "^1.5.15",
+    "typescript-transform-paths": "^3.4.6"
   }
 }

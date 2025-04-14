@@ -1,22 +1,21 @@
-import express from 'express';
+import express, { Request, Response, NextFunction, RequestHandler } from 'express';
 import { google } from 'googleapis';
 import { oauth2Client, SCOPES } from '../config/google.js';
 import { supabase } from '../config/supabase.js';
 import { authenticateUser, AuthRequest } from '../middleware/auth.js';
-import { Request, Response } from 'express';
 import { generateToken } from '../utils/jwt.js';
 import { upsertUser } from '../services/database.js';
 
 const router = express.Router();
 
 // Simple test endpoint to verify that routes are reachable
-router.get('/test', (req: Request, res: Response) => {
+router.get('/test', ((req: Request, res: Response) => {
   res.json({
     message: 'Auth routes are working properly!',
     origin: req.headers.origin,
     time: new Date().toISOString()
   });
-});
+}) as RequestHandler);
 
 // Add a direct route for testing direct2 endpoint
 router.post('/google/callback/direct2-test', (req: Request, res: Response) => {
@@ -86,7 +85,7 @@ router.get('/google', (req: Request, res: Response) => {
 });
 
 // Handle Google OAuth callback - explicitly catch all possible URL patterns
-router.get('*/google/callback', async (req: Request, res: Response) => {
+router.get('*/google/callback', (async (req: Request, res: Response) => {
   try {
     console.log('Attempting to handle callback with path:', req.path);
     const { code, error: oauthError, callback, redirect } = req.query;
@@ -101,9 +100,9 @@ router.get('*/google/callback', async (req: Request, res: Response) => {
     });
 
     // Set CORS headers for all responses
-    const origin = req.headers.origin || '';
-    if (origin && (origin.includes('quits.cc') || origin.includes('localhost'))) {
-      res.header('Access-Control-Allow-Origin', origin);
+    const requestOrigin = req.headers.origin || '';
+    if (requestOrigin && (requestOrigin.includes('quits.cc') || requestOrigin.includes('localhost'))) {
+      res.header('Access-Control-Allow-Origin', requestOrigin);
       res.header('Access-Control-Allow-Credentials', 'true');
       res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
       res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control');
@@ -274,10 +273,10 @@ router.get('*/google/callback', async (req: Request, res: Response) => {
     }
     return res.redirect(`${loginUrl}?error=${errorCode}`);
   }
-});
+}) as RequestHandler);
 
 // JSONP endpoint for Google OAuth callback (used as a fallback for CORS issues)
-router.get('/google/callback/jsonp', async (req: Request, res: Response) => {
+router.get('/google/callback/jsonp', (async (req: Request, res: Response) => {
   try {
     const { code, callback } = req.query;
     const origin = req.headers.origin || '';
@@ -375,10 +374,10 @@ router.get('/google/callback/jsonp', async (req: Request, res: Response) => {
     console.error('JSONP route error:', error);
     return res.status(500).json({ error: 'Server error' });
   }
-});
+}) as RequestHandler);
 
 // Direct form-based callback endpoint with redirect back (CSP-friendly)
-router.post('/google/callback/direct2', async (req: Request, res: Response) => {
+router.post('/google/callback/direct2', (async (req: Request, res: Response) => {
   try {
     const origin = req.headers.origin || '';
     console.log('Direct2 route hit with origin:', origin);
@@ -420,74 +419,82 @@ router.post('/google/callback/direct2', async (req: Request, res: Response) => {
       message: error.message
     });
   }
-});
+}) as RequestHandler);
 
 // Create another version of the direct2 route to try as a fallback
-router.post('/google/callback/direct-alt', express.urlencoded({ extended: true }), async (req: Request, res: Response) => {
-  try {
-    const origin = req.headers.origin;
-    console.log('Direct-alt route hit with origin:', origin);
-    
-    // Ensure CORS headers are set (redundant with global middleware, but belt-and-suspenders approach)
-    if (origin && (origin.includes('quits.cc') || origin.includes('localhost'))) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control');
-      res.setHeader('Access-Control-Allow-Credentials', 'true');
+router.post('/google/callback/direct-alt', 
+  express.urlencoded({ extended: true }),
+  (async (req: Request, res: Response) => {
+    try {
+      const origin = req.headers.origin;
+      console.log('Direct-alt route hit with origin:', origin);
+      
+      // Ensure CORS headers are set (redundant with global middleware, but belt-and-suspenders approach)
+      if (origin && (origin.includes('quits.cc') || origin.includes('localhost'))) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control');
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+      }
+      
+      const { code, origin: bodyOrigin, requestId, redirectUri: providedRedirectUri } = req.body;
+      
+      console.log('Direct-alt fallback route hit with body:', req.body);
+      
+      // Simple success response - no processing for now
+      return res.json({
+        success: true,
+        message: 'Direct-alt fallback route is working!',
+        token: 'sample-token-for-testing',
+        user: {
+          id: 'sample-id',
+          email: 'sample@example.com',
+          name: 'Sample User',
+          picture: 'https://example.com/sample.jpg'
+        },
+        time: new Date().toISOString()
+      });
+    } catch (error: any) {
+      console.error('Direct-alt fallback route error:', error);
+      return res.status(500).json({ error: 'Server error during authentication' });
     }
-    
-    const { code, origin: bodyOrigin, requestId, redirectUri: providedRedirectUri } = req.body;
-    
-    console.log('Direct-alt fallback route hit with body:', req.body);
-    
-    // Simple success response - no processing for now
-    return res.json({
-      success: true,
-      message: 'Direct-alt fallback route is working!',
-      token: 'sample-token-for-testing',
-      user: {
-        id: 'sample-id',
-        email: 'sample@example.com',
-        name: 'Sample User',
-        picture: 'https://example.com/sample.jpg'
-      },
-      time: new Date().toISOString()
-    });
-  } catch (error: any) {
-    console.error('Direct-alt fallback route error:', error);
-    return res.status(500).json({ error: 'Server error during authentication' });
-  }
-});
+  }) as RequestHandler
+);
 
 // Get user profile (Protected Route)
-router.get('/me', authenticateUser, async (req: AuthRequest, res: Response) => {
-  try {
-    const userId = req.user?.id;
-    if (!userId) {
-      return res.status(401).json({ error: 'User not authenticated' });
+router.get('/me', 
+  authenticateUser as RequestHandler,
+  (async (req: AuthRequest, res: Response) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ error: 'User not authenticated' });
+      }
+
+      // Fetch user details from your database (e.g., users table)
+      const { data: userProfile, error } = await supabase
+        .from('users') // Use 'users' table based on database.ts
+        .select('id, email, name, avatar_url')
+        .eq('id', userId)
+        .single();
+
+      if (error || !userProfile) {
+          console.error('Error fetching user profile:', error);
+          return res.status(404).json({ error: 'User profile not found' });
+      }
+
+      res.json(userProfile);
+    } catch (error) {
+      console.error('Error fetching /me:', error);
+      res.status(500).json({ error: 'Failed to fetch user profile' });
     }
-
-    // Fetch user details from your database (e.g., users table)
-    const { data: userProfile, error } = await supabase
-      .from('users') // Use 'users' table based on database.ts
-      .select('id, email, name, avatar_url')
-      .eq('id', userId)
-      .single();
-
-    if (error || !userProfile) {
-        console.error('Error fetching user profile:', error);
-        return res.status(404).json({ error: 'User profile not found' });
-    }
-
-    res.json(userProfile);
-  } catch (error) {
-    console.error('Error fetching /me:', error);
-    res.status(500).json({ error: 'Failed to fetch user profile' });
-  }
-});
+  }) as RequestHandler
+);
 
 // Example Logout (optional - depends on session management)
-router.post('/logout', authenticateUser, async (req: AuthRequest, res: Response) => {
+router.post('/logout',
+  authenticateUser as RequestHandler,
+  (async (req: AuthRequest, res: Response) => {
     try {
         const userId = req.user?.id;
         if (!userId) {
@@ -512,10 +519,11 @@ router.post('/logout', authenticateUser, async (req: AuthRequest, res: Response)
         console.error('Logout error:', error);
         res.status(500).json({ error: 'Logout failed' });
     }
-});
+  }) as RequestHandler
+);
 
 // Handle OPTIONS requests for the direct2 endpoint
-router.options('/google/callback/direct2', (req: Request, res: Response) => {
+router.options('/google/callback/direct2', ((req: Request, res: Response) => {
   const origin = req.headers.origin || '';
   console.log('OPTIONS request for direct2 with origin:', origin);
   
@@ -536,10 +544,10 @@ router.options('/google/callback/direct2', (req: Request, res: Response) => {
   
   // Always respond with 200 OK for OPTIONS
   return res.status(200).end();
-});
+}) as RequestHandler);
 
 // Handle OPTIONS requests for the direct-alt endpoint
-router.options('/google/callback/direct-alt', (req: Request, res: Response) => {
+router.options('/google/callback/direct-alt', ((req: Request, res: Response) => {
   const origin = req.headers.origin;
   console.log('OPTIONS request for direct-alt with origin:', origin);
   
@@ -552,10 +560,10 @@ router.options('/google/callback/direct-alt', (req: Request, res: Response) => {
   }
   
   return res.status(200).end();
-});
+}) as RequestHandler);
 
 // Handle OPTIONS requests for the direct2-test endpoint
-router.options('/google/callback/direct2-test', (req: Request, res: Response) => {
+router.options('/google/callback/direct2-test', ((req: Request, res: Response) => {
   const origin = req.headers.origin;
   console.log('OPTIONS request for direct2-test with origin:', origin);
   
@@ -568,7 +576,7 @@ router.options('/google/callback/direct2-test', (req: Request, res: Response) =>
   }
   
   return res.status(200).end();
-});
+}) as RequestHandler);
 
 // Catch-all route to help with debugging
 router.all('*', (req: Request, res: Response) => {
