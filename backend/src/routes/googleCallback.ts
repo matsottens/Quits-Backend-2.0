@@ -4,6 +4,25 @@ import { supabase } from '../config/supabase.js';
 import { generateToken } from '../utils/jwt.js';
 import { upsertUser } from '../services/database.js';
 
+// Handle OPTIONS preflight requests for the Google callback
+export const handleGoogleCallbackOptions = (req: Request, res: Response) => {
+  console.log('OPTIONS request for Google callback with origin:', req.headers.origin);
+  
+  const origin = req.headers.origin || '';
+  if (origin && (origin.includes('quits.cc') || origin.includes('localhost'))) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control');
+    res.header('Access-Control-Max-Age', '86400'); // 24 hours
+    console.log('CORS headers set for OPTIONS request with origin:', origin);
+  } else {
+    console.log('No CORS headers set for OPTIONS - unknown origin:', origin);
+  }
+  
+  return res.status(204).end();
+};
+
 // Handle Google OAuth callback
 export const handleGoogleCallback = async (req: Request, res: Response) => {
   console.log('===========================================================');

@@ -23,6 +23,27 @@ const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
 
 console.log('CLIENT_URL from env:', process.env.CLIENT_URL);
 
+// Add security middleware with customized CSP
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://www.quits.cc", "https://quits.cc"],
+      connectSrc: ["'self'", "https://*.quits.cc", "https://quits.cc", "https://www.quits.cc", "https://api.quits.cc"],
+      frameSrc: ["'self'", "https://*.quits.cc"],
+      imgSrc: ["'self'", "data:", "https://*.quits.cc", "https://*.googleusercontent.com"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      fontSrc: ["'self'", "data:"],
+      objectSrc: ["'none'"],
+      upgradeInsecureRequests: []
+    }
+  },
+  // Other helmet options
+  crossOriginEmbedderPolicy: false,
+  crossOriginOpenerPolicy: false,
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
+
 // Configure CORS with the cors package
 app.use(cors({
   origin: (origin, callback) => {
@@ -46,40 +67,27 @@ app.use(cors({
   allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'Cache-Control']
 }));
 
-// Debug middleware to log request headers and CORS headers
-const debugMiddleware: RequestHandler = (req, res, next) => {
-  console.log('Request details:', {
-    method: req.method,
-    url: req.url,
-    path: req.path,
-    origin: req.headers.origin,
-    host: req.headers.host,
-  });
+// Add a global CORS middleware that will set headers for all routes
+app.use((req, res, next) => {
+  const origin = req.headers.origin || '';
   
-  // For OPTIONS requests (CORS preflight), ensure we set the right headers
-  if (req.method === 'OPTIONS') {
-    const origin = req.headers.origin;
-    if (origin && (origin.includes('quits.cc') || origin.includes('localhost'))) {
-      res.header('Access-Control-Allow-Origin', origin);
-      res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-      res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control');
-      res.header('Access-Control-Allow-Credentials', 'true');
-      res.header('Access-Control-Max-Age', '86400'); // 24 hours
-      res.status(204).end();
-      return;
+  // For all routes, set proper CORS headers to ensure Cache-Control works
+  if (origin && (origin.includes('quits.cc') || origin.includes('localhost'))) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control');
+    
+    // For OPTIONS requests, send 200 OK immediately
+    if (req.method === 'OPTIONS') {
+      return res.status(200).end();
     }
   }
   
   next();
-};
-
-app.use(debugMiddleware);
+});
 
 // Middleware
-app.use(helmet({
-  contentSecurityPolicy: false, // Disable CSP temporarily for debugging
-}));
-
 app.use(express.json());
 app.use(express.urlencoded({ extended: true })); // Important for parsing application/x-www-form-urlencoded
 
@@ -116,30 +124,19 @@ app.get('/test-oauth', (req: Request, res: Response) => {
   res.sendFile(path.join(__dirname, 'public', 'test-oauth.html'));
 });
 
-// Special direct routes to handle Google callback - register all possible patterns
-app.get('/api/auth/google/callback', (req: Request, res: Response) => {
-  handleGoogleCallback(req, res);
-});
-
-app.get('/auth/google/callback', (req: Request, res: Response) => {
-  handleGoogleCallback(req, res);
-});
-
-// Also handle root-level callback (no /api prefix, no /auth prefix)
-app.get('/google/callback', (req: Request, res: Response) => {
-  handleGoogleCallback(req, res);
-});
-
-// Catch-all pattern to handle any path with google/callback at the end
-app.get('*/google/callback', (req: Request, res: Response) => {
-  console.log('Wildcard route matched for Google callback:', req.path);
-  handleGoogleCallback(req, res);
-});
-
-// Normal routes
+// Regular route handlers first
 app.use('/api/auth', authRoutes);
 app.use('/api/email', emailRoutes);
-app.use('/api/subscription', subscriptionRoutes);
+app.use('/api/subscriptions', subscriptionRoutes);
+
+// Direct Google callback handlers (not using Router)
+const googleCallbackPath = '/api/auth/google/callback';
+app.options(googleCallbackPath, function(req, res) {
+  return handleGoogleCallbackOptions(req, res);
+});
+app.get(googleCallbackPath, function(req, res) {
+  return handleGoogleCallback(req, res);
+});
 
 // CORS test endpoint at the root level
 app.get('/cors-test', (req: Request, res: Response) => {

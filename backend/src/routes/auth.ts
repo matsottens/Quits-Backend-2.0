@@ -522,6 +522,31 @@ router.post('/logout',
   }) as RequestHandler
 );
 
+// Handle OPTIONS requests for the Google callback specifically
+router.options('/google/callback', ((req: Request, res: Response) => {
+  const origin = req.headers.origin || '';
+  console.log('OPTIONS request for /google/callback with origin:', origin);
+  
+  // Always allow quits.cc origins
+  if (origin.includes('quits.cc') || origin.includes('localhost')) {
+    console.log('Setting CORS headers for OPTIONS request with origin:', origin);
+    // Set CORS headers very explicitly
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control');
+    res.header('Access-Control-Max-Age', '86400'); // 24 hours
+  } else {
+    console.warn('OPTIONS request from unknown origin:', origin);
+  }
+  
+  // Log all headers
+  console.log('Response headers for OPTIONS:', res.getHeaders());
+  
+  // Always respond with 200 OK for OPTIONS
+  return res.status(200).end();
+}) as RequestHandler);
+
 // Handle OPTIONS requests for the direct2 endpoint
 router.options('/google/callback/direct2', ((req: Request, res: Response) => {
   const origin = req.headers.origin || '';
