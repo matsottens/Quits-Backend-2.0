@@ -106,7 +106,7 @@ router.get('*/google/callback', async (req: Request, res: Response) => {
       res.header('Access-Control-Allow-Origin', origin);
       res.header('Access-Control-Allow-Credentials', 'true');
       res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-      res.header('Access-Control-Allow-Headers', 'Content-Type, Accept, Authorization');
+      res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control');
     }
 
     // Handle JSONP callback if provided (for alternative auth methods)
@@ -297,7 +297,7 @@ router.get('/google/callback/jsonp', async (req: Request, res: Response) => {
     // Set CORS headers explicitly - allow both www and non-www
     res.header('Access-Control-Allow-Origin', origin.includes('quits.cc') ? origin : '*'); 
     res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control');
     res.header('Access-Control-Allow-Credentials', 'true');
     res.header('Content-Type', 'application/javascript; charset=utf-8');
     
@@ -390,7 +390,7 @@ router.post('/google/callback/direct2', async (req: Request, res: Response) => {
       res.header('Access-Control-Allow-Origin', origin);
       res.header('Access-Control-Allow-Credentials', 'true');
       res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-      res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+      res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control');
     } else {
       console.warn('Request from unknown origin:', origin);
     }
@@ -432,7 +432,7 @@ router.post('/google/callback/direct-alt', express.urlencoded({ extended: true }
     if (origin && (origin.includes('quits.cc') || origin.includes('localhost'))) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+      res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control');
       res.setHeader('Access-Control-Allow-Credentials', 'true');
     }
     
@@ -526,7 +526,7 @@ router.options('/google/callback/direct2', (req: Request, res: Response) => {
     res.header('Access-Control-Allow-Origin', origin);
     res.header('Access-Control-Allow-Credentials', 'true');
     res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control');
   } else {
     console.warn('OPTIONS request from unknown origin:', origin);
   }
@@ -547,7 +547,7 @@ router.options('/google/callback/direct-alt', (req: Request, res: Response) => {
   if (origin && (origin.includes('quits.cc') || origin.includes('localhost'))) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control');
     res.setHeader('Access-Control-Allow-Credentials', 'true');
   }
   
@@ -563,7 +563,7 @@ router.options('/google/callback/direct2-test', (req: Request, res: Response) =>
   if (origin && (origin.includes('quits.cc') || origin.includes('localhost'))) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control');
     res.setHeader('Access-Control-Allow-Credentials', 'true');
   }
   

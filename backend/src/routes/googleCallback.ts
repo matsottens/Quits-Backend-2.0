@@ -34,7 +34,7 @@ export const handleGoogleCallback = async (req: Request, res: Response) => {
       res.header('Access-Control-Allow-Origin', corsOrigin);
       res.header('Access-Control-Allow-Credentials', 'true');
       res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-      res.header('Access-Control-Allow-Headers', 'Content-Type, Accept, Authorization');
+      res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control');
       console.log('CORS headers set for origin:', corsOrigin);
     } else {
       console.log('No CORS headers set - unknown origin:', corsOrigin);
