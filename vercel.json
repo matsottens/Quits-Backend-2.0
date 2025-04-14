@@ -20,16 +20,16 @@
   ],
   "rewrites": [
     {
+      "source": "/auth/callback",
+      "destination": "/index.html"
+    },
+    {
       "source": "/api/google-proxy",
       "destination": "/api/google-proxy.js"
     },
     {
       "source": "/api/:path*",
       "destination": "https://api.quits.cc/api/:path*"
-    },
-    {
-      "source": "/auth/callback",
-      "destination": "/index.html"
     },
     {
       "source": "/dashboard",
