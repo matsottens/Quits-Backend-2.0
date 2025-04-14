@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { Request, Response, NextFunction, RequestHandler } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
@@ -7,7 +7,6 @@ import { fileURLToPath } from 'url';
 import authRoutes from './routes/auth.js';
 import emailRoutes from './routes/email.js';
 import subscriptionRoutes from './routes/subscription.js';
-import { Request, Response } from 'express';
 import { handleGoogleCallback } from './routes/googleCallback.js';
 import { handleGoogleProxy } from './routes/proxy.js';
 
@@ -44,11 +43,11 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization']
+  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'Cache-Control']
 }));
 
 // Debug middleware to log request headers and CORS headers
-app.use((req, res, next) => {
+const debugMiddleware: RequestHandler = (req, res, next) => {
   console.log('Request details:', {
     method: req.method,
     url: req.url,
@@ -63,15 +62,18 @@ app.use((req, res, next) => {
     if (origin && (origin.includes('quits.cc') || origin.includes('localhost'))) {
       res.header('Access-Control-Allow-Origin', origin);
       res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-      res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+      res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control');
       res.header('Access-Control-Allow-Credentials', 'true');
       res.header('Access-Control-Max-Age', '86400'); // 24 hours
-      return res.status(204).end();
+      res.status(204).end();
+      return;
     }
   }
   
   next();
-});
+};
+
+app.use(debugMiddleware);
 
 // Middleware
 app.use(helmet({
@@ -86,15 +88,17 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // Emergency Google OAuth proxy routes - these MUST work
 // Add extensive logging to help debug any issues
-app.get('/api/google-proxy', (req: Request, res: Response) => {
-  console.log('[INDEX] /api/google-proxy endpoint hit');
-  return handleGoogleProxy(req, res);
-});
+const googleProxyHandler: RequestHandler = async (req, res, next) => {
+  try {
+    console.log('[INDEX] /api/google-proxy endpoint hit');
+    await handleGoogleProxy(req, res);
+  } catch (error) {
+    next(error);
+  }
+};
 
-app.post('/api/google-proxy', (req: Request, res: Response) => {
-  console.log('[INDEX] /api/google-proxy POST endpoint hit');
-  return handleGoogleProxy(req, res);
-});
+app.get('/api/google-proxy', googleProxyHandler);
+app.post('/api/google-proxy', googleProxyHandler);
 
 // Add a simple test endpoint to verify the server is responding
 app.get('/api/test', (req: Request, res: Response) => {
@@ -108,7 +112,7 @@ app.get('/api/test', (req: Request, res: Response) => {
 });
 
 // Serve the test OAuth page
-app.get('/test-oauth', (req, res) => {
+app.get('/test-oauth', (req: Request, res: Response) => {
   res.sendFile(path.join(__dirname, 'public', 'test-oauth.html'));
 });
 
@@ -138,7 +142,7 @@ app.use('/api/email', emailRoutes);
 app.use('/api/subscription', subscriptionRoutes);
 
 // CORS test endpoint at the root level
-app.get('/cors-test', (req, res) => {
+app.get('/cors-test', (req: Request, res: Response) => {
   const origin = req.headers.origin;
   console.log('CORS Test Request:', {
     origin,
@@ -154,7 +158,7 @@ app.get('/cors-test', (req, res) => {
 });
 
 // Health check endpoint
-app.get('/api/health', (req, res) => {
+app.get('/api/health', (req: Request, res: Response) => {
   res.status(200).json({ status: 'ok', message: 'Server is running' });
 });
 
