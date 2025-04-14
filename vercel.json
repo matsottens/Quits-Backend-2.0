@@ -1,7 +1,7 @@
 {
   "version": 2,
-  "buildCommand": "npm install && npm run build",
-  "outputDirectory": "dist",
+  "buildCommand": "cd backend && mkdir -p dist && cp -r src/* dist/ && cp package.json dist/",
+  "outputDirectory": "backend/dist",
   "headers": [
     {
       "source": "/(.*)",
