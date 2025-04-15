@@ -105,6 +105,25 @@ const googleProxyHandler: RequestHandler = async (req, res, next) => {
   }
 };
 
+// Add explicit OPTIONS handler for the proxy endpoint
+app.options('/api/google-proxy', (req, res) => {
+  console.log('[INDEX] OPTIONS for /api/google-proxy');
+  const origin = req.headers.origin || '';
+  
+  if (origin && (origin.includes('quits.cc') || origin.includes('localhost'))) {
+    // Set proper CORS headers for preflight request
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control');
+    res.header('Access-Control-Max-Age', '86400'); // 24 hours
+    console.log('[INDEX] CORS headers set for OPTIONS /api/google-proxy');
+  }
+  
+  // Send 204 No Content for OPTIONS requests
+  return res.status(204).end();
+});
+
 app.get('/api/google-proxy', googleProxyHandler);
 app.post('/api/google-proxy', googleProxyHandler);
 
