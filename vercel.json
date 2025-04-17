@@ -1,18 +1,14 @@
 {
   "version": 2,
-  "buildCommand": "cd backend && npm install && npm run build",
-  "outputDirectory": "backend/dist",
-  "installCommand": "cd backend && npm install",
-  "functions": {
-    "backend/dist/**/*.js": {
-      "runtime": "@vercel/node@3.0.0",
-      "memory": 1024
-    }
-  },
+  "buildCommand": "npm install && npm run build",
+  "installCommand": "npm install",
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/api/index.js" }
+  ],
   "routes": [
     {
       "src": "/(.*)",
-      "dest": "backend/dist/index.js",
+      "dest": "/api/index.js",
       "headers": {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",

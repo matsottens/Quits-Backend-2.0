@@ -2,7 +2,7 @@
   "name": "backend",
   "version": "1.0.0",
   "description": "Backend for subscription tracker application",
-  "main": "dist/index.js",
+  "main": "dist/app.js",
   "type": "module",
   "scripts": {
     "dev": "nodemon",

@@ -1,23 +1,8 @@
-import { setCorsHeaders } from './cors-middleware.js';
+// Import the Express app from the backend
+import app from '../backend/dist/app.js';
 
-export default function handler(req, res) {
-  // Handle CORS with shared middleware
-  const corsResult = setCorsHeaders(req, res);
-  if (corsResult) return corsResult; // Return early if it was an OPTIONS request
-  
-  // Return basic API info
-  res.status(200).json({
-    name: 'Quits API',
-    version: '1.0.0',
-    status: 'online',
-    timestamp: new Date().toISOString(),
-    origin: req.headers.origin || 'none',
-    endpoints: [
-      '/api/health',
-      '/api/test',
-      '/api/google-proxy',
-      '/api/auth/google',
-      '/api/auth/google/callback'
-    ]
-  });
+// This file serves as the entry point for Vercel serverless functions
+export default async function handler(req, res) {
+  // Pass the request to the Express app
+  await app(req, res);
 } 
