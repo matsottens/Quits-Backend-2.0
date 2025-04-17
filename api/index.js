@@ -1,4 +1,4 @@
-// Simple serverless handler for Vercel
+// Simple serverless handler for Vercel - Consolidated API Endpoints
 import express from 'express';
 import cors from 'cors';
 import { setCorsHeaders } from './cors-middleware.js';
