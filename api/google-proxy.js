@@ -1,143 +1,83 @@
 // Google OAuth Proxy - Standalone handler that doesn't rely on the backend codebase
+import { google } from 'googleapis';
+import jsonwebtoken from 'jsonwebtoken';
 import { setCorsHeaders } from './cors-middleware.js';
 
+// JWT configuration
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production';
+
+// Generate a JWT token with jsonwebtoken
+const generateToken = (payload) => {
+  const jwt = jsonwebtoken;
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
+};
+
+// Handler for Google OAuth proxy
 export default async function handler(req, res) {
-  console.log('==== GOOGLE PROXY ENDPOINT HIT ====');
-  console.log('Full URL:', req.url);
-  console.log('Method:', req.method);
-  console.log('Headers:', JSON.stringify(req.headers, null, 2));
-  console.log('Query params:', req.query);
-  
-  // Handle CORS with shared middleware - this is crucial for the API to work with the frontend
+  // Handle CORS
   const corsResult = setCorsHeaders(req, res);
-  if (corsResult) {
-    console.log('Handled OPTIONS preflight request');
-    return corsResult; // Return early if it was an OPTIONS request
-  }
-  
-  // Extract the authorization code and redirect URI from query parameters
-  const { code, redirect } = req.query;
-  
-  if (!code) {
-    console.log('Error: No authorization code provided in request');
-    return res.status(400).json({
-      error: 'Missing authorization code',
-      details: 'The code parameter is required'
-    });
-  }
-  
-  console.log(`Code received: ${code.substring(0, 10)}...`);
+  if (corsResult) return;
+
+  // Log detailed request info
+  console.log('=== Google Proxy Handler ===');
+  console.log('Path:', req.url);
+  console.log('Method:', req.method);
+  console.log('Origin:', req.headers.origin);
+  console.log('Query:', req.query);
   
   try {
-    // Check if environment variables for Google OAuth are set
-    if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
-      console.log('Error: Missing Google OAuth credentials in environment variables');
-      return res.status(500).json({
-        error: 'Server misconfiguration',
-        details: 'OAuth credentials are not configured properly'
-      });
+    // Must have a code query parameter
+    const code = req.query.code;
+    if (!code) {
+      return res.status(400).json({ error: 'Missing authorization code' });
     }
-    
-    // Google OAuth configuration
-    const { google } = await import('googleapis');
-    
-    // CRITICAL: This must match EXACTLY what's registered in Google Console
-    const redirectUri = 'https://www.quits.cc/auth/callback';
-    console.log('Using redirect URI:', redirectUri);
-    
+
     // Create OAuth client
     const oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET,
-      redirectUri
+      'https://api.quits.cc/api/auth/google/callback'
     );
-    
+
     // Exchange code for tokens
-    console.log('Exchanging code for tokens...');
-    let tokens;
-    try {
-      const tokenResponse = await oauth2Client.getToken(code);
-      tokens = tokenResponse.tokens;
-      console.log('Tokens received successfully');
-    } catch (tokenError) {
-      console.error('Token exchange error:', tokenError);
-      return res.status(400).json({
-        error: 'Token exchange failed',
-        details: tokenError.message
-      });
-    }
-    
-    if (!tokens || !tokens.access_token) {
-      console.error('No tokens received from Google OAuth');
-      return res.status(400).json({
-        error: 'Authentication failed',
-        details: 'No tokens received from Google OAuth'
-      });
-    }
-    
-    // Get user info
+    const { tokens } = await oauth2Client.getToken(code);
     oauth2Client.setCredentials(tokens);
+
+    // Get user info
     const oauth2 = google.oauth2('v2');
-    console.log('Fetching user info...');
     const userInfoResponse = await oauth2.userinfo.get({
       auth: oauth2Client,
     });
     const userInfo = userInfoResponse.data;
-    console.log('User info received:', userInfo.email);
-    
-    if (!userInfo.id || !userInfo.email) {
-      throw new Error('Failed to retrieve user information from Google');
-    }
-    
-    // Generate a JWT token - simplified for standalone function
-    const jwt = await import('jsonwebtoken');
-    const token = jwt.sign(
-      { 
-        sub: userInfo.id,
-        email: userInfo.email,
-        name: userInfo.name || '',
-        picture: userInfo.picture || '',
-        gmail_token: tokens.access_token, // Include Gmail token for API access
-        iat: Math.floor(Date.now() / 1000)
-      },
-      process.env.JWT_SECRET || 'your-jwt-secret-key',
-      { expiresIn: '7d' }
-    );
-    
-    console.log('JWT token generated successfully with Gmail access included');
-    
-    // Return JSON or redirect based on the request
-    if (req.headers.accept?.includes('application/json')) {
-      console.log('Returning JSON response');
-      return res.json({
-        success: true,
-        token,
-        user: {
-          id: userInfo.id,
-          email: userInfo.email,
-          name: userInfo.name,
-          picture: userInfo.picture
-        }
-      });
-    }
-    
-    // Redirect to the dashboard with the token
-    const redirectUrl = redirect || 'https://www.quits.cc/dashboard';
-    console.log('Redirecting to:', redirectUrl);
-    return res.redirect(`${redirectUrl}?token=${token}`);
-    
+
+    // Create user data object
+    const user = {
+      id: userInfo.id,
+      email: userInfo.email,
+      name: userInfo.name || '',
+      picture: userInfo.picture || ''
+    };
+
+    // Generate JWT token
+    const token = generateToken({ 
+      id: user.id, 
+      email: user.email,
+      createdAt: new Date().toISOString()
+    });
+
+    // Return JSON response
+    return res.status(200).json({
+      success: true,
+      token,
+      user
+    });
   } catch (error) {
-    console.error('Error in Google proxy handler:', error);
+    console.error('Google Proxy Error:', error);
     
-    // Return detailed error information
     return res.status(500).json({
       error: 'Authentication failed',
       message: error.message,
-      details: {
-        code: error.code,
-        statusCode: error.response?.status,
-        statusText: error.response?.statusText
-      }
+      details: error.response?.data || {}
     });
   }
 } 

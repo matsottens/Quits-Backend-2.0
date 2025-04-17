@@ -2,9 +2,19 @@
 import express from 'express';
 import cors from 'cors';
 import { setCorsHeaders } from './cors-middleware.js';
+import jsonwebtoken from 'jsonwebtoken';
 
 // Create Express app
 const app = express();
+
+// Configure JWT
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production';
+
+// Generate a JWT token - handle both ESM and CJS environments
+const generateToken = async (payload) => {
+  const jwt = jsonwebtoken;
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
+};
 
 // Use CORS middleware
 app.use(cors({
@@ -38,11 +48,44 @@ app.get('/', (req, res) => {
   });
 });
 
+// Test JWT endpoint
+app.get('/api/test-jwt', async (req, res) => {
+  try {
+    const token = await generateToken({ test: true, time: new Date().toISOString() });
+    res.status(200).json({ 
+      success: true, 
+      message: 'JWT is working', 
+      token,
+      environment: {
+        nodeEnv: process.env.NODE_ENV,
+        hasJwtSecret: !!process.env.JWT_SECRET,
+        runtime: process.version
+      }
+    });
+  } catch (error) {
+    console.error('JWT Error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'JWT error', 
+      error: error.message,
+      stack: process.env.NODE_ENV === 'production' ? undefined : error.stack
+    });
+  }
+});
+
 // Serverless entry point
 export default function handler(req, res) {
   // Apply CORS headers
   const corsResult = setCorsHeaders(req, res);
   if (corsResult) return;
+  
+  // Log request info
+  console.log('Request:', {
+    path: req.path,
+    method: req.method,
+    origin: req.headers.origin,
+    timestamp: new Date().toISOString()
+  });
   
   // Handle the request with Express
   return app(req, res);
