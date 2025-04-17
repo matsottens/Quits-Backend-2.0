@@ -1,18 +1,30 @@
-import jwt from 'jsonwebtoken';
+// Using dynamic import for JWT to ensure it works in all environments
+let jwt;
+
+// Initialize JWT module
+async function initJwt() {
+  if (!jwt) {
+    const module = await import('jsonwebtoken');
+    jwt = module.default || module;
+  }
+  return jwt;
+}
 
 // JWT Secret key from environment variable
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production';
 
 // Generate a JWT token
-export const generateToken = (payload) => {
+export const generateToken = async (payload) => {
   // Set token to expire in 7 days
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
+  const jwtModule = await initJwt();
+  return jwtModule.sign(payload, JWT_SECRET, { expiresIn: '7d' });
 };
 
 // Verify a JWT token
-export const verifyToken = (token) => {
+export const verifyToken = async (token) => {
   try {
-    return jwt.verify(token, JWT_SECRET);
+    const jwtModule = await initJwt();
+    return jwtModule.verify(token, JWT_SECRET);
   } catch (error) {
     return null;
   }

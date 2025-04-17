@@ -1,16 +1,23 @@
 {
   "version": 2,
-  "buildCommand": "cd backend && mkdir -p dist && cp -r src/* dist/ && cp package.json dist/",
+  "buildCommand": "cd backend && npm install && npm run build",
   "outputDirectory": "backend/dist",
-  "headers": [
+  "installCommand": "cd backend && npm install",
+  "functions": {
+    "backend/dist/**/*.js": {
+      "runtime": "@vercel/node@3.0.0",
+      "memory": 1024
+    }
+  },
+  "routes": [
     {
-      "source": "/(.*)",
-      "headers": [
-        { "key": "Access-Control-Allow-Credentials", "value": "true" },
-        { "key": "Access-Control-Allow-Origin", "value": "*" },
-        { "key": "Access-Control-Allow-Methods", "value": "GET,OPTIONS,PATCH,DELETE,POST,PUT" },
-        { "key": "Access-Control-Allow-Headers", "value": "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization, X-Gmail-Token, Cache-Control" }
-      ]
+      "src": "/(.*)",
+      "dest": "backend/dist/index.js",
+      "headers": {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+        "Access-Control-Allow-Headers": "Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control"
+      }
     }
   ]
 } 

@@ -5,7 +5,8 @@
       "src": "dist/index.js",
       "use": "@vercel/node",
       "config": {
-        "includeFiles": ["dist/**"]
+        "includeFiles": ["dist/**"],
+        "installCommand": "npm install"
       }
     }
   ],

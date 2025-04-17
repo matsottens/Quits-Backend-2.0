@@ -105,7 +105,7 @@ export const handleGoogleProxy = async (req: Request, res: Response) => {
         });
         
         // Generate token
-        const token = generateToken({ id: user.id, email: user.email });
+        const token = await generateToken({ id: user.id, email: user.email });
         console.log('[PROXY] Generated JWT token');
         
         // Return JSON or redirect based on the request
