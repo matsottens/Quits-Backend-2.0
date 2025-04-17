@@ -251,11 +251,16 @@ app.all('/api/google-proxy', async (req, res) => {
   }
 });
 
-// Email scan endpoint
-app.post('/api/email/scan', async (req, res) => {
+// Email scan endpoint - available at both /api/email/scan and /email/scan
+app.post('/api/email/scan', handleEmailScan);
+app.post('/email/scan', handleEmailScan);
+
+// Handler function for email scanning
+async function handleEmailScan(req, res) {
   // Log request info for debugging
   console.log('Email scan request received');
   console.log('Method:', req.method);
+  console.log('Path:', req.path);
   console.log('Headers present:', {
     'authorization': !!req.headers.authorization,
     'x-gmail-token': !!req.headers['x-gmail-token']
@@ -291,7 +296,7 @@ app.post('/api/email/scan', async (req, res) => {
       message: error.message
     });
   }
-});
+}
 
 // Serverless entry point
 export default function handler(req, res) {
