@@ -1,9 +1,16 @@
 {
   "version": 2,
-  "buildCommand": "npm install && npm run build",
+  "buildCommand": "chmod +x build.sh && ./build.sh",
   "installCommand": "npm install",
-  "rewrites": [
-    { "source": "/(.*)", "destination": "/api/index.js" }
+  "outputDirectory": "public",
+  "functions": {
+    "api/**/*.js": {
+      "runtime": "@vercel/node@latest"
+    }
+  },
+  "routes": [
+    { "src": "/api/(.*)", "dest": "/api/$1" },
+    { "src": "/(.*)", "dest": "/api/index.js" }
   ],
   "headers": [
     {
