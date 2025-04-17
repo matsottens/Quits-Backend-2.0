@@ -8,9 +8,24 @@ export default async function handler(req, res) {
   console.log('Headers:', JSON.stringify(req.headers, null, 2));
   console.log('Query params:', req.query);
   
-  // Handle CORS with shared middleware
-  const corsResult = setCorsHeaders(req, res);
-  if (corsResult) return corsResult; // Return early if it was an OPTIONS request
+  // Always ensure proper CORS headers are set, especially for Cache-Control
+  const origin = req.headers.origin || '';
+  if (origin && (origin.includes('quits.cc') || origin.includes('localhost'))) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+  
+  // Explicitly include Cache-Control in allowed headers
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token');
+  
+  // For preflight requests, return immediately after setting headers
+  if (req.method === 'OPTIONS') {
+    console.log('Handling OPTIONS preflight request with explicit Cache-Control header support');
+    return res.status(204).end();
+  }
   
   // Get code from query parameters
   const { code, redirect } = req.query;

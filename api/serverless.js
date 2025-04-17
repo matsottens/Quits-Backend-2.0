@@ -6,6 +6,7 @@ export default function handler(req, res) {
   console.log('Method:', req.method);
   console.log('Origin:', req.headers.origin);
   console.log('Host:', req.headers.host);
+  console.log('Headers:', JSON.stringify(req.headers, null, 2));
   
   // Fix path extraction - handle both with and without query string
   let path = req.url;
@@ -36,13 +37,22 @@ export default function handler(req, res) {
   }
   
   res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, X-Requested-With');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  // IMPORTANT: Include Cache-Control in the allowed headers
+  res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token');
+  res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours
+  
+  // Log the CORS headers for debugging
+  console.log('CORS headers set:', {
+    'Access-Control-Allow-Origin': res.getHeader('Access-Control-Allow-Origin'),
+    'Access-Control-Allow-Headers': res.getHeader('Access-Control-Allow-Headers'),
+    'Access-Control-Allow-Methods': res.getHeader('Access-Control-Allow-Methods')
+  });
   
   // Handle preflight OPTIONS request
   if (req.method === 'OPTIONS') {
     console.log('Handling OPTIONS preflight request');
-    return res.status(200).end();
+    return res.status(204).end(); // Using 204 No Content is more appropriate for OPTIONS
   }
   
   // IMPORTANT: This function will handle multiple path formats

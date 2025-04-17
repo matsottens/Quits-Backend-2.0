@@ -4,17 +4,31 @@ export default function handler(req, res) {
   console.log('Full URL:', req.url);
   console.log('Method:', req.method);
   console.log('Query params:', req.query);
+  console.log('Headers:', JSON.stringify(req.headers, null, 2));
   
-  // Set CORS headers
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  // Set CORS headers based on origin
+  const origin = req.headers.origin || '';
+  if (origin && (origin.includes('quits.cc') || origin.includes('localhost'))) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+  
   res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, X-Requested-With');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token');
+  res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours
+  
+  console.log('CORS headers set:', {
+    'Access-Control-Allow-Origin': res.getHeader('Access-Control-Allow-Origin'),
+    'Access-Control-Allow-Headers': res.getHeader('Access-Control-Allow-Headers'),
+    'Access-Control-Allow-Methods': res.getHeader('Access-Control-Allow-Methods')
+  });
   
   // Handle preflight OPTIONS request
   if (req.method === 'OPTIONS') {
     console.log('Handling OPTIONS preflight request');
-    return res.status(200).end();
+    return res.status(204).end();
   }
   
   // Handle the OAuth code that Google returns
