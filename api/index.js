@@ -16,7 +16,7 @@ const generateToken = async (payload) => {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
 };
 
-// Use CORS middleware
+// Use CORS middleware with expanded headers
 app.use(cors({
   origin: function(origin, callback) {
     // Allow requests with no origin
@@ -31,7 +31,15 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'Cache-Control']
+  allowedHeaders: [
+    'Origin', 
+    'X-Requested-With', 
+    'Content-Type', 
+    'Accept', 
+    'Authorization', 
+    'Cache-Control',
+    'X-Gmail-Token'
+  ]
 }));
 
 // Parse JSON bodies
@@ -71,6 +79,36 @@ app.get('/api/test-jwt', async (req, res) => {
       stack: process.env.NODE_ENV === 'production' ? undefined : error.stack
     });
   }
+});
+
+// CORS test endpoint - useful for debugging CORS issues
+app.options('/api/cors-test', (req, res) => {
+  setCorsHeaders(req, res);
+  return res.status(204).end();
+});
+
+app.get('/api/cors-test', (req, res) => {
+  // Apply CORS headers
+  setCorsHeaders(req, res);
+  
+  // Return information about the request
+  return res.status(200).json({
+    success: true,
+    message: 'CORS test successful',
+    request: {
+      headers: req.headers,
+      method: req.method,
+      url: req.url,
+      origin: req.headers.origin || 'none'
+    },
+    corsHeaders: {
+      'Access-Control-Allow-Origin': res.getHeader('Access-Control-Allow-Origin'),
+      'Access-Control-Allow-Methods': res.getHeader('Access-Control-Allow-Methods'),
+      'Access-Control-Allow-Headers': res.getHeader('Access-Control-Allow-Headers'),
+      'Access-Control-Allow-Credentials': res.getHeader('Access-Control-Allow-Credentials')
+    },
+    timestamp: new Date().toISOString()
+  });
 });
 
 // Serverless entry point
