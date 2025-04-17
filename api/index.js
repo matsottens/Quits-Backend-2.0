@@ -142,6 +142,7 @@ app.all('/api/google-proxy', async (req, res) => {
     console.log('Method:', req.method);
     console.log('Origin:', req.headers.origin);
     console.log('Query params:', req.query);
+    console.log('Timestamp:', new Date().toISOString());
     
     // Must have a code query parameter
     const code = req.query.code;
@@ -149,104 +150,110 @@ app.all('/api/google-proxy', async (req, res) => {
       return res.status(400).json({ error: 'Missing authorization code' });
     }
     
-    // Try multiple redirect URIs to find the one that works
-    const redirectUris = [
-      'https://www.quits.cc/auth/callback',
-      'https://quits.cc/auth/callback',
-      'https://api.quits.cc/api/auth/google/callback',
-      'https://api.quits.cc/api/google-proxy'
-    ];
+    // Use EXACTLY the same redirect URI that was used in the frontend
+    // This is crucial for OAuth to work properly
+    const redirectUri = 'https://www.quits.cc/auth/callback';
+    console.log(`Using redirect URI: ${redirectUri}`);
     
-    let lastError = null;
-    let invalidGrantEncountered = false;
-    
-    // Try each redirect URI
-    for (const redirectUri of redirectUris) {
-      try {
-        console.log(`Trying with redirect URI: ${redirectUri}`);
-        
-        if (invalidGrantEncountered) {
-          console.log('Skipping further attempts due to previous invalid_grant error');
-          break;
-        }
-        
-        // Create OAuth client with current redirect URI
-        const oauth2Client = new google.auth.OAuth2(
-          process.env.GOOGLE_CLIENT_ID,
-          process.env.GOOGLE_CLIENT_SECRET,
-          redirectUri
-        );
-        
-        // Exchange code for tokens
-        const { tokens } = await oauth2Client.getToken(code);
-        oauth2Client.setCredentials(tokens);
-        
-        // Get user info
-        const oauth2 = google.oauth2('v2');
-        const userInfoResponse = await oauth2.userinfo.get({
-          auth: oauth2Client,
-        });
-        const userInfo = userInfoResponse.data;
-        
-        // Create user data object
-        const user = {
-          id: userInfo.id,
-          email: userInfo.email,
-          name: userInfo.name || '',
-          picture: userInfo.picture || ''
-        };
-        
-        // Generate JWT token
-        const token = generateToken({ 
-          id: user.id, 
-          email: user.email,
-          createdAt: new Date().toISOString()
-        });
-        
-        // Return JSON response
-        return res.status(200).json({
-          success: true,
-          token,
-          user,
-          redirect_uri_used: redirectUri
-        });
-      } catch (err) {
-        console.log(`Failed with redirect URI ${redirectUri}: ${err.message}`);
-        
-        lastError = err;
-        
-        // If it's an invalid_grant error, no point trying other URIs
-        if (err.message.includes('invalid_grant')) {
-          invalidGrantEncountered = true;
-        }
-        
-        // Only continue to next URI if it's a redirect_uri_mismatch error
-        if (!err.message.includes('redirect_uri_mismatch')) {
-          break;
-        }
-      }
-    }
-    
-    // If we get here, all URIs failed
-    if (invalidGrantEncountered) {
-      return res.status(400).json({
-        error: 'Authentication failed',
-        message: 'The authorization code has expired or has already been used',
-        details: {
-          error: 'invalid_grant',
-          error_description: 'OAuth codes are single-use and expire quickly'
-        }
+    try {
+      // Create OAuth client with the correct redirect URI
+      const oauth2Client = new google.auth.OAuth2(
+        process.env.GOOGLE_CLIENT_ID,
+        process.env.GOOGLE_CLIENT_SECRET,
+        redirectUri
+      );
+      
+      // Log environment info for debugging
+      console.log('Environment:', {
+        NODE_ENV: process.env.NODE_ENV,
+        hasGoogleClientId: !!process.env.GOOGLE_CLIENT_ID,
+        hasGoogleClientSecret: !!process.env.GOOGLE_CLIENT_SECRET,
+        hasJwtSecret: !!process.env.JWT_SECRET
       });
+      
+      // Exchange code for tokens
+      console.log(`Exchanging code for tokens...`);
+      const { tokens } = await oauth2Client.getToken(code);
+      console.log('Token exchange successful');
+      
+      oauth2Client.setCredentials(tokens);
+      
+      // Get user info
+      console.log('Fetching user info...');
+      const oauth2 = google.oauth2('v2');
+      const userInfoResponse = await oauth2.userinfo.get({
+        auth: oauth2Client,
+      });
+      const userInfo = userInfoResponse.data;
+      console.log(`User info received for: ${userInfo.email}`);
+      
+      // Create user data object
+      const user = {
+        id: userInfo.id,
+        email: userInfo.email,
+        name: userInfo.name || '',
+        picture: userInfo.picture || ''
+      };
+      
+      // Generate JWT token
+      console.log('Generating JWT token...');
+      const token = generateToken({ 
+        id: user.id, 
+        email: user.email,
+        gmail_token: tokens.access_token,
+        createdAt: new Date().toISOString()
+      });
+      console.log('JWT token generated successfully');
+      
+      // Return JSON response
+      return res.status(200).json({
+        success: true,
+        token,
+        user,
+        redirect_uri_used: redirectUri
+      });
+    } catch (err) {
+      console.log(`Failed with redirect URI ${redirectUri}: ${err.message}`);
+      console.log('Error details:', err);
+      
+      if (err.message.includes('invalid_grant')) {
+        return res.status(400).json({
+          error: 'Authentication failed',
+          message: 'The authorization code has expired or has already been used',
+          details: {
+            error: 'invalid_grant',
+            error_description: 'OAuth codes are single-use and expire quickly'
+          }
+        });
+      }
+      
+      throw err;
     }
-    
-    throw lastError || new Error('Failed to authenticate with all redirect URIs');
   } catch (error) {
     console.error('Google Proxy Error:', error);
     
+    // Provide a user-friendly error message based on the type of error
+    let errorMessage = error.message;
+    let errorDetails = error.response?.data || {};
+    
+    if (error.message.includes('invalid_grant')) {
+      errorMessage = 'The authorization code has expired or has already been used';
+      errorDetails = {
+        error: 'invalid_grant',
+        error_description: 'Please try logging in again'
+      };
+    } else if (error.message.includes('redirect_uri_mismatch')) {
+      errorMessage = 'OAuth configuration error: redirect URI mismatch';
+      errorDetails = {
+        error: 'redirect_uri_mismatch',
+        error_description: 'The redirect URI in the request does not match the authorized redirect URI'
+      };
+    }
+    
     return res.status(500).json({
       error: 'Authentication failed',
-      message: error.message,
-      details: error.response?.data || {}
+      message: errorMessage,
+      details: errorDetails
     });
   }
 });
