@@ -148,6 +148,24 @@ app.use('/api/auth', authRoutes);
 app.use('/api/email', emailRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
 
+// Define the missing handleGoogleCallbackOptions function
+const handleGoogleCallbackOptions = (req: Request, res: Response) => {
+  console.log('[INDEX] OPTIONS for Google Callback');
+  const origin = req.headers.origin || '';
+  
+  if (origin && (origin.includes('quits.cc') || origin.includes('localhost'))) {
+    // Set proper CORS headers for preflight request
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control');
+    res.header('Access-Control-Max-Age', '86400'); // 24 hours
+  }
+  
+  // Send 204 No Content for OPTIONS requests
+  return res.status(204).end();
+};
+
 // Direct Google callback handlers (not using Router)
 const googleCallbackPath = '/api/auth/google/callback';
 app.options(googleCallbackPath, function(req, res) {
