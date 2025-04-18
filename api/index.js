@@ -503,29 +503,46 @@ async function handleGetSubscription(req, res) {
       }
     }
     
+    // Generate some mock subscription data
+    const mockSubscriptionData = [
+      {
+        id: "sub_" + Date.now(),
+        name: "Netflix",
+        price: 14.99,
+        billingCycle: "monthly",
+        category: "Entertainment",
+        nextBillingDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+        logo: "https://www.quits.cc/subscription-logos/netflix.png"
+      },
+      {
+        id: "sub_" + (Date.now() + 1),
+        name: "Spotify",
+        price: 9.99,
+        billingCycle: "monthly",
+        category: "Music",
+        nextBillingDate: new Date(Date.now() + 21 * 24 * 60 * 60 * 1000).toISOString(),
+        logo: "https://www.quits.cc/subscription-logos/spotify.png"
+      },
+      {
+        id: "sub_" + (Date.now() + 2),
+        name: "Amazon Prime",
+        price: 12.99,
+        billingCycle: "monthly",
+        category: "Shopping",
+        nextBillingDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        logo: "https://www.quits.cc/subscription-logos/amazon.png"
+      }
+    ];
+    
     // If backend is unavailable or request failed, return mock subscription data
     return res.status(200).json({
       success: true,
-      subscriptions: [
-        {
-          id: "sub_" + Date.now(),
-          name: "Netflix",
-          price: 14.99,
-          billingCycle: "monthly",
-          category: "Entertainment",
-          nextBillingDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
-          logo: "https://www.quits.cc/subscription-logos/netflix.png"
-        },
-        {
-          id: "sub_" + (Date.now() + 1),
-          name: "Spotify",
-          price: 9.99,
-          billingCycle: "monthly",
-          category: "Music",
-          nextBillingDate: new Date(Date.now() + 21 * 24 * 60 * 60 * 1000).toISOString(),
-          logo: "https://www.quits.cc/subscription-logos/spotify.png"
-        }
-      ]
+      subscriptions: mockSubscriptionData,
+      meta: {
+        total: mockSubscriptionData.length,
+        monthlyCost: mockSubscriptionData.reduce((sum, sub) => sum + sub.price, 0),
+        currency: "USD"
+      }
     });
   } catch (error) {
     console.error('Error in get subscription handler:', error);
