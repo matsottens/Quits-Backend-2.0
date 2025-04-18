@@ -1,5 +1,5 @@
 // Google OAuth Callback - Standalone handler
-import { setCorsHeaders } from '../../cors-middleware.js';
+import { setCorsHeaders } from '../utils.js';
 
 export default async function handler(req, res) {
   console.log('Vercel Serverless Function - Google OAuth Callback hit');
@@ -8,18 +8,8 @@ export default async function handler(req, res) {
   console.log('Headers:', JSON.stringify(req.headers, null, 2));
   console.log('Query params:', req.query);
   
-  // Always ensure proper CORS headers are set, especially for Cache-Control
-  const origin = req.headers.origin || '';
-  if (origin && (origin.includes('quits.cc') || origin.includes('localhost'))) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  } else {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-  }
-  
-  // Explicitly include Cache-Control in allowed headers
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token');
+  // Always ensure proper CORS headers are set
+  setCorsHeaders(req, res);
   
   // For preflight requests, return immediately after setting headers
   if (req.method === 'OPTIONS') {
@@ -92,7 +82,12 @@ export default async function handler(req, res) {
         break; // Exit the loop if successful
       } catch (error) {
         lastError = error;
-        console.error(`Token exchange failed with URI ${redirectUri}:`, error.message);
+        // Add more detailed logging for invalid_grant errors (these are expected in many cases)
+        if (error.response?.data?.error === 'invalid_grant') {
+          console.log('Invalid grant error received - this is expected if the code was already used or expired');
+        } else {
+          console.error(`Token exchange failed with URI ${redirectUri}:`, error.message);
+        }
         // Continue to the next URI
       }
     }
@@ -165,8 +160,9 @@ export default async function handler(req, res) {
       console.log('Received invalid_grant error - this is normal if the code was already used');
     }
     
-    // Return error in appropriate format
+    // If client wants JSON, return JSON error
     if (req.headers.accept?.includes('application/json')) {
+      console.log('Returning JSON error response');
       return res.status(500).json({
         error: errorCode,
         message: errorMessage,
@@ -179,6 +175,7 @@ export default async function handler(req, res) {
       const loginUrl = redirect?.includes('login') 
         ? redirect 
         : 'https://www.quits.cc/login';
+      console.log(`Redirecting to ${loginUrl} with error`);
       return res.redirect(`${loginUrl}?error=${errorCode}&message=${encodeURIComponent(errorMessage)}`);
     }
     

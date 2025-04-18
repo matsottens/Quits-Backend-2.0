@@ -4,16 +4,25 @@
  * Set CORS headers for all responses
  */
 export function setCorsHeaders(req, res) {
+  // Always ensure proper CORS headers are set, especially for Cache-Control
   const origin = req.headers.origin || '';
+  
+  // Allow specific origins with credentials
   if (origin && (origin.includes('quits.cc') || origin.includes('localhost'))) {
     res.setHeader('Access-Control-Allow-Origin', origin);
   } else {
+    // For requests without an origin header, use a wildcard (no credentials allowed with wildcard)
     res.setHeader('Access-Control-Allow-Origin', '*');
   }
   
+  // Explicitly include Cache-Control in allowed headers
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token');
+  res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token, Pragma');
+  res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours
+  
+  // Add Cache-Control header to prevent caching of API responses
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
 }
 
 /**
