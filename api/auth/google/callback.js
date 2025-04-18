@@ -1,5 +1,5 @@
 // Google OAuth Callback - Standalone handler
-import { setCorsHeaders } from '../utils.js';
+import { setCorsHeaders } from '../../utils.js';
 
 export default async function handler(req, res) {
   console.log('Vercel Serverless Function - Google OAuth Callback hit');
