@@ -119,7 +119,7 @@ export default async function handler(req, res) {
     
     // Generate a JWT token
     const jwt = await import('jsonwebtoken');
-    const token = jwt.sign(
+    const token = jwt.default.sign(
       { 
         id: userInfo.id,
         email: userInfo.email
@@ -152,10 +152,40 @@ export default async function handler(req, res) {
   } catch (error) {
     console.error('Error in Google callback handler:', error);
     
+    // Check for specific error types
+    let errorMessage = error.message || 'Authentication failed';
+    let errorCode = 'auth_failed';
+    let redirectToLogin = true;
+    
+    // Handle invalid_grant error (expired or already used code)
+    if (error.response?.data?.error === 'invalid_grant' || 
+        error.message?.includes('invalid_grant')) {
+      errorMessage = 'Authorization code has expired or already been used';
+      errorCode = 'invalid_grant';
+      console.log('Received invalid_grant error - this is normal if the code was already used');
+    }
+    
     // Return error in appropriate format
+    if (req.headers.accept?.includes('application/json')) {
+      return res.status(500).json({
+        error: errorCode,
+        message: errorMessage,
+        details: process.env.NODE_ENV === 'production' ? undefined : error.stack
+      });
+    }
+    
+    // Redirect to login with error
+    if (redirectToLogin) {
+      const loginUrl = redirect?.includes('login') 
+        ? redirect 
+        : 'https://www.quits.cc/login';
+      return res.redirect(`${loginUrl}?error=${errorCode}&message=${encodeURIComponent(errorMessage)}`);
+    }
+    
+    // Fallback error response
     return res.status(500).json({
-      error: 'Authentication failed',
-      message: error.message,
+      error: errorCode,
+      message: errorMessage,
       details: process.env.NODE_ENV === 'production' ? undefined : error.stack
     });
   }
