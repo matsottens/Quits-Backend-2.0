@@ -4,6 +4,24 @@
   "outputDirectory": "public",
   "routes": [
     {
+      "src": "/api/auth/google/callback",
+      "dest": "/api/auth/google/callback.js",
+      "headers": {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+        "Access-Control-Allow-Headers": "Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token"
+      }
+    },
+    {
+      "src": "/api/google-proxy",
+      "dest": "/api/google-proxy.js",
+      "headers": {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+        "Access-Control-Allow-Headers": "Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token"
+      }
+    },
+    {
       "src": "/api/(.*)",
       "dest": "/api/index.js",
       "headers": {
