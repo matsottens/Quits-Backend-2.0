@@ -22,20 +22,16 @@
       }
     },
     {
-      "src": "/favicon.ico",
-      "dest": "/api/favicon.js"
+      "src": "^/(favicon.ico|favicon.png|$)",
+      "dest": "/api/combined-handlers.js"
     },
     {
-      "src": "/favicon.png",
-      "dest": "/api/favicon.js"
+      "src": "^/(api/health|api/keepalive|health|keepalive)",
+      "dest": "/api/combined-handlers.js"
     },
     {
-      "src": "^/$",
-      "dest": "/api/root.js"
-    },
-    {
-      "src": "/api/(.*)",
-      "dest": "/api/index.js",
+      "src": "^/(api/test|api/env-check|api/cors-test|test|api/csp-bypass)",
+      "dest": "/api/serverless.js",
       "headers": {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
@@ -44,7 +40,7 @@
     },
     {
       "src": "/(.*)",
-      "dest": "/api/index.js",
+      "dest": "/api/combined-handlers.js",
       "headers": {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",

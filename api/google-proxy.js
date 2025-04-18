@@ -1,20 +1,13 @@
 // Google OAuth Proxy - Simplified handler to avoid path-to-regexp issues
+import { setCorsHeaders, handleOptions, getPath } from './utils.js';
+
 export default function handler(req, res) {
   // Set CORS headers
-  const origin = req.headers.origin || '';
-  if (origin && (origin.includes('quits.cc') || origin.includes('localhost'))) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  } else {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-  }
-  
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token');
+  setCorsHeaders(req, res);
   
   // Handle preflight request
-  if (req.method === 'OPTIONS') {
-    return res.status(204).end();
+  if (handleOptions(req, res)) {
+    return;
   }
   
   console.log('Google Proxy Handler - Request received');
