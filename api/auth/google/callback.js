@@ -117,7 +117,9 @@ export default async function handler(req, res) {
     const token = jwt.default.sign(
       { 
         id: userInfo.id,
-        email: userInfo.email
+        email: userInfo.email,
+        gmail_token: tokens.access_token, // Include Gmail token in the JWT
+        createdAt: new Date().toISOString()
       },
       process.env.JWT_SECRET || 'your-jwt-secret-key',
       { expiresIn: '7d' }
@@ -138,11 +140,40 @@ export default async function handler(req, res) {
       });
     }
     
-    // Redirect to the dashboard with the token
-    // Always use www version for the redirect to maintain consistency
+    // For HTML redirects, use an HTML page with meta refresh and script to localStorage
+    // This avoids CSP issues by letting the browser set the token directly
     const redirectUrl = redirect || 'https://www.quits.cc/dashboard';
     console.log('Redirecting to:', redirectUrl);
-    return res.redirect(`${redirectUrl}?token=${token}`);
+    
+    // Use safe redirect with no CSP issues
+    const htmlResponse = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <title>Redirecting to Dashboard</title>
+        <meta http-equiv="refresh" content="0; URL='${redirectUrl}'">
+        <meta name="robots" content="noindex">
+      </head>
+      <body>
+        <script>
+          // Store token in localStorage before redirect
+          localStorage.setItem('token', '${token}');
+          // Redirect immediately
+          window.location.href = '${redirectUrl}';
+        </script>
+        <noscript>
+          <meta http-equiv="refresh" content="0; URL='${redirectUrl}?token=${token}'">
+          Please click <a href="${redirectUrl}?token=${token}">here</a> to continue if not redirected.
+        </noscript>
+        <p>Redirecting to dashboard...</p>
+      </body>
+      </html>
+    `;
+    
+    res.setHeader('Content-Type', 'text/html');
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    return res.send(htmlResponse);
     
   } catch (error) {
     console.error('Error in Google callback handler:', error);

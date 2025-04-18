@@ -41,6 +41,30 @@ export default function handler(req, res) {
     // If the client wants JSON, return directly with a message instead of redirecting
     if (wantsJson) {
       console.log('Client requested JSON response, returning pending status');
+      
+      // Always include the redirect parameter if provided
+      const params = new URLSearchParams(req.query);
+      
+      // Redirect to the main backend handler but don't wait for the response
+      const backendUrl = 'https://api.quits.cc/api/auth/google/callback';
+      const redirectUrl = backendUrl + '?' + params.toString();
+      
+      // Start the authentication process in the background
+      fetch(redirectUrl, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json'
+        }
+      }).then(async response => {
+        if (response.ok) {
+          console.log('Background authentication succeeded');
+        } else {
+          console.error('Background authentication failed:', await response.text());
+        }
+      }).catch(error => {
+        console.error('Background authentication error:', error);
+      });
+      
       return res.status(200).json({
         success: false, 
         pending: true,
