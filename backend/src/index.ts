@@ -68,7 +68,7 @@ app.use(cors({
 }));
 
 // Add a global CORS middleware that will set headers for all routes
-app.use((req, res, next) => {
+app.use(function(req: Request, res: Response, next: NextFunction) {
   const origin = req.headers.origin || '';
   
   // For all routes, set proper CORS headers to ensure Cache-Control works
@@ -107,7 +107,7 @@ const googleProxyHandler: RequestHandler = async (req, res, next) => {
 };
 
 // Add explicit OPTIONS handler for the proxy endpoint
-app.options('/api/google-proxy', (req, res) => {
+app.options('/api/google-proxy', function(req: Request, res: Response) {
   console.log('[INDEX] OPTIONS for /api/google-proxy');
   const origin = req.headers.origin || '';
   
@@ -170,10 +170,10 @@ const handleGoogleCallbackOptions = (req: Request, res: Response) => {
 
 // Direct Google callback handlers (not using Router)
 const googleCallbackPath = '/api/auth/google/callback';
-app.options(googleCallbackPath, function(req, res) {
+app.options(googleCallbackPath, function(req: Request, res: Response) {
   return handleGoogleCallbackOptions(req, res);
 });
-app.get(googleCallbackPath, function(req, res) {
+app.get(googleCallbackPath, function(req: Request, res: Response) {
   return handleGoogleCallback(req, res);
 });
 
