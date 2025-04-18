@@ -209,7 +209,7 @@ app.get('/api/auth/google/callback', (req, res) => {
 });
 
 // Wildcard route to catch all google/callback paths
-app.get('*/google/callback', (req, res) => {
+app.get('/google/callback', (req, res) => {
   const code = req.query.code;
   
   if (!code) {

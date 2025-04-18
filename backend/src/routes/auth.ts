@@ -84,8 +84,8 @@ router.get('/google', (req: Request, res: Response) => {
   }
 });
 
-// Handle Google OAuth callback - explicitly catch all possible URL patterns
-router.get('*/google/callback', (async (req: Request, res: Response) => {
+// Extract the callback handler to a separate function for reuse
+const handleGoogleCallback: RequestHandler = async (req: Request, res: Response) => {
   try {
     console.log('Attempting to handle callback with path:', req.path);
     const { code, error: oauthError, callback, redirect } = req.query;
@@ -273,7 +273,13 @@ router.get('*/google/callback', (async (req: Request, res: Response) => {
     }
     return res.redirect(`${loginUrl}?error=${errorCode}`);
   }
-}) as RequestHandler);
+};
+
+// Handle Google OAuth callback - explicitly catch all possible URL patterns
+// Replace the problematic wildcard pattern with specific routes
+router.get('/google/callback', handleGoogleCallback);
+router.get('/auth/google/callback', handleGoogleCallback);
+router.get('/api/auth/google/callback', handleGoogleCallback);
 
 // JSONP endpoint for Google OAuth callback (used as a fallback for CORS issues)
 router.get('/google/callback/jsonp', (async (req: Request, res: Response) => {
