@@ -69,7 +69,7 @@ export default function handler(req, res) {
     path === '/api/google-proxy' || 
     path === 'api/google-proxy' || 
     path === '/google-proxy' ||
-    path.includes('google-proxy');
+    path === 'google-proxy';
     
   const isGoogleCallback = 
     path === '/api/auth/google/callback' || 
@@ -77,8 +77,8 @@ export default function handler(req, res) {
     path === '/auth/google/callback' ||
     path === '/google/callback' ||
     path === '/auth/callback' ||
-    path.includes('/google/callback') ||
-    path.includes('/auth/callback');
+    path === 'google/callback' ||
+    path === 'auth/callback';
   
   const isAuthCallback =
     path === '/auth/callback' ||
