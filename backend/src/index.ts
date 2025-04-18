@@ -64,7 +64,7 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'Cache-Control']
+  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'Cache-Control', 'Pragma']
 }));
 
 // Add a global CORS middleware that will set headers for all routes
@@ -76,7 +76,8 @@ app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', origin);
     res.header('Access-Control-Allow-Credentials', 'true');
     res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, Pragma');
+    res.header('Cache-Control', 'no-store, no-cache, must-revalidate, private');
     
     // For OPTIONS requests, send 200 OK immediately
     if (req.method === 'OPTIONS') {
@@ -115,8 +116,9 @@ app.options('/api/google-proxy', (req, res) => {
     res.header('Access-Control-Allow-Origin', origin);
     res.header('Access-Control-Allow-Credentials', 'true');
     res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, Pragma');
     res.header('Access-Control-Max-Age', '86400'); // 24 hours
+    res.header('Cache-Control', 'no-store, no-cache, must-revalidate, private');
     console.log('[INDEX] CORS headers set for OPTIONS /api/google-proxy');
   }
   

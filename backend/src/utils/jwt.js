@@ -11,21 +11,34 @@ async function initJwt() {
 }
 
 // JWT Secret key from environment variable
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production';
+// Use a consistent fallback secret for development to avoid token validation issues
+const getJwtSecret = () => {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    console.warn('WARNING: JWT_SECRET environment variable is not set. Using fallback secret - NOT SECURE FOR PRODUCTION!');
+    return 'quits-jwt-secret-key-development';
+  }
+  return secret;
+};
 
 // Generate a JWT token
 export const generateToken = async (payload) => {
   // Set token to expire in 7 days
   const jwtModule = await initJwt();
-  return jwtModule.sign(payload, JWT_SECRET, { expiresIn: '7d' });
+  const secret = getJwtSecret();
+  
+  console.log(`Generating JWT token with secret: ${secret.substring(0, 3)}... (${secret.length} chars)`);
+  return jwtModule.sign(payload, secret, { expiresIn: '7d' });
 };
 
 // Verify a JWT token
 export const verifyToken = async (token) => {
   try {
     const jwtModule = await initJwt();
-    return jwtModule.verify(token, JWT_SECRET);
+    const secret = getJwtSecret();
+    return jwtModule.verify(token, secret);
   } catch (error) {
+    console.error('JWT verification error:', error.message);
     return null;
   }
 }; 

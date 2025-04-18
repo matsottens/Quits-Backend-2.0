@@ -58,8 +58,9 @@ app.options('/api/google-proxy', (req, res) => {
     res.header('Access-Control-Allow-Origin', origin);
     res.header('Access-Control-Allow-Credentials', 'true');
     res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, Pragma');
     res.header('Access-Control-Max-Age', '86400'); // 24 hours
+    res.header('Cache-Control', 'no-store, no-cache, must-revalidate, private');
     console.log('[APP] CORS headers set for OPTIONS /api/google-proxy');
   }
   
