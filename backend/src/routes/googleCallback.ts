@@ -4,22 +4,23 @@ import { supabase } from '../config/supabase.js';
 import { generateToken } from '../utils/jwt.js';
 import { upsertUser } from '../services/database.js';
 
-// Handle OPTIONS preflight requests for the Google callback
+// Handle OPTIONS requests for the Google callback endpoint
 export const handleGoogleCallbackOptions = (req: Request, res: Response) => {
-  console.log('OPTIONS request for Google callback with origin:', req.headers.origin);
+  console.log('[OPTIONS] Google Callback Options Handler');
   
   const origin = req.headers.origin || '';
+  
   if (origin && (origin.includes('quits.cc') || origin.includes('localhost'))) {
+    // Set proper CORS headers for preflight request
     res.header('Access-Control-Allow-Origin', origin);
     res.header('Access-Control-Allow-Credentials', 'true');
     res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, Pragma');
     res.header('Access-Control-Max-Age', '86400'); // 24 hours
-    console.log('CORS headers set for OPTIONS request with origin:', origin);
-  } else {
-    console.log('No CORS headers set for OPTIONS - unknown origin:', origin);
+    res.header('Cache-Control', 'no-store, no-cache, must-revalidate, private');
   }
   
+  // Send 204 No Content for OPTIONS requests
   return res.status(204).end();
 };
 
@@ -35,7 +36,11 @@ export const handleGoogleCallback = async (req: Request, res: Response) => {
   console.log('Query params:', JSON.stringify(req.query, null, 2));
   
   try {
-    const { code, error: oauthError, callback, redirect } = req.query;
+    // Extract request parameters
+    const code = req.query.code as string | undefined;
+    const oauthError = req.query.error as string | undefined;
+    const callback = req.query.callback as string | undefined;
+    const redirect = req.query.redirect as string | undefined;
 
     console.log('Auth callback request received:', {
       path: req.path,
@@ -43,7 +48,7 @@ export const handleGoogleCallback = async (req: Request, res: Response) => {
       origin: req.headers.origin,
       referer: req.headers.referer,
       hasCode: !!code,
-      codePrefix: code ? (code as string).substring(0, 10) + '...' : 'none',
+      codePrefix: code ? code.substring(0, 10) + '...' : 'none',
       hasRedirect: !!redirect
     });
 
@@ -53,15 +58,17 @@ export const handleGoogleCallback = async (req: Request, res: Response) => {
       res.header('Access-Control-Allow-Origin', corsOrigin);
       res.header('Access-Control-Allow-Credentials', 'true');
       res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-      res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control');
+      res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, Pragma');
+      res.header('Cache-Control', 'no-store, no-cache, must-revalidate, private');
       console.log('CORS headers set for origin:', corsOrigin);
     } else {
       console.log('No CORS headers set - unknown origin:', corsOrigin);
     }
 
-    // Handle JSONP callback if provided (for alternative auth methods)
+    // Check if JSONP callback is provided
     const isJsonp = typeof callback === 'string' && callback.length > 0;
 
+    // Handle OAuth error if present
     if (oauthError) {
         console.error('Google OAuth Error on callback:', oauthError);
         
@@ -69,81 +76,53 @@ export const handleGoogleCallback = async (req: Request, res: Response) => {
           return res.send(`${callback}({"error": "google_oauth_failed", "details": "${oauthError}"})`);
         }
         
-        // Redirect back to frontend with error
-        const redirectUrl = typeof redirect === 'string' && redirect.length > 0
-          ? redirect
-          : req.headers.referer?.split('?')[0] || process.env.CLIENT_URL || 'http://localhost:5173';
-          
-        console.log('Redirecting with error to:', `${redirectUrl.replace('/auth/callback','/login')}?error=google_oauth_failed&details=${oauthError}`);
-        return res.redirect(`${redirectUrl.replace('/auth/callback','/login')}?error=google_oauth_failed&details=${oauthError}`);
+        // Determine frontend URL for redirection
+        const frontendUrl = getFrontendUrl(redirect, req.headers.origin, req.headers.referer);
+        const loginUrl = `${frontendUrl}/login`;
+        
+        console.log('Redirecting with error to:', `${loginUrl}?error=google_oauth_failed&details=${oauthError}`);
+        return res.redirect(`${loginUrl}?error=google_oauth_failed&details=${oauthError}`);
     }
 
-    if (!code || typeof code !== 'string') {
+    // Validate authorization code
+    if (!code) {
       console.error('Authorization code is required.');
       
       if (isJsonp) {
         return res.send(`${callback}({"error": "missing_code"})`);
       }
       
-      const redirectUrl = typeof redirect === 'string' && redirect.length > 0
-        ? redirect
-        : req.headers.referer?.split('?')[0] || process.env.CLIENT_URL || 'http://localhost:5173';
-        
-      console.log('Redirecting with missing code error to:', `${redirectUrl.replace('/auth/callback','/login')}?error=missing_code`);
-      return res.redirect(`${redirectUrl.replace('/auth/callback','/login')}?error=missing_code`);
+      const frontendUrl = getFrontendUrl(redirect, req.headers.origin, req.headers.referer);
+      const loginUrl = `${frontendUrl}/login`;
+      
+      console.log('Redirecting with missing code error to:', `${loginUrl}?error=missing_code`);
+      return res.redirect(`${loginUrl}?error=missing_code`);
     }
 
     // CRITICAL: For token exchange, we MUST use the exact same redirect URI
     // that was used in the initial authorization request
-    
-    // Get the redirect URI from the request parameters or headers
-    let redirectUri;
-    
-    // First check if we explicitly got a redirect_uri in the request
-    if (req.query.redirect_uri && typeof req.query.redirect_uri === 'string') {
-      redirectUri = req.query.redirect_uri;
-      console.log(`Using explicit redirect_uri from query: ${redirectUri}`);
-    } 
-    // Try to determine from the request origin/referer
-    else {
-      let redirectBase = '';
-      
-      // Check request origin header
-      if (req.headers.origin) {
-        redirectBase = req.headers.origin;
-      } 
-      // Or try to extract from referer
-      else if (req.headers.referer) {
-        // Extract the origin part from the referer
-        const refererUrl = new URL(req.headers.referer);
-        redirectBase = `${refererUrl.protocol}//${refererUrl.host}`;
-      }
-      // Fallback to environment or default
-      else {
-        redirectBase = process.env.CLIENT_URL || 'http://localhost:5173';
-      }
-      
-      console.log(`Using redirect base: ${redirectBase}`);
-      
-      // Default URI is the /auth/callback path
-      redirectUri = `${redirectBase}/auth/callback`;
-    }
-    
-    console.log(`Using redirect URI for token exchange: ${redirectUri}`);
+    const redirectUri = 'https://www.quits.cc/auth/callback';
+    console.log(`Using fixed redirect URI for token exchange: ${redirectUri}`);
 
-    // Create a new OAuth2 client instance FOR TOKEN EXCHANGE
+    // Create OAuth client for token exchange
     const tokenExchangeOauth2Client = new google.auth.OAuth2(
         process.env.GOOGLE_CLIENT_ID,
         process.env.GOOGLE_CLIENT_SECRET,
         redirectUri
     );
 
-    console.log('Received auth code, attempting to exchange for tokens...');
+    console.log('Attempting to exchange code for tokens...');
+    
     try {
-      const { tokens } = await tokenExchangeOauth2Client.getToken(code as string);
-      console.log('Tokens received:', tokens.access_token ? 'Yes (access token)' : 'No', tokens.refresh_token ? 'Yes (refresh token)' : 'No');
+      // Exchange authorization code for tokens
+      const { tokens } = await tokenExchangeOauth2Client.getToken(code);
+      console.log('Tokens received successfully:', {
+        hasAccessToken: !!tokens.access_token,
+        hasRefreshToken: !!tokens.refresh_token,
+        expiryDate: tokens.expiry_date
+      });
       
-      // Set credentials on the client for subsequent API calls
+      // Set credentials on client for API calls
       tokenExchangeOauth2Client.setCredentials(tokens);
   
       // Get user info from Google
@@ -153,44 +132,56 @@ export const handleGoogleCallback = async (req: Request, res: Response) => {
       });
       const userInfo = userInfoResponse.data;
   
-      console.log('User Info from Google:', userInfo.email);
+      console.log('User info retrieved:', {
+        email: userInfo.email,
+        hasId: !!userInfo.id
+      });
+      
       if (!userInfo.id || !userInfo.email) {
-          throw new Error('Failed to retrieve user ID or email from Google.');
+        throw new Error('Failed to retrieve user information');
       }
   
       // Create or update user in database
       const user = await upsertUser({
-          id: userInfo.id,
-          email: userInfo.email,
-          name: userInfo.name || undefined,
-          picture: userInfo.picture || undefined,
-          verified_email: userInfo.verified_email || undefined
+        id: userInfo.id,
+        email: userInfo.email,
+        name: userInfo.name || undefined,
+        picture: userInfo.picture || undefined,
+        verified_email: userInfo.verified_email || undefined
       });
-      console.log('User upserted in DB:', user.email);
+      
+      console.log('User upserted in database:', {
+        id: user.id,
+        email: user.email
+      });
   
-      // Store tokens securely
-      const { error: tokenStoreError } = await supabase
-        .from('user_tokens')
-        .upsert({
+      // Store tokens in Supabase
+      try {
+        const { error: tokenStoreError } = await supabase
+          .from('user_tokens')
+          .upsert({
             user_id: user.id,
             provider: 'google',
             access_token: tokens.access_token,
             refresh_token: tokens.refresh_token, 
             expires_at: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,
             scopes: tokens.scope
-        }, { onConflict: 'user_id, provider' });
-  
-      if (tokenStoreError) {
+          }, { onConflict: 'user_id, provider' });
+    
+        if (tokenStoreError) {
           console.error('Error storing user tokens:', tokenStoreError);
+        }
+      } catch (storeError) {
+        console.error('Failed to store tokens:', storeError);
+        // Continue even if token storage fails
       }
   
-      // Generate JWT token for your application's session
+      // Generate JWT token
       const appTokenPayload = { id: user.id, email: user.email };
       const appToken = generateToken(appTokenPayload);
-  
-      console.log('App token generated.');
+      console.log('JWT token generated successfully');
       
-      // Handle JSONP response if callback provided
+      // Handle JSONP response
       if (isJsonp) {
         const responseData = {
           token: appToken,
@@ -205,7 +196,7 @@ export const handleGoogleCallback = async (req: Request, res: Response) => {
         return res.send(`${callback}(${JSON.stringify(responseData)})`);
       }
       
-      // For regular API response, send JSON
+      // Handle JSON response
       if (req.headers.accept?.includes('application/json')) {
         console.log('Sending JSON response');
         return res.json({
@@ -219,15 +210,11 @@ export const handleGoogleCallback = async (req: Request, res: Response) => {
         });
       }
       
-      // Otherwise, redirect user back to the frontend with the token
-      // Use the redirect parameter if provided, otherwise determine based on referer
-      const clientRedirectUrl = typeof redirect === 'string' && redirect.length > 0
-        ? redirect
-        : (req.headers.origin || 'https://www.quits.cc') + '/dashboard'; // Default fallback
-        
-      // Include the app token in the redirect URL
-      console.log('Redirecting to frontend with token:', clientRedirectUrl);
-      return res.redirect(`${clientRedirectUrl}?token=${appToken}`);
+      // Handle redirect to frontend
+      const dashboardUrl = getRedirectUrl(redirect);
+      console.log('Redirecting to frontend with token:', dashboardUrl);
+      return res.redirect(`${dashboardUrl}?token=${appToken}`);
+      
     } catch (tokenError: any) {
       console.error('Error exchanging code for tokens:', tokenError.message);
       console.error('Full error:', tokenError);
@@ -263,31 +250,78 @@ export const handleGoogleCallback = async (req: Request, res: Response) => {
     }
     
     // Handle JSONP error response if callback was provided
-    const callback = req.query.callback;
+    const callback = req.query.callback as string | undefined;
     if (typeof callback === 'string' && callback.length > 0) {
       return res.send(`${callback}({"error": "auth_failed", "message": ${JSON.stringify(error.message)}})`);
     }
     
-    // Get redirect URL
-    const redirect = req.query.redirect;
-    const clientOrigin = typeof redirect === 'string' && redirect.length > 0
-      ? redirect
-      : req.headers.origin || process.env.CLIENT_URL || 'http://localhost:5173';
-      
-    // Redirect back to frontend login with a generic error
-    const loginUrl = `${clientOrigin}/login`;
+    // Get redirect URL for error cases
+    const redirect = req.query.redirect as string | undefined;
+    const frontendUrl = getFrontendUrl(redirect, req.headers.origin, req.headers.referer);
+    const loginUrl = `${frontendUrl}/login`;
+    
+    // Determine error type and details
     let errorCode = 'google_auth_failed';
     let errorDetails = '';
     
     if (error.response?.data?.error === 'redirect_uri_mismatch') {
-        errorCode = 'redirect_uri_mismatch';
-        errorDetails = '&details=Redirect+URI+mismatch+in+OAuth+config';
+      errorCode = 'redirect_uri_mismatch';
+      errorDetails = '&details=Redirect+URI+mismatch+in+OAuth+config';
     } else if (error.response?.data?.error === 'invalid_grant') {
-        errorCode = 'invalid_grant'; // Often means code expired or already used
-        errorDetails = '&details=Invalid+or+expired+authorization+code';
+      errorCode = 'invalid_grant';
+      errorDetails = '&details=Invalid+or+expired+authorization+code';
     }
     
     console.log('Redirecting to login with error:', `${loginUrl}?error=${errorCode}${errorDetails}`);
     return res.redirect(`${loginUrl}?error=${errorCode}${errorDetails}`);
   }
-}; 
+};
+
+// Helper function to get the frontend URL
+function getFrontendUrl(
+  redirectParam?: string, 
+  originHeader?: string, 
+  refererHeader?: string
+): string {
+  // If redirect param provided, extract the origin
+  if (redirectParam) {
+    try {
+      const redirectUrl = new URL(redirectParam);
+      return `${redirectUrl.protocol}//${redirectUrl.host}`;
+    } catch (error) {
+      // Invalid URL format
+    }
+  }
+  
+  // If origin header provided
+  if (originHeader) {
+    return originHeader;
+  }
+  
+  // If referer header provided
+  if (refererHeader) {
+    try {
+      const refererUrl = new URL(refererHeader);
+      return `${refererUrl.protocol}//${refererUrl.host}`;
+    } catch (error) {
+      // Invalid URL format
+    }
+  }
+  
+  // Default frontend URL
+  return 'https://www.quits.cc';
+}
+
+// Helper function to get the redirect URL
+function getRedirectUrl(redirectParam?: string): string {
+  if (redirectParam) {
+    // Ensure we're redirecting to the frontend, not the API
+    if (redirectParam.includes('api.quits.cc')) {
+      return redirectParam.replace('api.quits.cc', 'www.quits.cc');
+    }
+    return redirectParam;
+  }
+  
+  // Default dashboard URL
+  return 'https://www.quits.cc/dashboard';
+} 
