@@ -1,134 +1,135 @@
 // Google OAuth Callback - Standalone handler
-import { setCorsHeaders } from '../../utils.js';
+import { setCorsHeaders, getPath } from '../../utils.js';
 
 export default async function handler(req, res) {
-  console.log('Vercel Serverless Function - Google OAuth Callback hit');
-  console.log('Full URL:', req.url);
-  console.log('Method:', req.method);
-  console.log('Headers:', JSON.stringify(req.headers, null, 2));
-  console.log('Query params:', req.query);
-  
-  // Always ensure proper CORS headers are set
+  // Set CORS headers for all response types
   setCorsHeaders(req, res);
-  
-  // For preflight requests, return immediately after setting headers
+
+  // Add no-cache headers
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.setHeader('Surrogate-Control', 'no-store');
+
+  // Log basic request information for debugging
+  const path = getPath(req);
+  console.log(`OAuth Callback Handler - Processing ${req.method} request for: ${path}`);
+  console.log('Query params:', req.query);
+  console.log('Accept:', req.headers.accept);
+  console.log('Origin:', req.headers.origin);
+
+  // Check for OPTIONS preflight request
   if (req.method === 'OPTIONS') {
-    console.log('Handling OPTIONS preflight request with explicit Cache-Control header support');
     return res.status(204).end();
   }
-  
-  // Get code from query parameters
-  const { code, redirect } = req.query;
-  
+
+  // Extract code from query parameters
+  const { code, redirect = 'https://www.quits.cc/dashboard' } = req.query;
+
   if (!code) {
-    console.log('Error: Missing authorization code');
-    return res.status(400).json({ error: 'Missing authorization code' });
+    const errorMsg = 'Missing authorization code';
+    console.log(`Error: ${errorMsg}`);
+    
+    // Check if the client accepts JSON
+    if (req.headers.accept && req.headers.accept.includes('application/json')) {
+      return res.status(400).json({ error: errorMsg });
+    }
+    
+    // Otherwise return HTML
+    return res.status(400).send(`
+      <html>
+        <head><title>Authentication Error</title></head>
+        <body>
+          <h2>Authentication Error</h2>
+          <p>${errorMsg}</p>
+          <p><a href="https://www.quits.cc/login">Return to login</a></p>
+        </body>
+      </html>
+    `);
   }
-  
+
   try {
-    // Google OAuth configuration
+    // Import required modules
     const { google } = await import('googleapis');
-    
-    // Support multiple redirect URI formats depending on what's registered in Google Console
-    // The most likely ones are:
-    // - https://quits.cc/auth/callback (no www, shorter)
-    // - https://www.quits.cc/auth/callback (with www)
-    // - https://api.quits.cc/api/auth/google/callback (API path)
-    
-    // Try multiple redirect URIs to increase the chance of success
-    // The one we use here MUST match one of the URIs registered in Google Console
-    const possibleRedirectUris = [
-      'https://www.quits.cc/auth/callback', // Primary (with www)
-      'https://quits.cc/auth/callback',     // Secondary (without www)
-      'https://api.quits.cc/api/auth/google/callback' // API path (fallback)
-    ];
-    
+    const jwt = await import('jsonwebtoken');
+
     // Start with the primary redirect URI
-    let redirectUri = possibleRedirectUris[0];
-    console.log('Using primary redirect URI:', redirectUri);
-    
-    // Create OAuth client with our primary URI
-    let oauth2Client = new google.auth.OAuth2(
+    const redirectUri = 'https://www.quits.cc/auth/callback';
+
+    // Create OAuth client
+    const oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET,
       redirectUri
     );
-    
+
     // Exchange code for tokens
-    console.log('Exchanging code for tokens...');
     let tokens;
-    let exchangeSuccessful = false;
-    let lastError;
-    
-    // Try each redirect URI until one works
-    for (const uri of possibleRedirectUris) {
-      try {
-        // Update the redirect URI for this attempt
-        redirectUri = uri;
-        console.log(`Attempting token exchange with redirect URI: ${redirectUri}`);
-        
-        // Create a new OAuth client with this URI
-        oauth2Client = new google.auth.OAuth2(
-          process.env.GOOGLE_CLIENT_ID,
-          process.env.GOOGLE_CLIENT_SECRET,
-          redirectUri
-        );
-        
-        // Try to exchange the code for tokens
-        const response = await oauth2Client.getToken(code);
-        tokens = response.tokens;
-        console.log('Tokens received successfully with URI:', redirectUri);
-        exchangeSuccessful = true;
-        break; // Exit the loop if successful
-      } catch (error) {
-        lastError = error;
-        // Add more detailed logging for invalid_grant errors (these are expected in many cases)
-        if (error.response?.data?.error === 'invalid_grant') {
-          console.log('Invalid grant error received - this is expected if the code was already used or expired');
-        } else {
-          console.error(`Token exchange failed with URI ${redirectUri}:`, error.message);
+    try {
+      const response = await oauth2Client.getToken(code);
+      tokens = response.tokens;
+    } catch (tokenError) {
+      console.error('Token exchange error:', tokenError);
+      
+      // Return appropriate format based on Accept header
+      if (req.headers.accept && req.headers.accept.includes('application/json')) {
+        // If it's an invalid_grant error, return a specific message
+        if (tokenError.message && tokenError.message.includes('invalid_grant')) {
+          return res.status(400).json({
+            error: 'invalid_grant',
+            message: 'Authorization code has expired or already been used'
+          });
         }
-        // Continue to the next URI
+        
+        return res.status(400).json({
+          error: 'token_exchange_failed',
+          message: tokenError.message
+        });
       }
+      
+      // HTML response
+      return res.status(400).send(`
+        <html>
+          <head><title>Authentication Error</title></head>
+          <body>
+            <h2>Authentication Error</h2>
+            <p>${tokenError.message || 'Failed to exchange authorization code for tokens'}</p>
+            <p><a href="https://www.quits.cc/login">Return to login</a></p>
+          </body>
+        </html>
+      `);
     }
-    
-    // If none of the URIs worked, throw the last error
-    if (!exchangeSuccessful) {
-      console.error('All redirect URIs failed. Last error:', lastError?.message);
-      throw lastError || new Error('Failed to exchange authorization code for tokens');
-    }
-    
+
     // Get user info
     oauth2Client.setCredentials(tokens);
     const oauth2 = google.oauth2('v2');
-    console.log('Fetching user info...');
     const userInfoResponse = await oauth2.userinfo.get({
       auth: oauth2Client,
     });
     const userInfo = userInfoResponse.data;
-    console.log('User info received:', userInfo.email);
-    
+
     if (!userInfo.id || !userInfo.email) {
       throw new Error('Failed to retrieve user information');
     }
-    
+
+    console.log(`User authenticated: ${userInfo.email}`);
+
     // Generate a JWT token
-    const jwt = await import('jsonwebtoken');
     const token = jwt.default.sign(
       { 
         id: userInfo.id,
         email: userInfo.email,
-        gmail_token: tokens.access_token, // Include Gmail token in the JWT
+        gmail_token: tokens.access_token,
         createdAt: new Date().toISOString()
       },
       process.env.JWT_SECRET || 'your-jwt-secret-key',
       { expiresIn: '7d' }
     );
-    
-    // Return JSON or redirect based on the request
-    if (req.headers.accept?.includes('application/json')) {
-      console.log('Returning JSON response');
-      return res.json({
+
+    // Check if the client accepts JSON
+    if (req.headers.accept && req.headers.accept.includes('application/json')) {
+      // Return JSON with token and user info
+      return res.status(200).json({
         success: true,
         token,
         user: {
@@ -139,82 +140,69 @@ export default async function handler(req, res) {
         }
       });
     }
-    
-    // For HTML redirects, use an HTML page with meta refresh and script to localStorage
-    // This avoids CSP issues by letting the browser set the token directly
-    const redirectUrl = redirect || 'https://www.quits.cc/dashboard';
-    console.log('Redirecting to:', redirectUrl);
-    
-    // Use safe redirect with no CSP issues
+
+    // Generate HTML page with token in localStorage and auto-redirect
     const htmlResponse = `
       <!DOCTYPE html>
       <html>
       <head>
         <meta charset="utf-8">
-        <title>Redirecting to Dashboard</title>
-        <meta http-equiv="refresh" content="0; URL='${redirectUrl}'">
-        <meta name="robots" content="noindex">
+        <title>Authentication Successful</title>
+        <style>
+          body { font-family: Arial, sans-serif; text-align: center; margin: 50px; }
+          .success { color: green; }
+          .loader { border: 5px solid #f3f3f3; border-top: 5px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }
+          @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        </style>
+        <meta http-equiv="refresh" content="1;url=${redirect}">
       </head>
       <body>
-        <script>
-          // Store token in localStorage before redirect
-          localStorage.setItem('token', '${token}');
-          // Redirect immediately
-          window.location.href = '${redirectUrl}';
-        </script>
-        <noscript>
-          <meta http-equiv="refresh" content="0; URL='${redirectUrl}?token=${token}'">
-          Please click <a href="${redirectUrl}?token=${token}">here</a> to continue if not redirected.
-        </noscript>
+        <h2 class="success">Authentication Successful!</h2>
+        <div class="loader"></div>
         <p>Redirecting to dashboard...</p>
+        <p>If you are not redirected automatically, <a href="${redirect}">click here</a>.</p>
+        
+        <script>
+          // Store the token in localStorage
+          localStorage.setItem('token', '${token}');
+          console.log('Token stored successfully');
+          
+          // Redirect after a short delay
+          setTimeout(function() {
+            window.location.href = '${redirect}';
+          }, 1000);
+        </script>
       </body>
       </html>
     `;
-    
+
+    // Set content type to HTML and send the response
     res.setHeader('Content-Type', 'text/html');
-    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'");
     return res.send(htmlResponse);
-    
+
   } catch (error) {
-    console.error('Error in Google callback handler:', error);
+    console.error('OAuth callback error:', error);
     
-    // Check for specific error types
-    let errorMessage = error.message || 'Authentication failed';
-    let errorCode = 'auth_failed';
-    let redirectToLogin = true;
-    
-    // Handle invalid_grant error (expired or already used code)
-    if (error.response?.data?.error === 'invalid_grant' || 
-        error.message?.includes('invalid_grant')) {
-      errorMessage = 'Authorization code has expired or already been used';
-      errorCode = 'invalid_grant';
-      console.log('Received invalid_grant error - this is normal if the code was already used');
-    }
-    
-    // If client wants JSON, return JSON error
-    if (req.headers.accept?.includes('application/json')) {
-      console.log('Returning JSON error response');
+    // Return appropriate format based on Accept header
+    if (req.headers.accept && req.headers.accept.includes('application/json')) {
       return res.status(500).json({
-        error: errorCode,
-        message: errorMessage,
+        error: 'authentication_failed',
+        message: error.message,
         details: process.env.NODE_ENV === 'production' ? undefined : error.stack
       });
     }
     
-    // Redirect to login with error
-    if (redirectToLogin) {
-      const loginUrl = redirect?.includes('login') 
-        ? redirect 
-        : 'https://www.quits.cc/login';
-      console.log(`Redirecting to ${loginUrl} with error`);
-      return res.redirect(`${loginUrl}?error=${errorCode}&message=${encodeURIComponent(errorMessage)}`);
-    }
-    
-    // Fallback error response
-    return res.status(500).json({
-      error: errorCode,
-      message: errorMessage,
-      details: process.env.NODE_ENV === 'production' ? undefined : error.stack
-    });
+    // HTML error response
+    return res.status(500).send(`
+      <html>
+        <head><title>Authentication Error</title></head>
+        <body>
+          <h2>Authentication Error</h2>
+          <p>${error.message}</p>
+          <p><a href="https://www.quits.cc/login">Return to login</a></p>
+        </body>
+      </html>
+    `);
   }
 } 
