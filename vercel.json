@@ -22,6 +22,18 @@
       }
     },
     {
+      "src": "/favicon.ico",
+      "dest": "/api/favicon.js"
+    },
+    {
+      "src": "/favicon.png",
+      "dest": "/api/favicon.js"
+    },
+    {
+      "src": "^/$",
+      "dest": "/api/root.js"
+    },
+    {
       "src": "/api/(.*)",
       "dest": "/api/index.js",
       "headers": {
