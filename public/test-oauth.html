@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quits Google OAuth Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #4285F4;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 10px 0;
+        }
+        pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .success {
+            color: green;
+            font-weight: bold;
+        }
+        .error {
+            color: red;
+            font-weight: bold;
+        }
+        #logContainer {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin-top: 20px;
+            background-color: #f8f8f8;
+        }
+        .log-entry {
+            margin-bottom: 5px;
+            font-family: monospace;
+        }
+        .debug { color: #666; }
+        .info { color: #000; }
+        .warn { color: #f90; }
+        .error { color: #f00; }
+    </style>
+</head>
+<body>
+    <h1>Quits Google OAuth Test</h1>
+    
+    <h2>Step 1: Start OAuth Flow</h2>
+    <button id="startOauth">Start Google OAuth Flow</button>
+    
+    <h2>Step 2: Process Authorization Code</h2>
+    <div>
+        <p>If you've been redirected here with a code in the URL, it will be automatically processed.</p>
+        <button id="processCode" disabled>Process Code Manually</button>
+    </div>
+    
+    <h2>Step 3: Check Token</h2>
+    <div>
+        <button id="checkToken">Check Current Token</button>
+        <button id="clearToken">Clear Token</button>
+    </div>
+    
+    <div id="tokenInfo"></div>
+    
+    <h2>Debug Log</h2>
+    <div id="logContainer"></div>
+    
+    <script>
+        // Logging utility
+        const log = {
+            container: document.getElementById('logContainer'),
+            _log(level, message) {
+                const entry = document.createElement('div');
+                entry.className = `log-entry ${level}`;
+                entry.textContent = `[${new Date().toISOString()}] [${level.toUpperCase()}] ${message}`;
+                this.container.appendChild(entry);
+                this.container.scrollTop = this.container.scrollHeight;
+                console[level](message);
+            },
+            debug(message) { this._log('debug', message); },
+            info(message) { this._log('info', message); },
+            warn(message) { this._log('warn', message); },
+            error(message) { this._log('error', message); }
+        };
+        
+        // Get URL parameters
+        function getUrlParams() {
+            const params = new URLSearchParams(window.location.search);
+            return {
+                code: params.get('code'),
+                state: params.get('state'),
+                error: params.get('error'),
+                errorDescription: params.get('error_description')
+            };
+        }
+        
+        // Function to validate and decode JWT
+        function validateToken(token) {
+            if (!token) return null;
+            
+            try {
+                const parts = token.split('.');
+                if (parts.length !== 3) return null;
+                
+                // Decode payload
+                const payload = JSON.parse(atob(parts[1]));
+                
+                // Check expiration
+                if (payload.exp && payload.exp * 1000 < Date.now()) {
+                    log.warn('Token has expired');
+                    return null;
+                }
+                
+                return payload;
+            } catch (e) {
+                log.error('Error decoding token: ' + e.message);
+                return null;
+            }
+        }
+        
+        // Initialize the page
+        function init() {
+            log.info('OAuth test page initialized');
+            
+            // Check for code in URL
+            const params = getUrlParams();
+            if (params.code) {
+                log.info(`Authorization code found in URL: ${params.code.substring(0, 10)}...`);
+                document.getElementById('processCode').removeAttribute('disabled');
+                document.getElementById('processCode').textContent = 'Process Code: ' + params.code.substring(0, 10) + '...';
+                
+                // Auto-process the code
+                processCode(params.code);
+            } else if (params.error) {
+                log.error(`OAuth error: ${params.error} - ${params.errorDescription || 'No description'}`);
+            }
+            
+            // Check for existing token
+            checkToken();
+        }
+        
+        // Start OAuth flow
+        document.getElementById('startOauth').addEventListener('click', () => {
+            log.info('Starting OAuth flow...');
+            
+            // Generate state parameter for security
+            const state = Math.random().toString(36).substring(2, 15);
+            sessionStorage.setItem('oauth_state', state);
+            log.debug(`Generated state parameter: ${state}`);
+            
+            // Set up OAuth parameters
+            const params = new URLSearchParams({
+                client_id: '82730443897-ji64k4jhk02lonkps5vu54e1q5opoq3g.apps.googleusercontent.com',
+                redirect_uri: window.location.origin + '/test-oauth.html',
+                response_type: 'code',
+                scope: 'email profile https://www.googleapis.com/auth/gmail.readonly',
+                state: state,
+                prompt: 'select_account consent',
+                access_type: 'offline'
+            });
+            
+            const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+            log.debug(`Auth URL: ${authUrl}`);
+            
+            // Redirect to Google
+            window.location.href = authUrl;
+        });
+        
+        // Process authorization code
+        document.getElementById('processCode').addEventListener('click', () => {
+            const params = getUrlParams();
+            if (params.code) {
+                processCode(params.code);
+            } else {
+                log.error('No code found in URL');
+            }
+        });
+        
+        async function processCode(code) {
+            try {
+                log.info(`Processing authorization code: ${code.substring(0, 10)}...`);
+                
+                // First try the Google proxy API
+                const proxyEndpoint = 'https://api.quits.cc/google-proxy';
+                log.debug(`Using proxy endpoint: ${proxyEndpoint}`);
+                
+                const fetchOptions = {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json',
+                        'X-Client-Version': '2.0',
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Cache-Control': 'no-cache, no-store',
+                        'Pragma': 'no-cache'
+                    }
+                };
+                
+                log.debug('Fetch options: ' + JSON.stringify(fetchOptions, null, 2));
+                
+                const fullUrl = `${proxyEndpoint}?code=${encodeURIComponent(code)}&redirect=${encodeURIComponent(window.location.origin + '/test-oauth.html')}&_t=${Date.now()}`;
+                log.debug('Making request to: ' + fullUrl);
+                
+                const response = await fetch(fullUrl, fetchOptions);
+                
+                log.debug(`Response status: ${response.status}`);
+                log.debug('Response headers: ' + JSON.stringify(Object.fromEntries([...response.headers.entries()]), null, 2));
+                
+                const responseText = await response.text();
+                log.debug('Raw response: ' + responseText);
+                
+                try {
+                    const data = JSON.parse(responseText);
+                    log.info('Parsed response: ' + JSON.stringify(data, null, 2));
+                    
+                    if (data.token) {
+                        log.info('Received token from server');
+                        localStorage.setItem('token', data.token);
+                        log.info('Token stored in localStorage');
+                        checkToken();
+                    } else if (data.error) {
+                        log.error(`Error from server: ${data.error} - ${data.message || 'No message'}`);
+                    } else {
+                        log.warn('Unexpected response structure');
+                    }
+                } catch (parseError) {
+                    log.error('Failed to parse response as JSON: ' + parseError.message);
+                }
+                
+            } catch (error) {
+                log.error('Error processing code: ' + error.message);
+            }
+        }
+        
+        // Check current token
+        document.getElementById('checkToken').addEventListener('click', checkToken);
+        
+        function checkToken() {
+            const tokenElement = document.getElementById('tokenInfo');
+            const token = localStorage.getItem('token');
+            
+            if (!token) {
+                log.info('No token found in localStorage');
+                tokenElement.innerHTML = '<p class="error">No token found</p>';
+                return;
+            }
+            
+            log.info('Token found in localStorage');
+            const decoded = validateToken(token);
+            
+            if (decoded) {
+                log.info('Token is valid');
+                tokenElement.innerHTML = `
+                    <p class="success">Valid token found</p>
+                    <p>Email: ${decoded.email}</p>
+                    <p>Expiration: ${new Date(decoded.exp * 1000).toLocaleString()}</p>
+                    <p>Created: ${new Date(decoded.createdAt).toLocaleString()}</p>
+                    <p>User ID: ${decoded.id}</p>
+                    <pre>${JSON.stringify(decoded, null, 2)}</pre>
+                `;
+            } else {
+                log.warn('Token is invalid');
+                tokenElement.innerHTML = `
+                    <p class="error">Invalid token found</p>
+                    <pre>${token.substring(0, 100)}...</pre>
+                `;
+            }
+        }
+        
+        // Clear token
+        document.getElementById('clearToken').addEventListener('click', () => {
+            localStorage.removeItem('token');
+            log.info('Token cleared from localStorage');
+            document.getElementById('tokenInfo').innerHTML = '<p>Token cleared</p>';
+        });
+        
+        // Initialize page
+        init();
+    </script>
+</body>
+</html> 
