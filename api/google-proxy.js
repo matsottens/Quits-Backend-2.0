@@ -18,7 +18,7 @@ setInterval(() => {
       processedCodes.delete(code);
     }
   }
-}, 3600000); // Run every hour
+}, 3600000);
 
 export default async function handler(req, res) {
   // Always set CORS headers explicitly for all response types
@@ -67,22 +67,14 @@ export default async function handler(req, res) {
   // Check if this code has already been processed
   if (processedCodes.has(code)) {
     const cachedResult = processedCodes.get(code);
-    console.log(`Using cached result for code ${code.substring(0, 8)}...`);
+    console.log('Using cached result for authorization code:', {
+      code_partial: code.substring(0, 8) + '...',
+      result_type: cachedResult.error ? 'error' : 'success',
+      timestamp_age: Date.now() - cachedResult.timestamp,
+      status: cachedResult.status || 200
+    });
     
-    // If we have a successful result with a token, return it
-    if (cachedResult.success && cachedResult.token) {
-      return res.status(200).json(cachedResult);
-    }
-    
-    // If we previously encountered an invalid_grant error, return that
-    if (cachedResult.error === 'invalid_grant') {
-      return res.status(400).json({
-        error: 'invalid_grant',
-        message: 'Authorization code has expired or already been used'
-      });
-    }
-    
-    // For other cases, return the cached result
+    // Return the cached result with the original status code
     return res.status(cachedResult.status || 200).json(cachedResult);
   }
   
@@ -114,8 +106,8 @@ export default async function handler(req, res) {
         
         // Print environment variables for debugging
         console.log('Environment variables:');
-        console.log('GOOGLE_CLIENT_ID:', process.env.GOOGLE_CLIENT_ID ? 'Set (length: ' + process.env.GOOGLE_CLIENT_ID.length + ')' : 'Not set');
-        console.log('GOOGLE_CLIENT_SECRET:', process.env.GOOGLE_CLIENT_SECRET ? 'Set (length: ' + process.env.GOOGLE_CLIENT_SECRET.length + ')' : 'Not set');
+        console.log('GOOGLE_CLIENT_ID:', process.env.GOOGLE_CLIENT_ID ? `Set (length: ${process.env.GOOGLE_CLIENT_ID.length})` : 'Not set');
+        console.log('GOOGLE_CLIENT_SECRET:', process.env.GOOGLE_CLIENT_SECRET ? `Set (length: ${process.env.GOOGLE_CLIENT_SECRET.length})` : 'Not set');
         console.log('NODE_ENV:', process.env.NODE_ENV);
         console.log('VERCEL_ENV:', process.env.VERCEL_ENV);
         
@@ -133,59 +125,22 @@ export default async function handler(req, res) {
           console.log('Using hardcoded client secret');
           clientSecret = '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';
         }
-        
+
         // Create OAuth client
+        console.log(`Creating OAuth client with redirect URI: ${redirectUri}`);
         const oauth2Client = new google.auth.OAuth2(
           clientId,
           clientSecret,
           redirectUri
         );
         
-        console.log('Created OAuth client with client ID:', clientId.substring(0, 15) + '...');
-        console.log('Redirect URI:', redirectUri);
-        
-        // Exchange code for tokens
+        // Try to exchange the auth code for tokens
         try {
-          console.log('Attempting to exchange authorization code for tokens...');
-          let response;
-          let exchangeError;
+          console.log(`Attempting to exchange authorization code: ${code.substring(0, 10)}...`);
+          console.log(`Using client ID: ${clientId.substring(0, 10)}...`);
+          console.log(`Using redirect URI: ${redirectUri}`);
           
-          // Try with the primary redirect URI first
-          try {
-            response = await oauth2Client.getToken(code);
-          } catch (error) {
-            console.log('Token exchange failed with primary redirect URI, trying fallbacks...');
-            exchangeError = error;
-            
-            // Try with alternate redirect URIs
-            const alternateUris = [
-              'https://quits.cc/auth/callback',
-              'https://www.quits.cc/auth/callback',
-              redirect || 'https://www.quits.cc/dashboard'
-            ];
-            
-            for (const uri of alternateUris) {
-              try {
-                console.log(`Trying with alternate redirect URI: ${uri}`);
-                const altOAuth2Client = new google.auth.OAuth2(
-                  clientId,
-                  clientSecret,
-                  uri
-                );
-                response = await altOAuth2Client.getToken(code);
-                console.log(`Success with redirect URI: ${uri}`);
-                break;
-              } catch (altError) {
-                console.log(`Failed with URI ${uri}:`, altError.message);
-              }
-            }
-          }
-          
-          // If we still don't have a response, throw the original error
-          if (!response && exchangeError) {
-            throw exchangeError;
-          }
-          
+          const response = await oauth2Client.getToken(code);
           console.log('Token exchange successful');
           const tokens = response.tokens;
           
@@ -245,12 +200,23 @@ export default async function handler(req, res) {
           return res.status(200).json(result);
         } catch (tokenError) {
           console.error('Token exchange error:', tokenError);
+          console.error('Token error name:', tokenError.name);
+          console.error('Token error message:', tokenError.message);
           console.error('Token exchange error details:', tokenError.response?.data || 'No additional details');
+          
+          // Log more details about the error if available
+          if (tokenError.response && tokenError.response.data) {
+            console.error('Error response data:', JSON.stringify(tokenError.response.data));
+            console.error('Error status:', tokenError.response.status);
+            console.error('Error headers:', JSON.stringify(tokenError.response.headers));
+          }
           
           // If it's an invalid_grant error, return a specific message
           if (tokenError.message && tokenError.message.includes('invalid_grant')) {
+            console.log('Invalid grant error detected - authorization code expired or already used');
             // Cache the invalid_grant result
             const errorResult = {
+              success: false,
               error: 'invalid_grant',
               message: 'Authorization code has expired or already been used',
               timestamp: Date.now(),
@@ -261,20 +227,84 @@ export default async function handler(req, res) {
             return res.status(400).json(errorResult);
           }
           
+          // Try alternate redirect URIs if primary fails and it's not an invalid_grant error
+          console.log('Trying alternate redirect URIs');
+          const alternateUris = [
+            'https://quits.cc/auth/callback',
+            'https://www.quits.cc/dashboard',
+            redirect ? decodeURIComponent(redirect) : 'https://www.quits.cc/dashboard'
+          ];
+          
+          for (const uri of alternateUris) {
+            try {
+              console.log(`Trying with alternate redirect URI: ${uri}`);
+              const altOAuth2Client = new google.auth.OAuth2(
+                clientId,
+                clientSecret,
+                uri
+              );
+              const altResponse = await altOAuth2Client.getToken(code);
+              console.log(`Success with alternate URI: ${uri}`);
+              
+              // Process the successful response
+              const altTokens = altResponse.tokens;
+              altOAuth2Client.setCredentials(altTokens);
+              const altOauth2 = google.oauth2('v2');
+              const altUserInfoResponse = await altOauth2.userinfo.get({
+                auth: altOAuth2Client,
+              });
+              const altUserInfo = altUserInfoResponse.data;
+              
+              // Generate JWT
+              const jwtModule = await import('jsonwebtoken');
+              const altToken = jwtModule.default.sign(
+                { 
+                  id: altUserInfo.id,
+                  email: altUserInfo.email,
+                  gmail_token: altTokens.access_token,
+                  createdAt: new Date().toISOString()
+                },
+                process.env.JWT_SECRET || 'your-jwt-secret-key',
+                { expiresIn: '7d' }
+              );
+              
+              // Create successful result
+              const successResult = {
+                success: true,
+                token: altToken,
+                user: {
+                  id: altUserInfo.id,
+                  email: altUserInfo.email,
+                  name: altUserInfo.name,
+                  picture: altUserInfo.picture
+                },
+                timestamp: Date.now()
+              };
+              
+              // Cache the successful result
+              processedCodes.set(code, successResult);
+              
+              return res.status(200).json(successResult);
+            } catch (altError) {
+              console.log(`Failed with URI ${uri}:`, altError.message);
+            }
+          }
+          
           // For other errors, create a pending result
-          const pendingResult = {
+          console.log('All redirect URIs failed, returning auth_failed error');
+          const errorResult = {
             success: false, 
-            pending: true,
-            message: 'Authentication in progress via background service',
-            error: tokenError.message,
-            code_partial: code.substring(0, 8) + '...',
-            timestamp: Date.now()
+            error: 'auth_failed',
+            message: 'Failed to authenticate with Google. Please try again.',
+            details: tokenError.message,
+            timestamp: Date.now(),
+            status: 400
           };
           
-          // Cache the pending result
-          processedCodes.set(code, pendingResult);
+          // Cache the error result
+          processedCodes.set(code, errorResult);
           
-          return res.status(200).json(pendingResult);
+          return res.status(400).json(errorResult);
         }
       } catch (directError) {
         console.error('Error in direct handling:', directError);
@@ -292,7 +322,7 @@ export default async function handler(req, res) {
         // Cache the error result
         processedCodes.set(code, errorResult);
         
-        return res.status(200).json(errorResult);
+        return res.status(500).json(errorResult);
       }
     }
     
@@ -490,12 +520,16 @@ export default async function handler(req, res) {
     return res.send(htmlResponse);
   } catch (error) {
     console.error('Google Proxy Error:', error);
+    console.error('Error stack:', error.stack);
     
     // Create error result
     const errorResult = {
-      error: 'Authentication failed',
-      message: error.message,
-      details: process.env.NODE_ENV === 'production' ? undefined : error.stack
+      success: false,
+      error: 'auth_failed',
+      message: 'Authentication failed. Please try again.',
+      details: process.env.NODE_ENV === 'production' ? error.message : error.stack,
+      timestamp: Date.now(),
+      status: 500
     };
     
     // Cache the error result
