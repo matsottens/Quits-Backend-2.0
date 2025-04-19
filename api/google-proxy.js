@@ -111,23 +111,15 @@ export default async function handler(req, res) {
         console.log('NODE_ENV:', process.env.NODE_ENV);
         console.log('VERCEL_ENV:', process.env.VERCEL_ENV);
         
-        // For production, hardcode the client ID/secret if needed
-        let clientId = process.env.GOOGLE_CLIENT_ID;
-        let clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+        // Always use hardcoded values for reliability
+        const clientId = '82730443897-ji64k4jhk02lonkps5vu54e1q5opoq3g.apps.googleusercontent.com';
+        const clientSecret = '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';
+        const jwtSecret = 'your-jwt-secret-key';
         
-        // Fallback to hardcoded values if not set (for Vercel deployment)
-        if (!clientId || clientId.trim() === '') {
-          console.log('Using hardcoded client ID');
-          clientId = '82730443897-ji64k4jhk02lonkps5vu54e1q5opoq3g.apps.googleusercontent.com';
-        }
-        
-        if (!clientSecret || clientSecret.trim() === '') {
-          console.log('Using hardcoded client secret');
-          clientSecret = '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';
-        }
-
         // Create OAuth client
         console.log(`Creating OAuth client with redirect URI: ${redirectUri}`);
+        console.log(`Using client ID: ${clientId.substring(0, 10)}...`);
+        
         const oauth2Client = new google.auth.OAuth2(
           clientId,
           clientSecret,
@@ -137,8 +129,6 @@ export default async function handler(req, res) {
         // Try to exchange the auth code for tokens
         try {
           console.log(`Attempting to exchange authorization code: ${code.substring(0, 10)}...`);
-          console.log(`Using client ID: ${clientId.substring(0, 10)}...`);
-          console.log(`Using redirect URI: ${redirectUri}`);
           
           const response = await oauth2Client.getToken(code);
           console.log('Token exchange successful');
@@ -172,7 +162,7 @@ export default async function handler(req, res) {
           
           const token = jwt.default.sign(
             jwtPayload,
-            process.env.JWT_SECRET || 'your-jwt-secret-key',
+            jwtSecret,
             { expiresIn: '7d' }
           );
           
@@ -220,7 +210,13 @@ export default async function handler(req, res) {
               error: 'invalid_grant',
               message: 'Authorization code has expired or already been used',
               timestamp: Date.now(),
-              status: 400
+              status: 400,
+              error_details: {
+                code_partial: code.substring(0, 10) + '...',
+                error_type: tokenError.name,
+                error_message: tokenError.message,
+                redirect_uri: redirectUri
+              }
             };
             processedCodes.set(code, errorResult);
             
@@ -264,7 +260,7 @@ export default async function handler(req, res) {
                   gmail_token: altTokens.access_token,
                   createdAt: new Date().toISOString()
                 },
-                process.env.JWT_SECRET || 'your-jwt-secret-key',
+                jwtSecret,
                 { expiresIn: '7d' }
               );
               
@@ -298,7 +294,13 @@ export default async function handler(req, res) {
             message: 'Failed to authenticate with Google. Please try again.',
             details: tokenError.message,
             timestamp: Date.now(),
-            status: 400
+            status: 400,
+            error_details: {
+              code_partial: code.substring(0, 10) + '...',
+              tried_uris: alternateUris,
+              error_type: tokenError.name,
+              error_message: tokenError.message
+            }
           };
           
           // Cache the error result
@@ -316,7 +318,8 @@ export default async function handler(req, res) {
           error: 'direct_handling_failed',
           message: 'Error handling authorization code',
           details: directError.message,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          stack: directError.stack
         };
         
         // Cache the error result

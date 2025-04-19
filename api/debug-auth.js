@@ -13,6 +13,11 @@ export default async function handler(req, res) {
     return res.status(204).end();
   }
   
+  // Define hardcoded credentials that will be used regardless of env vars
+  const hardcodedClientId = '82730443897-ji64k4jhk02lonkps5vu54e1q5opoq3g.apps.googleusercontent.com';
+  const hardcodedClientSecret = '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';
+  const hardcodedJwtSecret = 'your-jwt-secret-key';
+  
   // Response object with debug information
   const debugInfo = {
     timestamp: new Date().toISOString(),
@@ -33,19 +38,30 @@ export default async function handler(req, res) {
     oauth: {
       google_client_id: process.env.GOOGLE_CLIENT_ID ? 
         `${process.env.GOOGLE_CLIENT_ID.substring(0, 10)}...` : 
-        'not set',
+        'hardcoded value available',
       google_client_id_length: process.env.GOOGLE_CLIENT_ID ? 
         process.env.GOOGLE_CLIENT_ID.length : 
-        0,
+        hardcodedClientId.length,
       google_client_secret: process.env.GOOGLE_CLIENT_SECRET ? 
         'set (length: ' + process.env.GOOGLE_CLIENT_SECRET.length + ')' : 
-        'not set',
+        'hardcoded value available',
       google_redirect_uri: process.env.GOOGLE_REDIRECT_URI || 
         process.env.GOOGLE_CALLBACK_URI || 
-        'not set',
+        'https://www.quits.cc/auth/callback',
       jwt_secret: process.env.JWT_SECRET ? 
         'set (length: ' + process.env.JWT_SECRET.length + ')' : 
-        'not set'
+        'hardcoded value available'
+    },
+    hardcoded_credentials: {
+      client_id_partial: hardcodedClientId.substring(0, 10) + '...',
+      client_id_length: hardcodedClientId.length,
+      client_secret_length: hardcodedClientSecret.length,
+      redirect_uri: 'https://www.quits.cc/auth/callback',
+      secondary_redirect_uris: [
+        'https://quits.cc/auth/callback',
+        'https://www.quits.cc/dashboard'
+      ],
+      jwt_secret_partial: hardcodedJwtSecret.substring(0, 3) + '...'
     },
     server: {
       nodejs_version: process.version,
@@ -63,20 +79,6 @@ export default async function handler(req, res) {
   };
   
   try {
-    // Add hardcoded client ID to verify it matches what we expect
-    const hardcodedClientId = '82730443897-ji64k4jhk02lonkps5vu54e1q5opoq3g.apps.googleusercontent.com';
-    debugInfo.oauth.hardcoded_client_id = hardcodedClientId.substring(0, 10) + '...';
-    debugInfo.oauth.hardcoded_client_id_length = hardcodedClientId.length;
-    
-    // Set client IDs directly so we know we have correct values
-    process.env.GOOGLE_CLIENT_ID = hardcodedClientId;
-    process.env.GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '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';
-    
-    // Update oauth info with corrected values
-    debugInfo.oauth.google_client_id = `${process.env.GOOGLE_CLIENT_ID.substring(0, 10)}...`;
-    debugInfo.oauth.google_client_id_length = process.env.GOOGLE_CLIENT_ID.length;
-    debugInfo.oauth.google_client_secret = 'set (length: ' + process.env.GOOGLE_CLIENT_SECRET.length + ')';
-    
     // Verify if the hardcoded client ID matches the environment variable
     if (process.env.GOOGLE_CLIENT_ID) {
       debugInfo.oauth.client_id_matches = process.env.GOOGLE_CLIENT_ID === hardcodedClientId;
@@ -101,8 +103,8 @@ export default async function handler(req, res) {
       
       // Try to create a test OAuth client
       try {
-        const clientId = process.env.GOOGLE_CLIENT_ID;
-        const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+        const clientId = hardcodedClientId;
+        const clientSecret = hardcodedClientSecret;
         
         debugInfo.test_client = {
           client_id: clientId.substring(0, 10) + '...',
@@ -133,7 +135,7 @@ export default async function handler(req, res) {
             const authUrl = oauth2Client.generateAuthUrl({
               access_type: 'offline',
               scope: ['email', 'profile'],
-              prompt: 'consent'
+              prompt: 'select_account consent'
             });
             
             debugInfo.oauth_clients.push({

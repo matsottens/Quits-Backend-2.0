@@ -67,20 +67,11 @@ export default async function handler(req, res) {
     console.log('NODE_ENV:', process.env.NODE_ENV);
     console.log('VERCEL_ENV:', process.env.VERCEL_ENV);
 
-    // For production, hardcode the client ID/secret if needed
-    let clientId = process.env.GOOGLE_CLIENT_ID;
-    let clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    // Always use hardcoded client ID/secret for stability
+    const clientId = '82730443897-ji64k4jhk02lonkps5vu54e1q5opoq3g.apps.googleusercontent.com';
+    const clientSecret = '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';
     
-    // Fallback to hardcoded values if not set (for Vercel deployment)
-    if (!clientId || clientId.trim() === '') {
-      console.log('Using hardcoded client ID');
-      clientId = '82730443897-ji64k4jhk02lonkps5vu54e1q5opoq3g.apps.googleusercontent.com';
-    }
-    
-    if (!clientSecret || clientSecret.trim() === '') {
-      console.log('Using hardcoded client secret');
-      clientSecret = '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';
-    }
+    console.log(`Using client ID: ${clientId.substring(0, 10)}... and redirect URI: ${redirectUri}`);
 
     // Create OAuth client
     const oauth2Client = new google.auth.OAuth2(
@@ -100,6 +91,8 @@ export default async function handler(req, res) {
       console.log('Token exchange successful, received tokens:', Object.keys(tokens).join(', '));
     } catch (tokenError) {
       console.error('Token exchange error:', tokenError);
+      console.error('Token error name:', tokenError.name);
+      console.error('Token error message:', tokenError.message);
       console.error('Token error details:', tokenError.response?.data || 'No additional details');
       
       // Try alternate redirect URIs if primary fails
@@ -109,6 +102,8 @@ export default async function handler(req, res) {
         'https://www.quits.cc/dashboard',
         redirect
       ];
+      
+      let altSucceeded = false;
       
       for (const uri of alternateUris) {
         try {
@@ -121,6 +116,7 @@ export default async function handler(req, res) {
           const response = await altOAuth2Client.getToken(code);
           tokens = response.tokens;
           console.log(`Success with alternate URI: ${uri}`);
+          altSucceeded = true;
           break;
         } catch (altError) {
           console.log(`Failed with URI ${uri}:`, altError.message);
@@ -135,13 +131,28 @@ export default async function handler(req, res) {
           if (tokenError.message && tokenError.message.includes('invalid_grant')) {
             return res.status(400).json({
               error: 'invalid_grant',
-              message: 'Authorization code has expired or already been used'
+              message: 'Authorization code has expired or already been used',
+              error_details: {
+                code_partial: code.substring(0, 10) + '...',
+                error_type: tokenError.name,
+                error_message: tokenError.message,
+                redirect_uri: redirectUri,
+                client_id_partial: clientId.substring(0, 10) + '...'
+              }
             });
           }
           
           return res.status(400).json({
             error: 'token_exchange_failed',
-            message: tokenError.message
+            message: tokenError.message,
+            tried_alternate_uris: alternateUris,
+            error_details: {
+              code_partial: code.substring(0, 10) + '...',
+              error_type: tokenError.name,
+              error_message: tokenError.message,
+              redirect_uri: redirectUri,
+              client_id_partial: clientId.substring(0, 10) + '...'
+            }
           });
         }
         
@@ -152,6 +163,7 @@ export default async function handler(req, res) {
             <body>
               <h2>Authentication Error</h2>
               <p>${tokenError.message || 'Failed to exchange authorization code for tokens'}</p>
+              <p>Error details: Code=${code.substring(0, 10)}..., ClientID=${clientId.substring(0, 10)}..., RedirectURI=${redirectUri}</p>
               <p><a href="https://www.quits.cc/login">Return to login</a></p>
             </body>
           </html>
@@ -180,6 +192,9 @@ export default async function handler(req, res) {
 
     // Generate a JWT token
     console.log('Generating JWT token');
+    const jwtSecret = process.env.JWT_SECRET || 'your-jwt-secret-key';
+    console.log(`Using JWT secret: ${jwtSecret.substring(0, 5)}...`);
+    
     const token = jwt.default.sign(
       { 
         id: userInfo.id,
@@ -187,7 +202,7 @@ export default async function handler(req, res) {
         gmail_token: tokens.access_token,
         createdAt: new Date().toISOString()
       },
-      process.env.JWT_SECRET || 'your-jwt-secret-key',
+      jwtSecret,
       { expiresIn: '7d' }
     );
     console.log('JWT token generated successfully, length:', token.length);
@@ -332,7 +347,13 @@ export default async function handler(req, res) {
       return res.status(500).json({
         error: 'authentication_failed',
         message: error.message,
-        details: process.env.NODE_ENV === 'production' ? undefined : error.stack
+        details: process.env.NODE_ENV === 'production' ? undefined : error.stack,
+        env_info: {
+          node_env: process.env.NODE_ENV || 'not set',
+          vercel_env: process.env.VERCEL_ENV || 'not set',
+          has_google_config: !!process.env.GOOGLE_CLIENT_ID,
+          has_jwt_secret: !!process.env.JWT_SECRET
+        }
       });
     }
     
@@ -343,6 +364,7 @@ export default async function handler(req, res) {
         <body>
           <h2>Authentication Error</h2>
           <p>${error.message}</p>
+          <p>We are using hardcoded credentials to improve reliability.</p>
           <p><a href="https://www.quits.cc/login">Return to login</a></p>
         </body>
       </html>
