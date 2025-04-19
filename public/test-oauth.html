@@ -76,6 +76,15 @@
     
     <div id="tokenInfo"></div>
     
+    <section id="debug-tools">
+        <h2>Debug Tools</h2>
+        <div class="btn-container">
+            <button id="directCallbackTest">Test Direct Callback</button>
+            <button id="directProxyTest">Test Direct Proxy</button>
+            <button id="checkDebugAuth">Check Auth Configuration</button>
+        </div>
+    </section>
+    
     <h2>Debug Log</h2>
     <div id="logContainer"></div>
     
@@ -286,6 +295,131 @@
             log.info('Token cleared from localStorage');
             document.getElementById('tokenInfo').innerHTML = '<p>Token cleared</p>';
         });
+        
+        // Direct API test calls for debugging
+        document.getElementById('directCallbackTest').addEventListener('click', async () => {
+            log.info('Testing direct callback API...');
+            
+            try {
+                const params = getUrlParams();
+                if (!params.code) {
+                    log.error('No code available for testing');
+                    return;
+                }
+                
+                const response = await fetch(`https://api.quits.cc/auth/google/callback?code=${encodeURIComponent(params.code)}&_t=${Date.now()}`, {
+                    headers: {
+                        'Accept': 'application/json'
+                    }
+                });
+                
+                log.debug(`Response status: ${response.status}`);
+                const responseText = await response.text();
+                log.debug(`Response body: ${responseText}`);
+                
+                try {
+                    const data = JSON.parse(responseText);
+                    log.info('Parsed response: ' + JSON.stringify(data, null, 2));
+                } catch (e) {
+                    log.error('Failed to parse response as JSON: ' + e.message);
+                }
+            } catch (error) {
+                log.error('Error testing direct callback: ' + error.message);
+            }
+        });
+        
+        document.getElementById('directProxyTest').addEventListener('click', async () => {
+            log.info('Testing direct proxy API...');
+            
+            try {
+                const params = getUrlParams();
+                if (!params.code) {
+                    log.error('No code available for testing');
+                    return;
+                }
+                
+                // Test both with and without .api prefix
+                const urls = [
+                    `https://api.quits.cc/google-proxy?code=${encodeURIComponent(params.code)}&redirect=${encodeURIComponent(window.location.origin + '/test-oauth.html')}&_t=${Date.now()}`,
+                    `https://api.quits.cc/api/google-proxy?code=${encodeURIComponent(params.code)}&redirect=${encodeURIComponent(window.location.origin + '/test-oauth.html')}&_t=${Date.now()}`
+                ];
+                
+                for (const url of urls) {
+                    log.debug(`Trying URL: ${url}`);
+                    
+                    try {
+                        const response = await fetch(url, {
+                            headers: {
+                                'Accept': 'application/json',
+                                'X-Client-Version': '2.0',
+                                'Cache-Control': 'no-cache, no-store'
+                            }
+                        });
+                        
+                        log.debug(`Response status: ${response.status}`);
+                        const responseText = await response.text();
+                        log.debug(`Response body: ${responseText.substring(0, 500)}${responseText.length > 500 ? '...' : ''}`);
+                        
+                        try {
+                            const data = JSON.parse(responseText);
+                            log.info(`Parsed response from ${url.includes('/api/') ? '/api/google-proxy' : '/google-proxy'}: ` + JSON.stringify(data, null, 2));
+                            
+                            if (data.token) {
+                                log.info('Found token in response! Storing and testing...');
+                                localStorage.setItem('token', data.token);
+                                checkToken();
+                                break; // Stop testing if we got a valid token
+                            }
+                        } catch (e) {
+                            log.error('Failed to parse response as JSON: ' + e.message);
+                        }
+                    } catch (urlError) {
+                        log.error(`Error with URL ${url}: ${urlError.message}`);
+                    }
+                }
+            } catch (error) {
+                log.error('Error testing direct proxy: ' + error.message);
+            }
+        });
+        
+        // Connect the Check Auth Configuration button
+        document.getElementById('checkDebugAuth').addEventListener('click', checkDebugAuth);
+        
+        function checkDebugAuth() {
+            log.info('Checking auth configuration...');
+            
+            Promise.all([
+                fetch('https://api.quits.cc/debug-auth').then(r => r.json().catch(() => r.text())),
+                fetch('https://api.quits.cc/api/debug-auth').then(r => r.json().catch(() => r.text()))
+            ])
+            .then(([result1, result2]) => {
+                log.info('✅ Debug Auth Results:');
+                
+                // Format the results nicely
+                let resultText = '';
+                if (typeof result1 === 'object') {
+                    resultText += 'From /debug-auth:\n' + JSON.stringify(result1, null, 2) + '\n\n';
+                } else {
+                    resultText += 'From /debug-auth (failed):\n' + result1 + '\n\n';
+                }
+                
+                if (typeof result2 === 'object') {
+                    resultText += 'From /api/debug-auth:\n' + JSON.stringify(result2, null, 2);
+                } else {
+                    resultText += 'From /api/debug-auth (failed):\n' + result2;
+                }
+                
+                // Add the results to the log container
+                const entry = document.createElement('div');
+                entry.className = 'log-entry info';
+                entry.innerHTML = `<pre>${resultText}</pre>`;
+                log.container.appendChild(entry);
+                log.container.scrollTop = log.container.scrollHeight;
+            })
+            .catch(error => {
+                log.error('❌ Debug auth check failed: ' + error.message);
+            });
+        }
         
         // Initialize page
         init();
