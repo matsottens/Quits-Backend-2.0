@@ -17,6 +17,8 @@ export default async function handler(req, res) {
   console.log('Query params:', req.query);
   console.log('Accept:', req.headers.accept);
   console.log('Origin:', req.headers.origin);
+  console.log('User Agent:', req.headers['user-agent']);
+  console.log('Full request headers:', req.headers);
 
   // Check for OPTIONS preflight request
   if (req.method === 'OPTIONS') {
@@ -55,58 +57,120 @@ export default async function handler(req, res) {
 
     // Start with the primary redirect URI
     const redirectUri = 'https://www.quits.cc/auth/callback';
+    console.log(`Using redirect URI: ${redirectUri}`);
+    
+    // Print environment variables for debugging
+    console.log('Environment variables:');
+    console.log('GOOGLE_CLIENT_ID:', process.env.GOOGLE_CLIENT_ID ? `Set (length: ${process.env.GOOGLE_CLIENT_ID.length})` : 'Not set');
+    console.log('GOOGLE_CLIENT_SECRET:', process.env.GOOGLE_CLIENT_SECRET ? `Set (length: ${process.env.GOOGLE_CLIENT_SECRET.length})` : 'Not set');
+    console.log('JWT_SECRET:', process.env.JWT_SECRET ? `Set (length: ${process.env.JWT_SECRET.length})` : 'Not set');
+    console.log('NODE_ENV:', process.env.NODE_ENV);
+    console.log('VERCEL_ENV:', process.env.VERCEL_ENV);
+
+    // For production, hardcode the client ID/secret if needed
+    let clientId = process.env.GOOGLE_CLIENT_ID;
+    let clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    
+    // Fallback to hardcoded values if not set (for Vercel deployment)
+    if (!clientId || clientId.trim() === '') {
+      console.log('Using hardcoded client ID');
+      clientId = '82730443897-ji64k4jhk02lonkps5vu54e1q5opoq3g.apps.googleusercontent.com';
+    }
+    
+    if (!clientSecret || clientSecret.trim() === '') {
+      console.log('Using hardcoded client secret');
+      clientSecret = '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';
+    }
 
     // Create OAuth client
     const oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
+      clientId,
+      clientSecret,
       redirectUri
     );
+    
+    console.log(`Created OAuth client with client ID: ${clientId.substring(0, 10)}... and redirect URI: ${redirectUri}`);
 
     // Exchange code for tokens
     let tokens;
     try {
+      console.log(`Attempting to exchange authorization code: ${code.substring(0, 10)}...`);
       const response = await oauth2Client.getToken(code);
       tokens = response.tokens;
+      console.log('Token exchange successful, received tokens:', Object.keys(tokens).join(', '));
     } catch (tokenError) {
       console.error('Token exchange error:', tokenError);
+      console.error('Token error details:', tokenError.response?.data || 'No additional details');
       
-      // Return appropriate format based on Accept header
-      if (req.headers.accept && req.headers.accept.includes('application/json')) {
-        // If it's an invalid_grant error, return a specific message
-        if (tokenError.message && tokenError.message.includes('invalid_grant')) {
+      // Try alternate redirect URIs if primary fails
+      console.log('Trying alternate redirect URIs');
+      const alternateUris = [
+        'https://quits.cc/auth/callback',
+        'https://www.quits.cc/dashboard',
+        redirect
+      ];
+      
+      for (const uri of alternateUris) {
+        try {
+          console.log(`Trying with alternate redirect URI: ${uri}`);
+          const altOAuth2Client = new google.auth.OAuth2(
+            clientId,
+            clientSecret,
+            uri
+          );
+          const response = await altOAuth2Client.getToken(code);
+          tokens = response.tokens;
+          console.log(`Success with alternate URI: ${uri}`);
+          break;
+        } catch (altError) {
+          console.log(`Failed with URI ${uri}:`, altError.message);
+        }
+      }
+      
+      // If we still don't have tokens, return an error
+      if (!tokens) {
+        // Return appropriate format based on Accept header
+        if (req.headers.accept && req.headers.accept.includes('application/json')) {
+          // If it's an invalid_grant error, return a specific message
+          if (tokenError.message && tokenError.message.includes('invalid_grant')) {
+            return res.status(400).json({
+              error: 'invalid_grant',
+              message: 'Authorization code has expired or already been used'
+            });
+          }
+          
           return res.status(400).json({
-            error: 'invalid_grant',
-            message: 'Authorization code has expired or already been used'
+            error: 'token_exchange_failed',
+            message: tokenError.message
           });
         }
         
-        return res.status(400).json({
-          error: 'token_exchange_failed',
-          message: tokenError.message
-        });
+        // HTML response
+        return res.status(400).send(`
+          <html>
+            <head><title>Authentication Error</title></head>
+            <body>
+              <h2>Authentication Error</h2>
+              <p>${tokenError.message || 'Failed to exchange authorization code for tokens'}</p>
+              <p><a href="https://www.quits.cc/login">Return to login</a></p>
+            </body>
+          </html>
+        `);
       }
-      
-      // HTML response
-      return res.status(400).send(`
-        <html>
-          <head><title>Authentication Error</title></head>
-          <body>
-            <h2>Authentication Error</h2>
-            <p>${tokenError.message || 'Failed to exchange authorization code for tokens'}</p>
-            <p><a href="https://www.quits.cc/login">Return to login</a></p>
-          </body>
-        </html>
-      `);
     }
+
+    // If we reach here, we should have tokens
+    console.log('Proceeding with tokens');
 
     // Get user info
     oauth2Client.setCredentials(tokens);
     const oauth2 = google.oauth2('v2');
+    console.log('Getting user info with access token');
     const userInfoResponse = await oauth2.userinfo.get({
       auth: oauth2Client,
     });
     const userInfo = userInfoResponse.data;
+    console.log('User info received:', userInfo.email);
 
     if (!userInfo.id || !userInfo.email) {
       throw new Error('Failed to retrieve user information');
@@ -115,6 +179,7 @@ export default async function handler(req, res) {
     console.log(`User authenticated: ${userInfo.email}`);
 
     // Generate a JWT token
+    console.log('Generating JWT token');
     const token = jwt.default.sign(
       { 
         id: userInfo.id,
@@ -125,9 +190,11 @@ export default async function handler(req, res) {
       process.env.JWT_SECRET || 'your-jwt-secret-key',
       { expiresIn: '7d' }
     );
+    console.log('JWT token generated successfully, length:', token.length);
 
     // Check if the client accepts JSON
     if (req.headers.accept && req.headers.accept.includes('application/json')) {
+      console.log('Returning JSON response with token');
       // Return JSON with token and user info
       return res.status(200).json({
         success: true,
@@ -141,6 +208,7 @@ export default async function handler(req, res) {
       });
     }
 
+    console.log('Generating HTML response with token');
     // Generate HTML page with token in localStorage and auto-redirect
     const htmlResponse = `
       <!DOCTYPE html>
@@ -252,10 +320,12 @@ export default async function handler(req, res) {
     // Set content type to HTML and send the response
     res.setHeader('Content-Type', 'text/html');
     res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'");
+    console.log('Sending HTML response with token');
     return res.send(htmlResponse);
 
   } catch (error) {
     console.error('OAuth callback error:', error);
+    console.error('Error stack:', error.stack);
     
     // Return appropriate format based on Accept header
     if (req.headers.accept && req.headers.accept.includes('application/json')) {

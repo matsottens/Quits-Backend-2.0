@@ -29,6 +29,18 @@ export default async function handler(req, res) {
   res.setHeader('Cross-Origin-Embedder-Policy', 'unsafe-none');
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   
+  // Add no-cache headers to prevent caching issues
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.setHeader('Surrogate-Control', 'no-store');
+  
+  // Add explicit CORS headers (redundant but being extra safe)
+  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  
   // Handle preflight OPTIONS requests immediately
   if (req.method === 'OPTIONS') {
     console.log('Handling OPTIONS preflight request for Google proxy');
@@ -75,12 +87,6 @@ export default async function handler(req, res) {
   }
   
   try {
-    // Add no-cache headers
-    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Expires', '0');
-    res.setHeader('Surrogate-Control', 'no-store');
-    
     // Log all request headers for debugging
     console.log('Request headers:', req.headers);
     
