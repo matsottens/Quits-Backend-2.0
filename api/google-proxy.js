@@ -220,7 +220,7 @@ export default async function handler(req, res) {
           body { font-family: Arial, sans-serif; text-align: center; margin: 50px; }
           .loader { border: 5px solid #f3f3f3; border-top: 5px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }
           @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-          #debugInfo { background: #f8f8f8; border: 1px solid #ddd; margin-top: 30px; padding: 10px; text-align: left; font-family: monospace; font-size: 12px; }
+          #debugInfo { background: #f8f8f8; border: 1px solid #ddd; margin-top: 30px; padding: 10px; text-align: left; font-family: monospace; font-size: 12px; max-height: 200px; overflow-y: auto; }
         </style>
       </head>
       <body>
@@ -231,25 +231,40 @@ export default async function handler(req, res) {
         <script>
           // Helper to show debug information
           function debug(message) {
-            console.log(message);
+            console.log("[Auth Debug] " + message);
             const debugEl = document.getElementById('debugInfo');
             debugEl.innerHTML += message + '<br>';
+            // Auto-scroll to bottom
+            debugEl.scrollTop = debugEl.scrollHeight;
           }
           
           // Helper to store token and ensure it's stored correctly
           function storeToken(token) {
             try {
+              debug("Starting token storage process");
+              
               // First clear any existing tokens
               localStorage.removeItem('token');
+              localStorage.removeItem('quits_auth_token');
+              debug("Cleared existing tokens");
               
-              // Try to store new token
+              // Try to store new token in both places for consistency
               localStorage.setItem('token', token);
+              localStorage.setItem('quits_auth_token', token);
+              debug("Attempted to set new token in both locations");
               
-              // Verify token was stored correctly
+              // Verify token was stored correctly in both places
               const storedToken = localStorage.getItem('token');
+              const altStoredToken = localStorage.getItem('quits_auth_token');
+              
               if (!storedToken) {
-                debug('ERROR: Failed to verify token storage');
+                debug('ERROR: Failed to verify primary token storage');
                 return false;
+              }
+              
+              if (!altStoredToken) {
+                debug('WARNING: Failed to verify secondary token storage');
+                // Continue anyway as long as primary storage worked
               }
               
               if (storedToken !== token) {
@@ -270,8 +285,9 @@ export default async function handler(req, res) {
             try {
               const test = 'test';
               localStorage.setItem(test, test);
+              const result = localStorage.getItem(test) === test;
               localStorage.removeItem(test);
-              return true;
+              return result;
             } catch (e) {
               return false;
             }
@@ -284,6 +300,8 @@ export default async function handler(req, res) {
           
           debug('Auth code: ' + code.substring(0, 8) + '...');
           debug('Redirect URL: ' + redirectUrl);
+          debug('User Agent: ' + navigator.userAgent);
+          debug('Browser: ' + (navigator.userAgentData ? navigator.userAgentData.brands.map(b => b.brand + ' ' + b.version).join(', ') : 'Not available'));
           
           // First check if localStorage is available
           if (!isLocalStorageAvailable()) {
@@ -305,49 +323,64 @@ export default async function handler(req, res) {
                 method: 'GET',
                 credentials: 'include',
                 headers: {
-                  'Accept': 'application/json'
+                  'Accept': 'application/json',
+                  'Cache-Control': 'no-cache, no-store'
                 }
               })
               .then(response => {
-                debug('Response status: ' + response.status);
+                debug('Response received with status: ' + response.status);
                 if (response.ok) {
+                  debug('Response OK, parsing JSON');
                   return response.json();
                 } else if (response.status === 400) {
                   debug('Error 400 received, redirecting to login with error');
                   window.location.href = '/login?error=invalid_grant&message=Your authorization code has expired. Please try again.';
                   throw new Error('Invalid authorization code');
                 } else {
+                  debug('Network error: ' + response.status);
                   throw new Error('Network response was not ok: ' + response.status);
                 }
               })
               .then(data => {
-                debug('Response data received');
+                debug('Response data received: ' + (data ? JSON.stringify(data).substring(0, 100) + '...' : 'null'));
                 
-                if (data.token) {
+                if (data && data.token) {
                   debug('Token received, length: ' + data.token.length);
                   
                   // Store the token and verify it was stored
                   const stored = storeToken(data.token);
                   
                   if (stored) {
-                    debug('Token stored successfully, redirecting to: ' + redirectUrl);
+                    debug('Token stored successfully. Performing double-check...');
                     
-                    // Use a slight delay before redirecting to ensure localStorage has time to persist
+                    // Double-check the token storage after a brief delay
                     setTimeout(() => {
-                      window.location.href = redirectUrl;
-                    }, 500);
+                      const doubleCheck = localStorage.getItem('token');
+                      if (doubleCheck === data.token) {
+                        debug('Double-check passed! Token persistence confirmed.');
+                        debug('Redirecting to: ' + redirectUrl);
+                        
+                        // Use another slight delay before redirecting
+                        setTimeout(() => {
+                          window.location.href = redirectUrl;
+                        }, 200);
+                      } else {
+                        debug('ERROR: Double-check failed! Token was lost or changed.');
+                        document.body.innerHTML = '<h2>Authentication Error</h2><p>Failed to reliably store authentication token. Please ensure cookies and localStorage are enabled.</p><p><a href="https://www.quits.cc/login">Return to login</a></p>';
+                      }
+                    }, 300);
                   } else {
                     debug('Failed to store token, showing error');
                     document.body.innerHTML = '<h2>Authentication Error</h2><p>Failed to store authentication token. Please ensure cookies and localStorage are enabled.</p><p><a href="https://www.quits.cc/login">Return to login</a></p>';
                   }
-                } else if (data.error) {
+                } else if (data && data.error) {
                   debug('Error in response: ' + data.error);
                   // Redirect to login with error
                   window.location.href = '/login?error=' + data.error + '&message=' + encodeURIComponent(data.message || 'Authentication failed');
                 } else {
-                  debug('No token or error in response');
+                  debug('No token or error in response: ' + JSON.stringify(data));
                   // Display error
-                  document.body.innerHTML = '<h2>Authentication Error</h2><p>' + (data.message || 'Failed to authenticate') + '</p><p><a href="https://www.quits.cc/login">Return to login</a></p>';
+                  document.body.innerHTML = '<h2>Authentication Error</h2><p>' + (data && data.message ? data.message : 'Failed to authenticate') + '</p><p><a href="https://www.quits.cc/login">Return to login</a></p>';
                 }
               })
               .catch(error => {

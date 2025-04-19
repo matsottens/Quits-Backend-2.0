@@ -153,7 +153,7 @@ export default async function handler(req, res) {
           .success { color: green; }
           .loader { border: 5px solid #f3f3f3; border-top: 5px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }
           @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-          #debugInfo { background: #f8f8f8; border: 1px solid #ddd; margin-top: 30px; padding: 10px; text-align: left; font-family: monospace; font-size: 12px; }
+          #debugInfo { background: #f8f8f8; border: 1px solid #ddd; margin-top: 30px; padding: 10px; text-align: left; font-family: monospace; font-size: 12px; max-height: 200px; overflow-y: auto; }
         </style>
       </head>
       <body>
@@ -165,9 +165,11 @@ export default async function handler(req, res) {
         <script>
           // Helper to show debug information
           function debug(message) {
-            console.log(message);
+            console.log("[Auth Debug] " + message);
             const debugEl = document.getElementById('debugInfo');
             debugEl.innerHTML += message + '<br>';
+            // Auto-scroll to bottom
+            debugEl.scrollTop = debugEl.scrollHeight;
           }
           
           // Helper to store token and ensure it's stored correctly
@@ -175,19 +177,30 @@ export default async function handler(req, res) {
             try {
               // First clear any existing tokens
               localStorage.removeItem('token');
+              localStorage.removeItem('quits_auth_token');
+              debug("Cleared existing tokens");
               
-              // Try to store new token
+              // Try to store new token in both places for consistency
               localStorage.setItem('token', token);
+              localStorage.setItem('quits_auth_token', token);
+              debug("Attempted to set new token in both locations");
               
               // Verify token was stored correctly
               const storedToken = localStorage.getItem('token');
+              const altStoredToken = localStorage.getItem('quits_auth_token');
+              
               if (!storedToken) {
-                debug('ERROR: Failed to verify token storage');
+                debug('ERROR: Failed to verify primary token storage');
                 return false;
               }
               
+              if (!altStoredToken) {
+                debug('WARNING: Failed to verify secondary token storage');
+                // Continue anyway as long as primary storage worked
+              }
+              
               debug('Token stored successfully and verified');
-              return true;
+              return storedToken === token;
             } catch (e) {
               debug('ERROR: Exception storing token: ' + e.message);
               return false;
@@ -196,6 +209,8 @@ export default async function handler(req, res) {
           
           try {
             debug('Starting token storage process');
+            debug('User Agent: ' + navigator.userAgent);
+            
             const token = '${token}';
             debug('Token length: ' + token.length);
             
@@ -203,12 +218,24 @@ export default async function handler(req, res) {
             const stored = storeToken(token);
             
             if (stored) {
-              debug('Token stored successfully, redirecting in 1 second');
-              // Redirect after a short delay to ensure storage completes
-              setTimeout(function() {
-                debug('Redirecting to: ${redirect}');
-                window.location.href = '${redirect}';
-              }, 1000);
+              debug('Token stored successfully. Performing double-check...');
+              
+              // Double-check the token storage after a brief delay
+              setTimeout(() => {
+                const doubleCheck = localStorage.getItem('token');
+                if (doubleCheck === token) {
+                  debug('Double-check passed! Token persistence confirmed');
+                  debug('Redirecting to: ${redirect}');
+                  
+                  // Redirect after a short delay to ensure storage completes
+                  setTimeout(function() {
+                    window.location.href = '${redirect}';
+                  }, 200);
+                } else {
+                  debug('ERROR: Double-check failed! Token was lost or changed');
+                  document.body.innerHTML = '<h2>Authentication Error</h2><p>Failed to reliably store authentication token. Please ensure cookies and localStorage are enabled.</p><p><a href="https://www.quits.cc/login">Return to login</a></p>';
+                }
+              }, 300);
             } else {
               debug('Failed to store token');
               document.body.innerHTML = '<h2>Authentication Error</h2><p>Failed to store authentication token. Please ensure cookies and localStorage are enabled.</p><p><a href="https://www.quits.cc/login">Return to login</a></p>';
