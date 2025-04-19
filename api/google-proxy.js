@@ -1,7 +1,11 @@
 // Google OAuth Proxy - Simplified handler to avoid path-to-regexp issues
 import { setCorsHeaders, getPath } from './utils.js';
+import nodeFetch from 'node-fetch';
 
-export default function handler(req, res) {
+// Use node-fetch for older Node.js environments
+const fetch = globalThis.fetch || nodeFetch;
+
+export default async function handler(req, res) {
   // Always set CORS headers explicitly for all response types
   setCorsHeaders(req, res);
   
@@ -124,7 +128,7 @@ export default function handler(req, res) {
           // Start background process anyway
           try {
             // Start the authentication process in the background
-            fetch(fullUrl, {
+            await fetch(fullUrl, {
               method: 'GET',
               headers: {
                 'Accept': 'application/json'
@@ -156,7 +160,7 @@ export default function handler(req, res) {
         
         // Start the authentication process in the background
         try {
-          fetch(fullUrl, {
+          await fetch(fullUrl, {
             method: 'GET',
             headers: {
               'Accept': 'application/json'
