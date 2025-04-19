@@ -220,62 +220,142 @@ export default async function handler(req, res) {
           body { font-family: Arial, sans-serif; text-align: center; margin: 50px; }
           .loader { border: 5px solid #f3f3f3; border-top: 5px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }
           @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+          #debugInfo { background: #f8f8f8; border: 1px solid #ddd; margin-top: 30px; padding: 10px; text-align: left; font-family: monospace; font-size: 12px; }
         </style>
       </head>
       <body>
         <h2>Authenticating with Google</h2>
         <div class="loader"></div>
         <p>Please wait while we complete your authentication...</p>
+        <div id="debugInfo"></div>
         <script>
+          // Helper to show debug information
+          function debug(message) {
+            console.log(message);
+            const debugEl = document.getElementById('debugInfo');
+            debugEl.innerHTML += message + '<br>';
+          }
+          
+          // Helper to store token and ensure it's stored correctly
+          function storeToken(token) {
+            try {
+              // First clear any existing tokens
+              localStorage.removeItem('token');
+              
+              // Try to store new token
+              localStorage.setItem('token', token);
+              
+              // Verify token was stored correctly
+              const storedToken = localStorage.getItem('token');
+              if (!storedToken) {
+                debug('ERROR: Failed to verify token storage');
+                return false;
+              }
+              
+              if (storedToken !== token) {
+                debug('ERROR: Token verification failed - stored value does not match');
+                return false;
+              }
+              
+              debug('Token stored successfully and verified');
+              return true;
+            } catch (e) {
+              debug('ERROR: Exception storing token: ' + e.message);
+              return false;
+            }
+          }
+          
+          // Check if localStorage is available
+          function isLocalStorageAvailable() {
+            try {
+              const test = 'test';
+              localStorage.setItem(test, test);
+              localStorage.removeItem(test);
+              return true;
+            } catch (e) {
+              return false;
+            }
+          }
+          
           // Forward the request to the main callback handler
           const code = "${code}";
           const redirectUrl = "${redirect || 'https://www.quits.cc/dashboard'}";
           const timestamp = Date.now();
           
-          // Don't make another request if we already have a token
-          if (localStorage.getItem('token')) {
-            console.log('Found existing token, redirecting directly');
-            window.location.href = redirectUrl;
+          debug('Auth code: ' + code.substring(0, 8) + '...');
+          debug('Redirect URL: ' + redirectUrl);
+          
+          // First check if localStorage is available
+          if (!isLocalStorageAvailable()) {
+            debug('ERROR: localStorage is not available in this browser/context');
+            document.body.innerHTML = '<h2>Authentication Error</h2><p>Your browser does not support or allow localStorage, which is required for authentication.</p><p>Please enable cookies and localStorage for this site.</p><p><a href="https://www.quits.cc/login">Return to login</a></p>';
           } else {
-            // Make the request
-            fetch(\`https://api.quits.cc/api/auth/google/callback?code=\${encodeURIComponent(code)}&redirect=\${encodeURIComponent(redirectUrl)}&_t=\${timestamp}\`, {
-              method: 'GET',
-              credentials: 'include',
-              headers: {
-                'Accept': 'application/json'
-              }
-            })
-            .then(response => {
-              if (response.ok) {
-                return response.json();
-              } else if (response.status === 400) {
-                // For 400 errors, redirect to login with error
-                window.location.href = '/login?error=invalid_grant&message=Your authorization code has expired. Please try again.';
-                throw new Error('Invalid authorization code');
-              } else {
-                throw new Error('Network response was not ok');
-              }
-            })
-            .then(data => {
-              if (data.token) {
-                // Store the token
-                localStorage.setItem('token', data.token);
-                console.log('Token stored successfully');
+            debug('localStorage is available');
+            
+            // Check if we already have a token
+            const existingToken = localStorage.getItem('token');
+            if (existingToken) {
+              debug('Found existing token, redirecting directly');
+              window.location.href = redirectUrl;
+            } else {
+              debug('No existing token found, making API request');
+              
+              // Make the request
+              fetch(\`https://api.quits.cc/api/auth/google/callback?code=\${encodeURIComponent(code)}&redirect=\${encodeURIComponent(redirectUrl)}&_t=\${timestamp}\`, {
+                method: 'GET',
+                credentials: 'include',
+                headers: {
+                  'Accept': 'application/json'
+                }
+              })
+              .then(response => {
+                debug('Response status: ' + response.status);
+                if (response.ok) {
+                  return response.json();
+                } else if (response.status === 400) {
+                  debug('Error 400 received, redirecting to login with error');
+                  window.location.href = '/login?error=invalid_grant&message=Your authorization code has expired. Please try again.';
+                  throw new Error('Invalid authorization code');
+                } else {
+                  throw new Error('Network response was not ok: ' + response.status);
+                }
+              })
+              .then(data => {
+                debug('Response data received');
                 
-                // Redirect
-                window.location.href = redirectUrl;
-              } else if (data.error) {
-                // Redirect to login with error
-                window.location.href = '/login?error=' + data.error + '&message=' + encodeURIComponent(data.message || 'Authentication failed');
-              } else {
+                if (data.token) {
+                  debug('Token received, length: ' + data.token.length);
+                  
+                  // Store the token and verify it was stored
+                  const stored = storeToken(data.token);
+                  
+                  if (stored) {
+                    debug('Token stored successfully, redirecting to: ' + redirectUrl);
+                    
+                    // Use a slight delay before redirecting to ensure localStorage has time to persist
+                    setTimeout(() => {
+                      window.location.href = redirectUrl;
+                    }, 500);
+                  } else {
+                    debug('Failed to store token, showing error');
+                    document.body.innerHTML = '<h2>Authentication Error</h2><p>Failed to store authentication token. Please ensure cookies and localStorage are enabled.</p><p><a href="https://www.quits.cc/login">Return to login</a></p>';
+                  }
+                } else if (data.error) {
+                  debug('Error in response: ' + data.error);
+                  // Redirect to login with error
+                  window.location.href = '/login?error=' + data.error + '&message=' + encodeURIComponent(data.message || 'Authentication failed');
+                } else {
+                  debug('No token or error in response');
+                  // Display error
+                  document.body.innerHTML = '<h2>Authentication Error</h2><p>' + (data.message || 'Failed to authenticate') + '</p><p><a href="https://www.quits.cc/login">Return to login</a></p>';
+                }
+              })
+              .catch(error => {
+                debug('Fetch error: ' + error.message);
                 // Display error
-                document.body.innerHTML = '<h2>Authentication Error</h2><p>' + (data.message || 'Failed to authenticate') + '</p><p><a href="https://www.quits.cc/login">Return to login</a></p>';
-              }
-            })
-            .catch(error => {
-              // Display error
-              document.body.innerHTML = '<h2>Authentication Error</h2><p>' + error.message + '</p><p><a href="https://www.quits.cc/login">Return to login</a></p>';
-            });
+                document.body.innerHTML = '<h2>Authentication Error</h2><p>' + error.message + '</p><p><a href="https://www.quits.cc/login">Return to login</a></p>';
+              });
+            }
           }
         </script>
       </body>

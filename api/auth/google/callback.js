@@ -153,24 +153,70 @@ export default async function handler(req, res) {
           .success { color: green; }
           .loader { border: 5px solid #f3f3f3; border-top: 5px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }
           @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+          #debugInfo { background: #f8f8f8; border: 1px solid #ddd; margin-top: 30px; padding: 10px; text-align: left; font-family: monospace; font-size: 12px; }
         </style>
-        <meta http-equiv="refresh" content="1;url=${redirect}">
       </head>
       <body>
         <h2 class="success">Authentication Successful!</h2>
         <div class="loader"></div>
         <p>Redirecting to dashboard...</p>
-        <p>If you are not redirected automatically, <a href="${redirect}">click here</a>.</p>
+        <div id="debugInfo"></div>
         
         <script>
-          // Store the token in localStorage
-          localStorage.setItem('token', '${token}');
-          console.log('Token stored successfully');
+          // Helper to show debug information
+          function debug(message) {
+            console.log(message);
+            const debugEl = document.getElementById('debugInfo');
+            debugEl.innerHTML += message + '<br>';
+          }
           
-          // Redirect after a short delay
-          setTimeout(function() {
-            window.location.href = '${redirect}';
-          }, 1000);
+          // Helper to store token and ensure it's stored correctly
+          function storeToken(token) {
+            try {
+              // First clear any existing tokens
+              localStorage.removeItem('token');
+              
+              // Try to store new token
+              localStorage.setItem('token', token);
+              
+              // Verify token was stored correctly
+              const storedToken = localStorage.getItem('token');
+              if (!storedToken) {
+                debug('ERROR: Failed to verify token storage');
+                return false;
+              }
+              
+              debug('Token stored successfully and verified');
+              return true;
+            } catch (e) {
+              debug('ERROR: Exception storing token: ' + e.message);
+              return false;
+            }
+          }
+          
+          try {
+            debug('Starting token storage process');
+            const token = '${token}';
+            debug('Token length: ' + token.length);
+            
+            // Store the token
+            const stored = storeToken(token);
+            
+            if (stored) {
+              debug('Token stored successfully, redirecting in 1 second');
+              // Redirect after a short delay to ensure storage completes
+              setTimeout(function() {
+                debug('Redirecting to: ${redirect}');
+                window.location.href = '${redirect}';
+              }, 1000);
+            } else {
+              debug('Failed to store token');
+              document.body.innerHTML = '<h2>Authentication Error</h2><p>Failed to store authentication token. Please ensure cookies and localStorage are enabled.</p><p><a href="https://www.quits.cc/login">Return to login</a></p>';
+            }
+          } catch (e) {
+            debug('Error in script: ' + e.message);
+            document.body.innerHTML = '<h2>Authentication Error</h2><p>Error: ' + e.message + '</p><p><a href="https://www.quits.cc/login">Return to login</a></p>';
+          }
         </script>
       </body>
       </html>
