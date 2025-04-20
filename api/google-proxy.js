@@ -53,6 +53,16 @@ export default async function handler(req, res) {
   console.log('Origin:', req.headers.origin);
   console.log('Query params:', req.query);
   
+  // Debug environment variables
+  console.log('ENVIRONMENT DIAGNOSTICS:');
+  console.log('CLIENT_URL:', process.env.CLIENT_URL);
+  console.log('CORS_ORIGIN:', process.env.CORS_ORIGIN);
+  console.log('NODE_ENV:', process.env.NODE_ENV);
+  console.log('VERCEL_ENV:', process.env.VERCEL_ENV);
+  console.log('GOOGLE_CLIENT_ID present:', !!process.env.GOOGLE_CLIENT_ID);
+  console.log('GOOGLE_CLIENT_SECRET present:', !!process.env.GOOGLE_CLIENT_SECRET);
+  console.log('JWT_SECRET present:', !!process.env.JWT_SECRET);
+  
   // Extract code from query parameters
   const { code, redirect, _t } = req.query;
   
@@ -104,17 +114,18 @@ export default async function handler(req, res) {
         // Start with the primary redirect URI
         const redirectUri = 'https://www.quits.cc/auth/callback';
         
-        // Print environment variables for debugging
+        // Debug environment variables
         console.log('Environment variables:');
         console.log('GOOGLE_CLIENT_ID:', process.env.GOOGLE_CLIENT_ID ? `Set (length: ${process.env.GOOGLE_CLIENT_ID.length})` : 'Not set');
         console.log('GOOGLE_CLIENT_SECRET:', process.env.GOOGLE_CLIENT_SECRET ? `Set (length: ${process.env.GOOGLE_CLIENT_SECRET.length})` : 'Not set');
+        console.log('JWT_SECRET:', process.env.JWT_SECRET ? `Set (length: ${process.env.JWT_SECRET.length})` : 'Not set');
         console.log('NODE_ENV:', process.env.NODE_ENV);
         console.log('VERCEL_ENV:', process.env.VERCEL_ENV);
         
-        // Always use hardcoded values for reliability
-        const clientId = '82730443897-ji64k4jhk02lonkps5vu54e1q5opoq3g.apps.googleusercontent.com';
-        const clientSecret = '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';
-        const jwtSecret = 'your-jwt-secret-key';
+        // Use environment variables with fallbacks
+        const clientId = process.env.GOOGLE_CLIENT_ID || '82730443897-ji64k4jhk02lonkps5vu54e1q5opoq3g.apps.googleusercontent.com';
+        const clientSecret = process.env.GOOGLE_CLIENT_SECRET || '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';
+        const jwtSecret = process.env.JWT_SECRET || 'your-jwt-secret-key';
         
         // Create OAuth client
         console.log(`Creating OAuth client with redirect URI: ${redirectUri}`);
@@ -163,7 +174,7 @@ export default async function handler(req, res) {
           const token = jwt.default.sign(
             jwtPayload,
             jwtSecret,
-            { expiresIn: '7d' }
+            { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
           );
           
           console.log('JWT token generated successfully, length:', token.length);
