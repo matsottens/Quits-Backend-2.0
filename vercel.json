@@ -1,68 +1,23 @@
 {
   "version": 2,
-  "buildCommand": "chmod +x build.sh && ./build.sh",
-  "outputDirectory": "public",
-  "routes": [
-    {
-      "src": "/api/google-proxy",
-      "methods": ["OPTIONS"],
-      "dest": "/api/google-proxy.js",
-      "headers": {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token, Pragma",
-        "Access-Control-Allow-Credentials": "true",
-        "Access-Control-Max-Age": "86400"
-      }
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "functions": {
+    "api/*.js": {
+      "memory": 1024,
+      "maxDuration": 10
     },
-    {
-      "src": "/api/auth/google/callback",
-      "dest": "/api/auth/google/callback.js",
-      "headers": {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token, Pragma",
-        "Access-Control-Allow-Credentials": "true",
-        "Access-Control-Max-Age": "86400"
-      }
-    },
-    {
-      "src": "/api/google-proxy",
-      "dest": "/api/google-proxy.js",
-      "headers": {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token, Pragma",
-        "Access-Control-Allow-Credentials": "true"
-      }
-    },
-    {
-      "src": "^/(favicon.ico|favicon.png|$)",
-      "dest": "/api/combined-handlers.js"
-    },
-    {
-      "src": "^/(api/health|api/keepalive|health|keepalive)",
-      "dest": "/api/combined-handlers.js"
-    },
-    {
-      "src": "^/(api/test|api/env-check|api/cors-test|test|api/csp-bypass)",
-      "dest": "/api/serverless.js",
-      "headers": {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token, Pragma",
-        "Access-Control-Allow-Credentials": "true"
-      }
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/api/combined-handlers.js",
-      "headers": {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token, Pragma",
-        "Access-Control-Allow-Credentials": "true"
-      }
+    "api/auth/**/*.js": {
+      "memory": 1024,
+      "maxDuration": 10
     }
+  },
+  "routes": [
+    { "src": "/api/debug", "dest": "/api/debug.js" },
+    { "src": "/api/google-proxy", "dest": "/api/google-proxy.js" },
+    { "src": "/api/health", "dest": "/api/health.js" },
+    { "src": "/api/auth/google/callback", "dest": "/api/auth/google/callback.js" },
+    { "src": "/api/auth/google", "dest": "/api/auth/google/index.js" },
+    { "src": "/(.*)", "dest": "/frontend/$1" }
   ]
 } 
