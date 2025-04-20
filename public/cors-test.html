@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CORS Test</title>
+  <script>
+    // List of endpoints to test
+    const endpoints = [
+      'https://api.quits.cc/health',
+      'https://api.quits.cc/api/health',
+      'https://api.quits.cc/debug?type=auth',
+      'https://api.quits.cc/api/debug?type=auth',
+      'https://quits-backend-2-0-mahy1vpr6-mats-ottens-hotmailcoms-projects.vercel.app/health',
+      'https://quits-backend-2-0-mahy1vpr6-mats-ottens-hotmailcoms-projects.vercel.app/api/health'
+    ];
+
+    // Function to test an endpoint
+    async function testEndpoint(url) {
+      const resultDiv = document.createElement('div');
+      resultDiv.className = 'result';
+      resultDiv.innerHTML = `<h3>Testing ${url}</h3>`;
+      
+      try {
+        const startTime = Date.now();
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' },
+          mode: 'cors'
+        });
+        const endTime = Date.now();
+        
+        if (response.ok) {
+          const data = await response.text();
+          resultDiv.innerHTML += `
+            <p class="success">✅ Success! (${endTime - startTime}ms)</p>
+            <pre>${data.substring(0, 500)}${data.length > 500 ? '...' : ''}</pre>
+          `;
+          resultDiv.classList.add('success-result');
+        } else {
+          resultDiv.innerHTML += `
+            <p class="error">❌ Failed with status: ${response.status} ${response.statusText}</p>
+          `;
+          resultDiv.classList.add('error-result');
+        }
+      } catch (error) {
+        resultDiv.innerHTML += `
+          <p class="error">❌ Error: ${error.message}</p>
+        `;
+        resultDiv.classList.add('error-result');
+      }
+      
+      document.getElementById('results').appendChild(resultDiv);
+    }
+
+    // Run all tests when page loads
+    window.onload = function() {
+      endpoints.forEach(testEndpoint);
+      
+      // Add event listener to the custom URL button
+      document.getElementById('testButton').addEventListener('click', function() {
+        const customUrl = document.getElementById('customUrl').value.trim();
+        if (customUrl) {
+          testEndpoint(customUrl);
+        }
+      });
+    };
+  </script>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      background-color: #f5f5f5;
+    }
+    h1 {
+      text-align: center;
+      color: #2a2a2a;
+    }
+    .result {
+      margin-bottom: 20px;
+      padding: 15px;
+      border-radius: 5px;
+      background-color: white;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .success-result {
+      border-left: 5px solid #4CAF50;
+    }
+    .error-result {
+      border-left: 5px solid #F44336;
+    }
+    h3 {
+      margin-top: 0;
+      color: #444;
+    }
+    pre {
+      background-color: #f8f8f8;
+      padding: 10px;
+      border-radius: 4px;
+      overflow-x: auto;
+      font-size: 14px;
+    }
+    .success {
+      color: #4CAF50;
+      font-weight: bold;
+    }
+    .error {
+      color: #F44336;
+      font-weight: bold;
+    }
+    .custom-url {
+      margin: 20px 0;
+      display: flex;
+      gap: 10px;
+    }
+    input {
+      flex-grow: 1;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+    button {
+      padding: 10px 15px;
+      background-color: #2196F3;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #0b7dda;
+    }
+  </style>
+</head>
+<body>
+  <h1>API CORS Test</h1>
+  
+  <div class="custom-url">
+    <input type="text" id="customUrl" placeholder="Enter a custom URL to test" value="https://api.quits.cc/health">
+    <button id="testButton">Test URL</button>
+  </div>
+  
+  <div id="results"></div>
+</body>
+</html> 

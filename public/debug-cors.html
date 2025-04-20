@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>API Connectivity Diagnostics</title>
+  <style>
+    :root {
+      --primary: #1e88e5;
+      --success: #43a047;
+      --error: #e53935;
+      --warning: #ff9800;
+      --dark: #333;
+      --light: #f5f5f5;
+      --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    
+    body {
+      font-family: var(--font);
+      line-height: 1.6;
+      color: var(--dark);
+      background: var(--light);
+      padding: 20px;
+    }
+    
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+      overflow: hidden;
+    }
+    
+    header {
+      background: var(--primary);
+      color: white;
+      padding: 20px;
+      text-align: center;
+    }
+    
+    h1 {
+      margin: 0;
+      font-size: 24px;
+    }
+    
+    h2 {
+      margin: 20px 0 10px;
+      font-size: 18px;
+      color: var(--primary);
+    }
+    
+    .dashboard {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      padding: 20px;
+    }
+    
+    @media (max-width: 768px) {
+      .dashboard {
+        grid-template-columns: 1fr;
+      }
+    }
+    
+    .panel {
+      background: white;
+      border-radius: 4px;
+      border: 1px solid #e0e0e0;
+      overflow: hidden;
+    }
+    
+    .panel-header {
+      background: #f5f5f5;
+      padding: 12px;
+      font-weight: bold;
+      border-bottom: 1px solid #e0e0e0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .panel-body {
+      padding: 15px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    
+    .test-controls {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 15px;
+      flex-wrap: wrap;
+    }
+    
+    .btn {
+      padding: 8px 16px;
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-family: var(--font);
+      font-size: 14px;
+      transition: background 0.3s;
+    }
+    
+    .btn:hover {
+      background: #1976d2;
+    }
+    
+    .btn:active {
+      transform: translateY(1px);
+    }
+    
+    .btn-secondary {
+      background: #757575;
+    }
+    
+    .btn-secondary:hover {
+      background: #616161;
+    }
+    
+    .btn-success {
+      background: var(--success);
+    }
+    
+    .btn-success:hover {
+      background: #388e3c;
+    }
+    
+    .input-group {
+      display: flex;
+      margin-bottom: 15px;
+    }
+    
+    input {
+      flex: 1;
+      padding: 8px 12px;
+      border: 1px solid #e0e0e0;
+      border-radius: 4px 0 0 4px;
+      font-size: 14px;
+    }
+    
+    .input-group .btn {
+      border-radius: 0 4px 4px 0;
+    }
+    
+    .status {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 3px;
+      font-size: 12px;
+      font-weight: bold;
+    }
+    
+    .status-success {
+      background: var(--success);
+      color: white;
+    }
+    
+    .status-error {
+      background: var(--error);
+      color: white;
+    }
+    
+    .status-warning {
+      background: var(--warning);
+      color: white;
+    }
+    
+    .test-result {
+      margin-bottom: 10px;
+      padding: 10px;
+      border-radius: 4px;
+      border-left: 4px solid #e0e0e0;
+      background: #f9f9f9;
+    }
+    
+    .test-result.success {
+      border-left-color: var(--success);
+    }
+    
+    .test-result.error {
+      border-left-color: var(--error);
+    }
+    
+    .test-result.warning {
+      border-left-color: var(--warning);
+    }
+    
+    .test-title {
+      display: flex;
+      justify-content: space-between;
+      font-weight: bold;
+      margin-bottom: 5px;
+    }
+    
+    .test-meta {
+      color: #757575;
+      font-size: 12px;
+      margin-bottom: 8px;
+    }
+    
+    .test-message {
+      word-break: break-word;
+    }
+    
+    pre {
+      background: #2d2d2d;
+      color: #f8f8f2;
+      padding: 10px;
+      border-radius: 4px;
+      overflow-x: auto;
+      font-size: 13px;
+      margin-top: 8px;
+    }
+    
+    .badge {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 10px;
+      font-size: 11px;
+      background: #e0e0e0;
+      color: #333;
+      margin-left: 5px;
+    }
+    
+    .badge-http {
+      background: #7e57c2;
+      color: white;
+    }
+    
+    .badge-cors {
+      background: #26a69a;
+      color: white;
+    }
+    
+    .badge-auth {
+      background: #ef5350;
+      color: white;
+    }
+    
+    .badge-network {
+      background: #f57c00;
+      color: white;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>API Connectivity Diagnostics</h1>
+      <p>Enterprise-grade troubleshooting for your OAuth and API connections</p>
+    </header>
+    
+    <div class="dashboard">
+      <div class="panel">
+        <div class="panel-header">API Health Checks</div>
+        <div class="panel-body">
+          <div class="test-controls">
+            <button id="testAllEndpoints" class="btn">Test All Endpoints</button>
+            <button id="testHealth" class="btn">Test Health</button>
+            <button id="testAuth" class="btn">Test Auth</button>
+            <button id="clearResults" class="btn btn-secondary">Clear Results</button>
+          </div>
+          
+          <div class="input-group">
+            <input type="text" id="customUrl" placeholder="Custom endpoint URL" value="https://api.quits.cc/health">
+            <button id="testCustomUrl" class="btn">Test</button>
+          </div>
+          
+          <div id="apiResults"></div>
+        </div>
+      </div>
+      
+      <div class="panel">
+        <div class="panel-header">OAuth Diagnostics</div>
+        <div class="panel-body">
+          <div class="test-controls">
+            <button id="generateOAuthUrl" class="btn">Generate OAuth URL</button>
+            <button id="testDirectCallback" class="btn">Test Direct Callback</button>
+            <button id="testProxyEndpoint" class="btn">Test Proxy Endpoint</button>
+            <button id="openAuth" class="btn btn-success">Open Auth Flow</button>
+          </div>
+          
+          <div id="oauthResults"></div>
+        </div>
+      </div>
+      
+      <div class="panel">
+        <div class="panel-header">Environment Information</div>
+        <div class="panel-body">
+          <div id="envInfo">
+            <div class="test-result">
+              <div class="test-title">Environment Data</div>
+              <div class="test-message">Click "Load Environment Info" to retrieve data</div>
+            </div>
+          </div>
+          <div class="test-controls">
+            <button id="loadEnvInfo" class="btn">Load Environment Info</button>
+          </div>
+        </div>
+      </div>
+      
+      <div class="panel">
+        <div class="panel-header">Browser & Network Diagnostics</div>
+        <div class="panel-body">
+          <div id="browserInfo"></div>
+          <div class="test-controls">
+            <button id="runDiagnostics" class="btn">Run Diagnostics</button>
+            <button id="testCORSHeaders" class="btn">Test CORS Headers</button>
+            <button id="testServiceWorker" class="btn">Check Service Worker</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <script>
+    // API endpoints to test
+    const API_DOMAINS = [
+      'https://api.quits.cc',
+      'https://quits-backend-2-0-mahy1vpr6-mats-ottens-hotmailcoms-projects.vercel.app'
+    ];
+    
+    const API_ENDPOINTS = [
+      '/health',
+      '/api/health',
+      '/debug?type=auth',
+      '/api/debug?type=auth',
+      '/auth/google/callback?test=true',
+      '/api/auth/google/callback?test=true'
+    ];
+    
+    // Create all combinations of domains and endpoints
+    const ENDPOINTS_TO_TEST = [];
+    API_DOMAINS.forEach(domain => {
+      API_ENDPOINTS.forEach(endpoint => {
+        ENDPOINTS_TO_TEST.push(domain + endpoint);
+      });
+    });
+    
+    // Handle adding results
+    function addResult(containerId, title, message, status, meta = {}, responseData = null) {
+      const container = document.getElementById(containerId);
+      const result = document.createElement('div');
+      result.className = `test-result ${status}`;
+      
+      const timestamp = new Date().toLocaleTimeString();
+      const metaText = Object.entries(meta)
+        .filter(([_, value]) => value !== undefined)
+        .map(([key, value]) => `${key}: ${value}`)
+        .join(' | ');
+      
+      let badgeHtml = '';
+      if (meta.type === 'http') badgeHtml += '<span class="badge badge-http">HTTP</span>';
+      if (meta.type === 'cors') badgeHtml += '<span class="badge badge-cors">CORS</span>';
+      if (meta.type === 'auth') badgeHtml += '<span class="badge badge-auth">AUTH</span>';
+      if (meta.type === 'network') badgeHtml += '<span class="badge badge-network">NETWORK</span>';
+      
+      let responseHtml = '';
+      if (responseData) {
+        responseHtml = `<pre>${typeof responseData === 'string' ? responseData : JSON.stringify(responseData, null, 2)}</pre>`;
+      }
+      
+      result.innerHTML = `
+        <div class="test-title">
+          ${title} 
+          <span class="status status-${status}">${status.toUpperCase()}</span>
+          ${badgeHtml}
+        </div>
+        <div class="test-meta">${timestamp} | ${metaText}</div>
+        <div class="test-message">${message}</div>
+        ${responseHtml}
+      `;
+      
+      container.prepend(result);
+    }
+    
+    // Test a specific endpoint
+    async function testEndpoint(url, containerId = 'apiResults') {
+      try {
+        addResult(containerId, 'Testing ' + url, 'Request started...', 'warning', { type: 'http' });
+        
+        const startTime = Date.now();
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+            'Cache-Control': 'no-store, no-cache'
+          },
+          mode: 'cors'
+        });
+        
+        const endTime = Date.now();
+        const duration = endTime - startTime;
+        
+        let responseText;
+        let parsedResponse;
+        
+        try {
+          responseText = await response.text();
+          try {
+            parsedResponse = JSON.parse(responseText);
+          } catch {
+            // Not JSON
+            parsedResponse = { raw: responseText };
+          }
+        } catch (e) {
+          responseText = '(Failed to read response body)';
+          parsedResponse = null;
+        }
+        
+        if (response.ok) {
+          addResult(
+            containerId,
+            'Success: ' + url, 
+            `Endpoint responded with ${response.status} ${response.statusText}`,
+            'success',
+            { 
+              type: 'http', 
+              duration: `${duration}ms`,
+              contentType: response.headers.get('content-type')
+            },
+            parsedResponse
+          );
+        } else {
+          addResult(
+            containerId,
+            'Failed: ' + url, 
+            `Endpoint responded with ${response.status} ${response.statusText}`,
+            'error',
+            { 
+              type: 'http', 
+              duration: `${duration}ms` 
+            },
+            parsedResponse || responseText
+          );
+        }
+        
+        return { success: response.ok, response, data: parsedResponse };
+      } catch (error) {
+        addResult(
+          containerId,
+          'Error: ' + url, 
+          `Request failed: ${error.message}`,
+          'error',
+          { type: 'network' }
+        );
+        return { success: false, error };
+      }
+    }
+    
+    // Test OAuth URL generation
+    function generateOAuthUrl() {
+      try {
+        const clientId = '82730443897-ji64k4jhk02lonkps5vu54e1q5opoq3g.apps.googleusercontent.com';
+        const redirectUri = encodeURIComponent('https://www.quits.cc/auth/callback');
+        const scope = encodeURIComponent('email profile https://www.googleapis.com/auth/gmail.readonly openid');
+        const state = Math.random().toString(36).substring(2, 15);
+        
+        // Store the state for verification
+        localStorage.setItem('oauth_state', state);
+        
+        const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code&scope=${scope}&state=${state}&prompt=select_account+consent&access_type=offline`;
+        
+        addResult(
+          'oauthResults',
+          'OAuth URL Generated', 
+          'Generated Google OAuth URL with proper parameters',
+          'success',
+          { type: 'auth' },
+          url
+        );
+        
+        return url;
+      } catch (error) {
+        addResult(
+          'oauthResults',
+          'OAuth URL Generation Failed', 
+          `Error: ${error.message}`,
+          'error',
+          { type: 'auth' }
+        );
+        return null;
+      }
+    }
+    
+    // Run browser diagnostics
+    function runBrowserDiagnostics() {
+      const container = document.getElementById('browserInfo');
+      container.innerHTML = '';
+      
+      const result = document.createElement('div');
+      result.className = 'test-result success';
+      
+      const browserInfo = {
+        userAgent: navigator.userAgent,
+        platform: navigator.platform,
+        language: navigator.language,
+        cookiesEnabled: navigator.cookieEnabled,
+        localStorage: testLocalStorage(),
+        serviceWorker: 'serviceWorker' in navigator,
+        fetch: typeof fetch === 'function',
+        cors: 'cors' in new Request(''),
+        onLine: navigator.onLine
+      };
+      
+      result.innerHTML = `
+        <div class="test-title">Browser Information</div>
+        <div class="test-message">
+          <pre>${JSON.stringify(browserInfo, null, 2)}</pre>
+        </div>
+      `;
+      
+      container.appendChild(result);
+      
+      // Test network connectivity
+      addResult(
+        'browserInfo',
+        'Network Status', 
+        navigator.onLine ? 'Browser reports online status' : 'Browser reports offline status',
+        navigator.onLine ? 'success' : 'error',
+        { type: 'network' }
+      );
+      
+      return browserInfo;
+    }
+    
+    // Test localStorage
+    function testLocalStorage() {
+      try {
+        const testKey = '_test_' + Math.random();
+        localStorage.setItem(testKey, 'test');
+        const value = localStorage.getItem(testKey);
+        localStorage.removeItem(testKey);
+        return value === 'test';
+      } catch (e) {
+        return false;
+      }
+    }
+    
+    // Test Service Worker
+    async function testServiceWorker() {
+      if (!('serviceWorker' in navigator)) {
+        addResult(
+          'browserInfo',
+          'Service Worker API', 
+          'Service Worker API is not available in this browser',
+          'error',
+          { type: 'network' }
+        );
+        return false;
+      }
+      
+      try {
+        const registration = await navigator.serviceWorker.getRegistration();
+        if (registration) {
+          addResult(
+            'browserInfo',
+            'Service Worker Status', 
+            `Service Worker is active: ${registration.active ? 'Yes' : 'No'}, Scope: ${registration.scope}`,
+            'success',
+            { type: 'network' }
+          );
+          return true;
+        } else {
+          addResult(
+            'browserInfo',
+            'Service Worker Status', 
+            'No Service Worker is registered',
+            'warning',
+            { type: 'network' }
+          );
+          return false;
+        }
+      } catch (error) {
+        addResult(
+          'browserInfo',
+          'Service Worker Error', 
+          `Failed to check Service Worker: ${error.message}`,
+          'error',
+          { type: 'network' }
+        );
+        return false;
+      }
+    }
+    
+    // Load environment info
+    async function loadEnvironmentInfo() {
+      try {
+        const domains = [
+          'https://api.quits.cc/debug?type=env',
+          'https://quits-backend-2-0-mahy1vpr6-mats-ottens-hotmailcoms-projects.vercel.app/debug?type=env'
+        ];
+        
+        let envData = null;
+        
+        for (const domain of domains) {
+          try {
+            const result = await testEndpoint(domain, 'envInfo');
+            if (result.success) {
+              envData = result.data;
+              break;
+            }
+          } catch (e) {
+            console.warn(`Failed to fetch from ${domain}:`, e);
+          }
+        }
+        
+        if (!envData) {
+          addResult(
+            'envInfo',
+            'Environment Info', 
+            'Failed to retrieve environment information from any endpoint',
+            'error',
+            { type: 'http' }
+          );
+        }
+        
+        return envData;
+      } catch (error) {
+        addResult(
+          'envInfo',
+          'Environment Info Error', 
+          `Error: ${error.message}`,
+          'error',
+          { type: 'http' }
+        );
+        return null;
+      }
+    }
+    
+    // Event listeners
+    document.getElementById('testAllEndpoints').addEventListener('click', () => {
+      ENDPOINTS_TO_TEST.forEach(endpoint => testEndpoint(endpoint));
+    });
+    
+    document.getElementById('testHealth').addEventListener('click', () => {
+      API_DOMAINS.forEach(domain => testEndpoint(`${domain}/health`));
+    });
+    
+    document.getElementById('testAuth').addEventListener('click', () => {
+      API_DOMAINS.forEach(domain => testEndpoint(`${domain}/debug?type=auth`));
+    });
+    
+    document.getElementById('clearResults').addEventListener('click', () => {
+      document.getElementById('apiResults').innerHTML = '';
+    });
+    
+    document.getElementById('testCustomUrl').addEventListener('click', () => {
+      const url = document.getElementById('customUrl').value.trim();
+      if (url) {
+        testEndpoint(url);
+      }
+    });
+    
+    document.getElementById('generateOAuthUrl').addEventListener('click', () => {
+      generateOAuthUrl();
+    });
+    
+    document.getElementById('openAuth').addEventListener('click', () => {
+      const url = generateOAuthUrl();
+      if (url) {
+        window.open(url, '_blank');
+      }
+    });
+    
+    document.getElementById('loadEnvInfo').addEventListener('click', () => {
+      loadEnvironmentInfo();
+    });
+    
+    document.getElementById('runDiagnostics').addEventListener('click', () => {
+      runBrowserDiagnostics();
+    });
+    
+    document.getElementById('testServiceWorker').addEventListener('click', () => {
+      testServiceWorker();
+    });
+    
+    document.getElementById('testDirectCallback').addEventListener('click', () => {
+      API_DOMAINS.forEach(domain => {
+        testEndpoint(`${domain}/auth/google/callback?test=true`, 'oauthResults');
+      });
+    });
+    
+    document.getElementById('testProxyEndpoint').addEventListener('click', () => {
+      API_DOMAINS.forEach(domain => {
+        testEndpoint(`${domain}/google-proxy?test=true`, 'oauthResults');
+      });
+    });
+    
+    document.getElementById('testCORSHeaders').addEventListener('click', async () => {
+      try {
+        const url = 'https://api.quits.cc/health';
+        const response = await fetch(url, {
+          method: 'OPTIONS',
+          headers: { 'Origin': window.location.origin }
+        });
+        
+        const corsHeaders = {
+          'Access-Control-Allow-Origin': response.headers.get('Access-Control-Allow-Origin'),
+          'Access-Control-Allow-Methods': response.headers.get('Access-Control-Allow-Methods'),
+          'Access-Control-Allow-Headers': response.headers.get('Access-Control-Allow-Headers'),
+          'Access-Control-Allow-Credentials': response.headers.get('Access-Control-Allow-Credentials'),
+          'Access-Control-Max-Age': response.headers.get('Access-Control-Max-Age')
+        };
+        
+        const hasValidCORS = corsHeaders['Access-Control-Allow-Origin'] !== null;
+        
+        addResult(
+          'browserInfo',
+          'CORS Headers Test', 
+          hasValidCORS ? 'CORS headers are properly configured' : 'CORS headers are missing or incorrectly configured',
+          hasValidCORS ? 'success' : 'error',
+          { type: 'cors' },
+          corsHeaders
+        );
+      } catch (error) {
+        addResult(
+          'browserInfo',
+          'CORS Headers Test Failed', 
+          `Error: ${error.message}`,
+          'error',
+          { type: 'cors' }
+        );
+      }
+    });
+    
+    // Initialize
+    window.addEventListener('load', () => {
+      // Automatic diagnostics on load
+      runBrowserDiagnostics();
+      testEndpoint('https://api.quits.cc/health');
+    });
+  </script>
+</body>
+</html> 

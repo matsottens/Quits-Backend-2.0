@@ -1,7 +1,10 @@
 // Combined handlers file to reduce the number of serverless functions
 import { setCorsHeaders, handleOptions, getPath } from './utils.js';
 
-export default function handler(req, res) {
+// Import debug handler directly
+import debugHandler from './debug.js';
+
+export default async function handler(req, res) {
   // Set CORS headers
   setCorsHeaders(req, res);
   
@@ -13,6 +16,12 @@ export default function handler(req, res) {
   // Extract the path
   const path = getPath(req);
   console.log('Combined handler processing path:', path);
+  
+  // Handle debug endpoint
+  if (path === '/api/debug' || path === '/debug') {
+    console.log('Routing to debug handler');
+    return debugHandler(req, res);
+  }
   
   // Handle favicon requests
   if (path === '/favicon.ico' || path === '/favicon.png') {
@@ -36,7 +45,13 @@ export default function handler(req, res) {
     return res.status(200).json({
       status: 'ok',
       message: 'API is working',
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      cors_test: true,
+      headers: {
+        origin: req.headers.origin || 'none',
+        referer: req.headers.referer || 'none',
+        'user-agent': req.headers['user-agent'] || 'none'
+      }
     });
   }
   
