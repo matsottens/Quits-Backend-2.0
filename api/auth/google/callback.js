@@ -15,20 +15,6 @@ export default async function handler(req, res) {
   const path = getPath(req);
   console.log(`OAuth Callback Handler - Processing ${req.method} request for: ${path}`);
   console.log('Query params:', req.query);
-  console.log('Accept:', req.headers.accept);
-  console.log('Origin:', req.headers.origin);
-  console.log('User Agent:', req.headers['user-agent']);
-  console.log('Full request headers:', req.headers);
-
-  // Debug environment variables
-  console.log('ENVIRONMENT DIAGNOSTICS:');
-  console.log('CLIENT_URL:', process.env.CLIENT_URL);
-  console.log('CORS_ORIGIN:', process.env.CORS_ORIGIN);
-  console.log('NODE_ENV:', process.env.NODE_ENV);
-  console.log('VERCEL_ENV:', process.env.VERCEL_ENV);
-  console.log('GOOGLE_CLIENT_ID present:', !!process.env.GOOGLE_CLIENT_ID);
-  console.log('GOOGLE_CLIENT_SECRET present:', !!process.env.GOOGLE_CLIENT_SECRET);
-  console.log('JWT_SECRET present:', !!process.env.JWT_SECRET);
   
   // Check for OPTIONS preflight request
   if (req.method === 'OPTIONS') {
@@ -65,23 +51,28 @@ export default async function handler(req, res) {
     const { google } = await import('googleapis');
     const jwt = await import('jsonwebtoken');
 
-    // Start with the primary redirect URI
+    // Set up the redirect URI - use a consistent one
     const redirectUri = 'https://www.quits.cc/auth/callback';
     console.log(`Using redirect URI: ${redirectUri}`);
     
-    // Debug environment variables
-    console.log('Environment variables:');
-    console.log('GOOGLE_CLIENT_ID:', process.env.GOOGLE_CLIENT_ID ? `Set (length: ${process.env.GOOGLE_CLIENT_ID.length})` : 'Not set');
-    console.log('GOOGLE_CLIENT_SECRET:', process.env.GOOGLE_CLIENT_SECRET ? `Set (length: ${process.env.GOOGLE_CLIENT_SECRET.length})` : 'Not set');
-    console.log('JWT_SECRET:', process.env.JWT_SECRET ? `Set (length: ${process.env.JWT_SECRET.length})` : 'Not set');
-    console.log('NODE_ENV:', process.env.NODE_ENV);
-    console.log('VERCEL_ENV:', process.env.VERCEL_ENV);
-
-    // Use environment variables with hardcoded fallbacks
-    const clientId = process.env.GOOGLE_CLIENT_ID || '82730443897-ji64k4jhk02lonkps5vu54e1q5opoq3g.apps.googleusercontent.com';
-    const clientSecret = process.env.GOOGLE_CLIENT_SECRET || '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';
+    // Check for required environment variables
+    if (!process.env.GOOGLE_CLIENT_ID) {
+      throw new Error('Missing required environment variable: GOOGLE_CLIENT_ID');
+    }
     
-    console.log(`Using client ID: ${clientId.substring(0, 10)}... and redirect URI: ${redirectUri}`);
+    if (!process.env.GOOGLE_CLIENT_SECRET) {
+      throw new Error('Missing required environment variable: GOOGLE_CLIENT_SECRET');
+    }
+    
+    if (!process.env.JWT_SECRET) {
+      throw new Error('Missing required environment variable: JWT_SECRET');
+    }
+    
+    // Use environment variables (no hardcoded fallbacks for security)
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    
+    console.log(`Using client ID: ${clientId.substring(0, 5)}****** and redirect URI: ${redirectUri}`);
 
     // Create OAuth client
     const oauth2Client = new google.auth.OAuth2(
@@ -89,96 +80,69 @@ export default async function handler(req, res) {
       clientSecret,
       redirectUri
     );
-    
-    console.log(`Created OAuth client with client ID: ${clientId.substring(0, 10)}... and redirect URI: ${redirectUri}`);
 
     // Exchange code for tokens
     let tokens;
     try {
-      console.log(`Attempting to exchange authorization code: ${code.substring(0, 10)}...`);
+      console.log(`Attempting to exchange authorization code: ${code.substring(0, 5)}******`);
       const response = await oauth2Client.getToken(code);
       tokens = response.tokens;
       console.log('Token exchange successful, received tokens:', Object.keys(tokens).join(', '));
     } catch (tokenError) {
-      console.error('Token exchange error:', tokenError);
-      console.error('Token error name:', tokenError.name);
-      console.error('Token error message:', tokenError.message);
-      console.error('Token error details:', tokenError.response?.data || 'No additional details');
+      console.error('Token exchange error:', tokenError.message);
       
-      // Try alternate redirect URIs if primary fails
-      console.log('Trying alternate redirect URIs');
-      const alternateUris = [
-        'https://quits.cc/auth/callback',
-        'https://www.quits.cc/dashboard',
-        redirect
-      ];
-      
-      let altSucceeded = false;
-      
-      for (const uri of alternateUris) {
-        try {
-          console.log(`Trying with alternate redirect URI: ${uri}`);
-          const altOAuth2Client = new google.auth.OAuth2(
-            clientId,
-            clientSecret,
-            uri
-          );
-          const response = await altOAuth2Client.getToken(code);
-          tokens = response.tokens;
-          console.log(`Success with alternate URI: ${uri}`);
-          altSucceeded = true;
-          break;
-        } catch (altError) {
-          console.log(`Failed with URI ${uri}:`, altError.message);
-        }
-      }
-      
-      // If we still don't have tokens, return an error
-      if (!tokens) {
-        // Return appropriate format based on Accept header
+      // If it's an invalid_grant error, return a specific message
+      if (tokenError.message && tokenError.message.includes('invalid_grant')) {
         if (req.headers.accept && req.headers.accept.includes('application/json')) {
-          // If it's an invalid_grant error, return a specific message
-          if (tokenError.message && tokenError.message.includes('invalid_grant')) {
-            return res.status(400).json({
-              error: 'invalid_grant',
-              message: 'Authorization code has expired or already been used',
-              error_details: {
-                code_partial: code.substring(0, 10) + '...',
-                error_type: tokenError.name,
-                error_message: tokenError.message,
-                redirect_uri: redirectUri,
-                client_id_partial: clientId.substring(0, 10) + '...'
-              }
-            });
-          }
-          
           return res.status(400).json({
-            error: 'token_exchange_failed',
-            message: tokenError.message,
-            tried_alternate_uris: alternateUris,
+            error: 'invalid_grant',
+            message: 'Authorization code has expired or already been used',
             error_details: {
-              code_partial: code.substring(0, 10) + '...',
               error_type: tokenError.name,
               error_message: tokenError.message,
-              redirect_uri: redirectUri,
-              client_id_partial: clientId.substring(0, 10) + '...'
+              redirect_uri: redirectUri
             }
           });
         }
         
-        // HTML response
+        // HTML response for invalid_grant error
         return res.status(400).send(`
           <html>
             <head><title>Authentication Error</title></head>
             <body>
               <h2>Authentication Error</h2>
-              <p>${tokenError.message || 'Failed to exchange authorization code for tokens'}</p>
-              <p>Error details: Code=${code.substring(0, 10)}..., ClientID=${clientId.substring(0, 10)}..., RedirectURI=${redirectUri}</p>
+              <p>Authorization code has expired or already been used.</p>
+              <p>Please try logging in again.</p>
               <p><a href="https://www.quits.cc/login">Return to login</a></p>
             </body>
           </html>
         `);
       }
+      
+      // For other token errors
+      if (req.headers.accept && req.headers.accept.includes('application/json')) {
+        return res.status(400).json({
+          error: 'token_exchange_failed',
+          message: tokenError.message,
+          error_details: {
+            error_type: tokenError.name,
+            error_message: tokenError.message,
+            redirect_uri: redirectUri
+          }
+        });
+      }
+      
+      // HTML response
+      return res.status(400).send(`
+        <html>
+          <head><title>Authentication Error</title></head>
+          <body>
+            <h2>Authentication Error</h2>
+            <p>${tokenError.message || 'Failed to exchange authorization code for tokens'}</p>
+            <p><a href="https://www.quits.cc/login">Return to login</a></p>
+          </body>
+        </html>
+      `);
     }
 
     // If we reach here, we should have tokens
@@ -202,14 +166,14 @@ export default async function handler(req, res) {
 
     // Generate a JWT token
     console.log('Generating JWT token');
-    const jwtSecret = process.env.JWT_SECRET || 'your-jwt-secret-key';
-    console.log(`Using JWT secret: ${jwtSecret.substring(0, 5)}...`);
+    const jwtSecret = process.env.JWT_SECRET;
     
     const token = jwt.default.sign(
       { 
         id: userInfo.id,
         email: userInfo.email,
         gmail_token: tokens.access_token,
+        refresh_token: tokens.refresh_token || null,
         createdAt: new Date().toISOString()
       },
       jwtSecret,
@@ -265,8 +229,25 @@ export default async function handler(req, res) {
             debugEl.scrollTop = debugEl.scrollHeight;
           }
           
+          // Helper to check localStorage availability
+          function isLocalStorageAvailable() {
+            try {
+              const test = '__test__';
+              localStorage.setItem(test, test);
+              localStorage.removeItem(test);
+              return true;
+            } catch(e) {
+              return false;
+            }
+          }
+          
           // Helper to store token and ensure it's stored correctly
           function storeToken(token) {
+            if (!isLocalStorageAvailable()) {
+              debug('ERROR: localStorage is not available in this browser');
+              return false;
+            }
+            
             try {
               // First clear any existing tokens
               localStorage.removeItem('token');
@@ -276,7 +257,7 @@ export default async function handler(req, res) {
               // Try to store new token in both places for consistency
               localStorage.setItem('token', token);
               localStorage.setItem('quits_auth_token', token);
-              debug("Attempted to set new token in both locations");
+              debug("Set new token in both locations");
               
               // Verify token was stored correctly
               const storedToken = localStorage.getItem('token');
@@ -302,7 +283,6 @@ export default async function handler(req, res) {
           
           try {
             debug('Starting token storage process');
-            debug('User Agent: ' + navigator.userAgent);
             
             const token = '${token}';
             debug('Token length: ' + token.length);
@@ -349,8 +329,20 @@ export default async function handler(req, res) {
     return res.send(htmlResponse);
 
   } catch (error) {
-    console.error('OAuth callback error:', error);
+    console.error('OAuth callback error:', error.message);
     console.error('Error stack:', error.stack);
+    
+    // Environment variables debug info object
+    const envInfo = {
+      has_google_client_id: !!process.env.GOOGLE_CLIENT_ID,
+      has_google_client_secret: !!process.env.GOOGLE_CLIENT_SECRET,
+      has_jwt_secret: !!process.env.JWT_SECRET,
+      node_env: process.env.NODE_ENV || 'not set',
+      vercel_env: process.env.VERCEL_ENV || 'not set'
+    };
+    
+    // Log environment info for debugging
+    console.error('Environment info:', envInfo);
     
     // Return appropriate format based on Accept header
     if (req.headers.accept && req.headers.accept.includes('application/json')) {
@@ -358,12 +350,7 @@ export default async function handler(req, res) {
         error: 'authentication_failed',
         message: error.message,
         details: process.env.NODE_ENV === 'production' ? undefined : error.stack,
-        env_info: {
-          node_env: process.env.NODE_ENV || 'not set',
-          vercel_env: process.env.VERCEL_ENV || 'not set',
-          has_google_config: !!process.env.GOOGLE_CLIENT_ID,
-          has_jwt_secret: !!process.env.JWT_SECRET
-        }
+        env_info: envInfo
       });
     }
     

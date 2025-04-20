@@ -1,24 +1,22 @@
 // Google OAuth Proxy - Simplified handler to avoid path-to-regexp issues
 import { setCorsHeaders, getPath } from './utils.js';
-import nodeFetch from 'node-fetch';
+import fetch from 'node-fetch';
 
 // Use node-fetch for older Node.js environments
-const fetch = globalThis.fetch || nodeFetch;
+const fetchNode = globalThis.fetch || fetch;
 
-// Simple in-memory cache to track already processed codes
-// This helps prevent multiple attempts with the same code
-const processedCodes = new Map();
+// Simple in-memory rate limiting cache to prevent duplicate requests
+const requestCache = new Map();
 
-// Clear old entries from the cache every hour
+// Clean cache periodically
 setInterval(() => {
   const now = Date.now();
-  for (const [code, data] of processedCodes.entries()) {
-    // Remove entries older than 1 hour
-    if (now - data.timestamp > 3600000) {
-      processedCodes.delete(code);
+  for (const [key, value] of requestCache.entries()) {
+    if (now - value.timestamp > 60000) { // Remove entries older than 1 minute
+      requestCache.delete(key);
     }
   }
-}, 3600000);
+}, 60000);
 
 export default async function handler(req, res) {
   // Always set CORS headers explicitly for all response types
@@ -64,28 +62,26 @@ export default async function handler(req, res) {
   console.log('JWT_SECRET present:', !!process.env.JWT_SECRET);
   
   // Extract code from query parameters
-  const { code, redirect, _t } = req.query;
+  const { code, redirect_uri } = req.query;
   
   if (!code) {
     console.log('Error: Missing authorization code');
     return res.status(400).json({ 
-      error: 'Missing authorization code',
-      details: 'The authorization code is required for the Google OAuth flow'
+      error: 'missing_code',
+      message: 'Missing authorization code'
     });
   }
   
-  // Check if this code has already been processed
-  if (processedCodes.has(code)) {
-    const cachedResult = processedCodes.get(code);
-    console.log('Using cached result for authorization code:', {
-      code_partial: code.substring(0, 8) + '...',
-      result_type: cachedResult.error ? 'error' : 'success',
-      timestamp_age: Date.now() - cachedResult.timestamp,
-      status: cachedResult.status || 200
-    });
+  // Create a cache key based on the code
+  const cacheKey = `${code}-${redirect_uri || ''}`;
+  
+  // Check if we've already processed this request
+  if (requestCache.has(cacheKey)) {
+    const cachedResult = requestCache.get(cacheKey);
+    console.log(`Using cached result for request ${cacheKey.substring(0, 10)}...`);
     
-    // Return the cached result with the original status code
-    return res.status(cachedResult.status || 200).json(cachedResult);
+    // Return the cached response
+    return res.status(cachedResult.status).json(cachedResult.data);
   }
   
   try {
@@ -193,7 +189,11 @@ export default async function handler(req, res) {
           };
           
           // Cache the successful result
-          processedCodes.set(code, result);
+          requestCache.set(cacheKey, {
+            status: 200,
+            data: result,
+            timestamp: Date.now()
+          });
           
           console.log('Sending success response with token');
           
@@ -229,7 +229,11 @@ export default async function handler(req, res) {
                 redirect_uri: redirectUri
               }
             };
-            processedCodes.set(code, errorResult);
+            requestCache.set(cacheKey, {
+              status: 400,
+              data: errorResult,
+              timestamp: Date.now()
+            });
             
             return res.status(400).json(errorResult);
           }
@@ -239,7 +243,7 @@ export default async function handler(req, res) {
           const alternateUris = [
             'https://quits.cc/auth/callback',
             'https://www.quits.cc/dashboard',
-            redirect ? decodeURIComponent(redirect) : 'https://www.quits.cc/dashboard'
+            redirect_uri ? decodeURIComponent(redirect_uri) : 'https://www.quits.cc/dashboard'
           ];
           
           for (const uri of alternateUris) {
@@ -289,7 +293,11 @@ export default async function handler(req, res) {
               };
               
               // Cache the successful result
-              processedCodes.set(code, successResult);
+              requestCache.set(cacheKey, {
+                status: 200,
+                data: successResult,
+                timestamp: Date.now()
+              });
               
               return res.status(200).json(successResult);
             } catch (altError) {
@@ -315,7 +323,11 @@ export default async function handler(req, res) {
           };
           
           // Cache the error result
-          processedCodes.set(code, errorResult);
+          requestCache.set(cacheKey, {
+            status: 400,
+            data: errorResult,
+            timestamp: Date.now()
+          });
           
           return res.status(400).json(errorResult);
         }
@@ -334,7 +346,11 @@ export default async function handler(req, res) {
         };
         
         // Cache the error result
-        processedCodes.set(code, errorResult);
+        requestCache.set(cacheKey, {
+          status: 500,
+          data: errorResult,
+          timestamp: Date.now()
+        });
         
         return res.status(500).json(errorResult);
       }
@@ -426,7 +442,7 @@ export default async function handler(req, res) {
           
           // Forward the request to the main callback handler
           const code = "${code}";
-          const redirectUrl = "${redirect || 'https://www.quits.cc/dashboard'}";
+          const redirectUrl = "${redirect_uri || 'https://www.quits.cc/dashboard'}";
           const timestamp = Date.now();
           
           debug('Auth code: ' + code.substring(0, 8) + '...');
@@ -547,8 +563,9 @@ export default async function handler(req, res) {
     };
     
     // Cache the error result
-    processedCodes.set(code, {
-      ...errorResult,
+    requestCache.set(cacheKey, {
+      status: 500,
+      data: errorResult,
       timestamp: Date.now()
     });
     
