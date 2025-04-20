@@ -37,92 +37,23 @@
         { "key": "Access-Control-Allow-Credentials", "value": "true" },
         { "key": "X-Content-Type-Options", "value": "nosniff" }
       ]
-    }
-  ],
-  "routes": [
-    { 
-      "src": "/(cors-test.html|test-auth|debug-cors)",
-      "dest": "/public/$1",
-      "headers": {
-        "Cache-Control": "no-store, no-cache"
-      }
-    },
-    { 
-      "src": "/api/debug", 
-      "dest": "/api/debug.js",
-      "methods": ["GET", "OPTIONS"],
-      "headers": {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token, Pragma",
-        "Access-Control-Allow-Credentials": "true"
-      }
-    },
-    { 
-      "src": "/api/debug-env", 
-      "dest": "/api/debug-env.js",
-      "methods": ["GET", "OPTIONS"],
-      "headers": {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token, Pragma",
-        "Access-Control-Allow-Credentials": "true"
-      }
-    },
-    { 
-      "src": "/api/google-proxy", 
-      "dest": "/api/google-proxy.js",
-      "methods": ["GET", "POST", "OPTIONS"],
-      "headers": {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token, Pragma",
-        "Access-Control-Allow-Credentials": "true"
-      }
-    },
-    { 
-      "src": "/api/health", 
-      "dest": "/api/health.js",
-      "methods": ["GET", "OPTIONS"],
-      "headers": {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token, Pragma",
-        "Access-Control-Allow-Credentials": "true"
-      }
-    },
-    { 
-      "src": "/api/auth/google/callback", 
-      "dest": "/api/auth/google/callback.js",
-      "methods": ["GET", "OPTIONS"],
-      "headers": {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token, Pragma",
-        "Access-Control-Allow-Credentials": "true"
-      }
-    },
-    { 
-      "src": "/api/auth/google", 
-      "dest": "/api/auth/google/index.js",
-      "methods": ["GET", "OPTIONS"],
-      "headers": {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token, Pragma",
-        "Access-Control-Allow-Credentials": "true"
-      }
     },
     {
-      "src": "/api/(.*)",
-      "dest": "/api/combined-handlers.js",
-      "headers": {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token, Pragma",
-        "Access-Control-Allow-Credentials": "true"
-      }
-    },
-    { "src": "/(.*)", "dest": "/frontend/$1" }
+      "source": "/(cors-test.html|test-auth|debug-cors)",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store, no-cache" }
+      ]
+    }
+  ],
+  "rewrites": [
+    { "source": "/(cors-test.html|test-auth|debug-cors)", "destination": "/public/$1" },
+    { "source": "/api/debug", "destination": "/api/debug.js" },
+    { "source": "/api/debug-env", "destination": "/api/debug-env.js" },
+    { "source": "/api/google-proxy", "destination": "/api/google-proxy.js" },
+    { "source": "/api/health", "destination": "/api/health.js" },
+    { "source": "/api/auth/google/callback", "destination": "/api/auth/google/callback.js" },
+    { "source": "/api/auth/google", "destination": "/api/auth/google/index.js" },
+    { "source": "/api/(.*)", "destination": "/api/combined-handlers.js" },
+    { "source": "/(.*)", "destination": "/frontend/$1" }
   ]
 } 
