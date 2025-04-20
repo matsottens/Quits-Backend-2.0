@@ -3,6 +3,7 @@ import { setCorsHeaders, handleOptions, getPath } from './utils.js';
 
 // Import debug handler directly
 import debugHandler from './debug.js';
+import debugEnvHandler from './debug-env.js';
 
 export default async function handler(req, res) {
   // Set CORS headers
@@ -21,6 +22,12 @@ export default async function handler(req, res) {
   if (path === '/api/debug' || path === '/debug') {
     console.log('Routing to debug handler');
     return debugHandler(req, res);
+  }
+  
+  // Handle debug-env endpoint
+  if (path === '/api/debug-env' || path === '/debug-env') {
+    console.log('Routing to debug-env handler');
+    return debugEnvHandler(req, res);
   }
   
   // Handle favicon requests

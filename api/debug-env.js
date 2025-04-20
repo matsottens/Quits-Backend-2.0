@@ -1,5 +1,5 @@
 // Debug environment variables without exposing secrets
-import { setCorsHeaders } from './utils';
+import { setCorsHeaders } from './utils.js';
 
 export default function handler(req, res) {
   // Set CORS headers for preflight requests
