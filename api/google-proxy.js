@@ -475,113 +475,123 @@ export default async function handler(req, res) {
           const code = "${code}";
           const redirectUrl = "${req.query.redirect_uri || 'https://www.quits.cc/dashboard'}";
           const timestamp = Date.now();
+          const token = "${token || ''}";
           
           debug('Auth code: ' + code.substring(0, 8) + '...');
           debug('Redirect URL: ' + redirectUrl);
-          debug('User Agent: ' + navigator.userAgent);
-          debug('Browser: ' + (navigator.userAgentData ? navigator.userAgentData.brands.map(b => b.brand + ' ' + b.version).join(', ') : 'Not available'));
           
-          // First check if localStorage is available
-          if (!isLocalStorageAvailable()) {
-            debug('ERROR: localStorage is not available in this browser/context');
-            document.body.innerHTML = '<h2>Authentication Error</h2><p>Your browser does not support or allow localStorage, which is required for authentication.</p><p>Please enable cookies and localStorage for this site.</p><p><a href="https://www.quits.cc/login">Return to login</a></p>';
-          } else {
-            debug('localStorage is available');
+          // First check if we already got a token directly
+          if (token) {
+            debug('Token received directly, length: ' + token.length);
             
-            // Check if we already have a token
-            const existingToken = localStorage.getItem('token');
-            if (existingToken) {
-              debug('Found existing token, redirecting directly');
-              window.location.href = redirectUrl;
+            // Try localStorage if available, but don't require it
+            if (isLocalStorageAvailable()) {
+              debug('localStorage is available, storing token');
+              storeToken(token);
             } else {
-              debug('No existing token found, making API request');
-              
-              // Make the request
-              fetch(\`https://api.quits.cc/api/auth/google/callback?code=\${encodeURIComponent(code)}&redirect=\${encodeURIComponent(redirectUrl)}&_t=\${timestamp}\`, {
-                method: 'GET',
-                credentials: 'include',
-                headers: {
-                  'Accept': 'application/json',
-                  'Cache-Control': 'no-cache, no-store'
-                }
-              })
-              .then(response => {
-                debug('Response received with status: ' + response.status);
-                if (response.ok) {
-                  debug('Response OK, parsing JSON');
-                  return response.json();
-                } else if (response.status === 400) {
-                  debug('Error 400 received, redirecting to login with error');
-                  window.location.href = '/login?error=invalid_grant&message=Your authorization code has expired. Please try again.';
-                  throw new Error('Invalid authorization code');
-                } else {
-                  debug('Network error: ' + response.status);
-                  throw new Error('Network response was not ok: ' + response.status);
-                }
-              })
-              .then(data => {
-                debug('Response data received: ' + (data ? JSON.stringify(data).substring(0, 100) + '...' : 'null'));
-                
-                if (data && data.token) {
-                  debug('Token received, length: ' + data.token.length);
-                  
-                  // Store the token and verify it was stored
-                  const stored = storeToken(data.token);
-                  
-                  if (stored) {
-                    debug('Token stored successfully. Performing double-check...');
-                    
-                    // Double-check the token storage after a brief delay
-                    setTimeout(() => {
-                      const doubleCheck = localStorage.getItem('token');
-                      if (doubleCheck === data.token) {
-                        debug('Double-check passed! Token persistence confirmed.');
-                        debug('Redirecting to: ' + redirectUrl);
-                        
-                        // Use another slight delay before redirecting
-                        setTimeout(() => {
-                          window.location.href = redirectUrl;
-                        }, 200);
-                      } else {
-                        debug('ERROR: Double-check failed! Token was lost or changed.');
-                        document.body.innerHTML = '<h2>Authentication Error</h2><p>Failed to reliably store authentication token. Please ensure cookies and localStorage are enabled.</p><p><a href="https://www.quits.cc/login">Return to login</a></p>';
-                      }
-                    }, 300);
-                  } else {
-                    debug('Failed to store token, showing error');
-                    document.body.innerHTML = '<h2>Authentication Error</h2><p>Failed to store authentication token. Please ensure cookies and localStorage are enabled.</p><p><a href="https://www.quits.cc/login">Return to login</a></p>';
-                  }
-                } else if (data && data.error) {
-                  debug('Error in response: ' + data.error);
-                  // Redirect to login with error
-                  window.location.href = '/login?error=' + data.error + '&message=' + encodeURIComponent(data.message || 'Authentication failed');
-                } else {
-                  debug('No token or error in response: ' + JSON.stringify(data));
-                  // Display error
-                  document.body.innerHTML = '<h2>Authentication Error</h2><p>' + (data && data.message ? data.message : 'Failed to authenticate') + '</p><p><a href="https://www.quits.cc/login">Return to login</a></p>';
-                }
-              })
-              .catch(error => {
-                debug('Fetch error: ' + error.message);
-                // Check for known error types in the error message
-                if (error.message.includes('invalid_grant') || error.message.includes('expired')) {
-                  debug('Identified as invalid_grant error, redirecting to login');
-                  window.location.href = '/login?error=invalid_grant&message=' + encodeURIComponent('Your authorization has expired. Please try again.');
-                } else {
-                  // Display generic error for other cases
-                  document.body.innerHTML = '<h2>Authentication Error</h2><p>' + error.message + '</p><p><a href="https://www.quits.cc/login">Return to login</a></p>';
-                }
-              });
+              debug('WARNING: localStorage is not available, continuing anyway with URL token');
             }
+            
+            // Redirect with token as query parameter
+            debug('Redirecting to app with token in URL');
+            window.location.href = redirectUrl + (redirectUrl.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
+          } else {
+            debug('No direct token provided, using API call');
+            
+            // Make the request to get a token
+            fetch(\`https://api.quits.cc/api/auth/google/callback?code=\${encodeURIComponent(code)}&redirect=\${encodeURIComponent(redirectUrl)}&_t=\${timestamp}\`, {
+              method: 'GET',
+              credentials: 'include',
+              headers: {
+                'Accept': 'application/json',
+                'Cache-Control': 'no-cache, no-store'
+              }
+            })
+            .then(response => {
+              debug('Response received with status: ' + response.status);
+              if (response.ok) {
+                debug('Response OK, parsing JSON');
+                return response.json();
+              } else if (response.status === 400) {
+                debug('Error 400 received, redirecting to login with error');
+                window.location.href = '/login?error=invalid_grant&message=Your authorization code has expired. Please try again.';
+                throw new Error('Invalid authorization code');
+              } else {
+                debug('Network error: ' + response.status);
+                throw new Error('Network response was not ok: ' + response.status);
+              }
+            })
+            .then(data => {
+              debug('Response data received: ' + (data ? JSON.stringify(data).substring(0, 100) + '...' : 'null'));
+              
+              if (data && data.token) {
+                debug('Token received from API, length: ' + data.token.length);
+                
+                // Try localStorage if available
+                let stored = false;
+                if (isLocalStorageAvailable()) {
+                  debug('localStorage is available, storing token');
+                  stored = storeToken(data.token);
+                  debug('Token storage result: ' + (stored ? 'success' : 'failed'));
+                } else {
+                  debug('WARNING: localStorage is not available');
+                }
+                
+                // Redirect with token as query parameter (regardless of localStorage)
+                debug('Redirecting to app with token in URL');
+                window.location.href = redirectUrl + (redirectUrl.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(data.token);
+              } else if (data && data.error) {
+                debug('Error in response: ' + data.error);
+                // Redirect to login with error
+                window.location.href = '/login?error=' + data.error + '&message=' + encodeURIComponent(data.message || 'Authentication failed');
+              } else {
+                debug('No token or error in response: ' + JSON.stringify(data));
+                // Display error
+                document.body.innerHTML = '<h2>Authentication Error</h2><p>' + (data && data.message ? data.message : 'Failed to authenticate') + '</p><p><a href="https://www.quits.cc/login">Return to login</a></p>';
+              }
+            })
+            .catch(error => {
+              debug('Fetch error: ' + error.message);
+              // Check for known error types in the error message
+              if (error.message.includes('invalid_grant') || error.message.includes('expired')) {
+                debug('Identified as invalid_grant error, redirecting to login');
+                window.location.href = '/login?error=invalid_grant&message=' + encodeURIComponent('Your authorization has expired. Please try again.');
+              } else {
+                // Display generic error for other cases
+                document.body.innerHTML = '<h2>Authentication Error</h2><p>' + error.message + '</p><p><a href="https://www.quits.cc/login">Return to login</a></p>';
+              }
+            });
           }
         </script>
       </body>
       </html>
     `;
     
-    // Set response headers
+    // Check if JSON response was explicitly requested
+    if (req.headers.accept && req.headers.accept.includes('application/json')) {
+      // For JSON requests, return the token directly in the response
+      if (token) {
+        console.log('Returning JSON response with token');
+        return res.status(200).json({
+          success: true,
+          token: token,
+          redirect: req.query.redirect_uri || 'https://www.quits.cc/dashboard'
+        });
+      } else if (error) {
+        console.log('Returning JSON error response');
+        return res.status(400).json({
+          success: false,
+          error: error.code || 'auth_error',
+          message: error.message || 'Authentication failed',
+          details: error.details || null
+        });
+      }
+    }
+    
+    // For all other requests, return HTML
+    // Set response headers for HTML
     res.setHeader('Content-Type', 'text/html');
-    res.setHeader('Content-Security-Policy', "default-src 'self' https://api.quits.cc; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'");
+    res.setHeader('Content-Security-Policy', "default-src 'self' https://api.quits.cc https://www.quits.cc; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'");
     
     // Return the HTML
     return res.send(htmlResponse);
@@ -609,41 +619,83 @@ export default async function handler(req, res) {
         timestamp: Date.now()
       });
       
-      return res.status(400).json(errorResponse);
-    }
-    
-    // For all other errors, allow the backend processing attempt
-    console.log('Error occurred during token exchange, will try backend approach as fallback');
-    
-    // Only attempt backend auth if we didn't have an invalid_grant error
-    if (!hadInvalidGrantError) {
-      try {
-        console.log('Attempting backend authentication as fallback');
-        // ... existing backend auth code ...
-      } catch (error) {
-        // ... existing error handling ...
+      // Check if JSON response was requested
+      if (req.headers.accept && req.headers.accept.includes('application/json')) {
+        return res.status(400).json(errorResponse);
       }
-    } else {
-      console.log('Skipping backend authentication attempt due to previous invalid_grant error');
+      
+      // Provide HTML response with redirection for browser requests
+      res.setHeader('Content-Type', 'text/html');
+      return res.status(400).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <title>Authentication Error</title>
+          <style>
+            body { font-family: Arial, sans-serif; text-align: center; margin: 50px; }
+          </style>
+        </head>
+        <body>
+          <h2>Authentication Error</h2>
+          <p>${errorResponse.message}</p>
+          <p><a href="https://www.quits.cc/login">Return to login</a></p>
+          <script>
+            // Redirect automatically after 2 seconds
+            setTimeout(function() {
+              window.location.href = 'https://www.quits.cc/login?error=invalid_grant&message=${encodeURIComponent(errorResponse.message)}';
+            }, 2000);
+          </script>
+        </body>
+        </html>
+      `);
     }
     
-    // Create error result
-    const errorResult = {
+    // For all other errors, return a generic error response
+    const genericErrorResponse = {
       success: false,
-      error: 'auth_failed',
-      message: 'Authentication failed. Please try again.',
-      details: process.env.NODE_ENV === 'production' ? error.message : error.stack,
-      timestamp: Date.now(),
-      status: 500
+      error: 'auth_error',
+      message: 'An error occurred during authentication. Please try again.',
+      details: error.message,
+      timestamp: Date.now()
     };
     
-    // Cache the error result
+    // Cache the error
     requestCache.set(cacheKey, {
       status: 500,
-      data: errorResult,
+      data: genericErrorResponse,
       timestamp: Date.now()
     });
     
-    return res.status(500).json(errorResult);
+    // Check if JSON response was requested
+    if (req.headers.accept && req.headers.accept.includes('application/json')) {
+      return res.status(500).json(genericErrorResponse);
+    }
+    
+    // Provide HTML error response with redirection for browser requests
+    res.setHeader('Content-Type', 'text/html');
+    return res.status(500).send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <title>Authentication Error</title>
+        <style>
+          body { font-family: Arial, sans-serif; text-align: center; margin: 50px; }
+        </style>
+      </head>
+      <body>
+        <h2>Authentication Error</h2>
+        <p>${genericErrorResponse.message}</p>
+        <p><a href="https://www.quits.cc/login">Return to login</a></p>
+        <script>
+          // Redirect automatically after 3 seconds
+          setTimeout(function() {
+            window.location.href = 'https://www.quits.cc/login?error=auth_error&message=${encodeURIComponent(genericErrorResponse.message)}';
+          }, 3000);
+        </script>
+      </body>
+      </html>
+    `);
   }
 } 
