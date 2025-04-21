@@ -324,6 +324,7 @@ export default async function handler(req, res) {
 
     // Set content type to HTML and send the response
     res.setHeader('Content-Type', 'text/html');
+    // Allow inline scripts with unsafe-inline
     res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'");
     console.log('Sending HTML response with token');
     return res.send(htmlResponse);

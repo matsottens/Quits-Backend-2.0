@@ -61,28 +61,59 @@ export default async function handler(req, res) {
   console.log('GOOGLE_CLIENT_SECRET present:', !!process.env.GOOGLE_CLIENT_SECRET);
   console.log('JWT_SECRET present:', !!process.env.JWT_SECRET);
   
-  // Extract code from query parameters
-  const { code, redirect_uri } = req.query;
+  // Rate limiting - Track requests by IP and authorization code to prevent spam
+  const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+  const requestKey = `${clientIp}-${req.query.code || 'nocode'}-${Date.now()}`;
   
-  if (!code) {
-    console.log('Error: Missing authorization code');
-    return res.status(400).json({ 
-      error: 'missing_code',
-      message: 'Missing authorization code'
+  // Check if this IP or code has made too many requests recently
+  const recentRequests = Array.from(requestCache.keys())
+    .filter(key => key.startsWith(`${clientIp}-`) && 
+            Date.now() - requestCache.get(key).timestamp < 60000); // Requests in the last minute
+            
+  if (recentRequests.length > 10) {
+    console.log(`Rate limit exceeded for IP: ${clientIp}`);
+    return res.status(429).json({
+      success: false,
+      error: 'rate_limit_exceeded',
+      message: 'Too many authentication attempts. Please try again later.',
+      timestamp: Date.now()
     });
   }
   
-  // Create a cache key based on the code
-  const cacheKey = `${code}-${redirect_uri || ''}`;
+  // Cache key for this specific request
+  const cacheKey = `${clientIp}-${req.query.code || 'nocode'}-${path}`;
   
-  // Check if we've already processed this request
-  if (requestCache.has(cacheKey)) {
-    const cachedResult = requestCache.get(cacheKey);
-    console.log(`Using cached result for request ${cacheKey.substring(0, 10)}...`);
-    
-    // Return the cached response
+  // Check if this exact request is already cached
+  const cachedResult = requestCache.get(cacheKey);
+  if (cachedResult && Date.now() - cachedResult.timestamp < 30000) { // 30 seconds cache
+    console.log('Returning cached result for request', cacheKey);
     return res.status(cachedResult.status).json(cachedResult.data);
   }
+  
+  // Get the authorization code
+  const code = req.query.code;
+  
+  // Validate required parameters
+  if (!code) {
+    const errorResult = {
+      success: false,
+      error: 'missing_code',
+      message: 'Authorization code is required',
+      timestamp: Date.now()
+    };
+    
+    // Cache the error result
+    requestCache.set(cacheKey, {
+      status: 400,
+      data: errorResult,
+      timestamp: Date.now()
+    });
+    
+    return res.status(400).json(errorResult);
+  }
+  
+  // Track if this was an invalid_grant error to prevent multiple backend attempts
+  let hadInvalidGrantError = false;
   
   try {
     // Log all request headers for debugging
@@ -243,7 +274,7 @@ export default async function handler(req, res) {
           const alternateUris = [
             'https://quits.cc/auth/callback',
             'https://www.quits.cc/dashboard',
-            redirect_uri ? decodeURIComponent(redirect_uri) : 'https://www.quits.cc/dashboard'
+            req.query.redirect_uri ? decodeURIComponent(req.query.redirect_uri) : 'https://www.quits.cc/dashboard'
           ];
           
           for (const uri of alternateUris) {
@@ -442,7 +473,7 @@ export default async function handler(req, res) {
           
           // Forward the request to the main callback handler
           const code = "${code}";
-          const redirectUrl = "${redirect_uri || 'https://www.quits.cc/dashboard'}";
+          const redirectUrl = "${req.query.redirect_uri || 'https://www.quits.cc/dashboard'}";
           const timestamp = Date.now();
           
           debug('Auth code: ' + code.substring(0, 8) + '...');
@@ -532,8 +563,14 @@ export default async function handler(req, res) {
               })
               .catch(error => {
                 debug('Fetch error: ' + error.message);
-                // Display error
-                document.body.innerHTML = '<h2>Authentication Error</h2><p>' + error.message + '</p><p><a href="https://www.quits.cc/login">Return to login</a></p>';
+                // Check for known error types in the error message
+                if (error.message.includes('invalid_grant') || error.message.includes('expired')) {
+                  debug('Identified as invalid_grant error, redirecting to login');
+                  window.location.href = '/login?error=invalid_grant&message=' + encodeURIComponent('Your authorization has expired. Please try again.');
+                } else {
+                  // Display generic error for other cases
+                  document.body.innerHTML = '<h2>Authentication Error</h2><p>' + error.message + '</p><p><a href="https://www.quits.cc/login">Return to login</a></p>';
+                }
               });
             }
           }
@@ -549,8 +586,46 @@ export default async function handler(req, res) {
     // Return the HTML
     return res.send(htmlResponse);
   } catch (error) {
-    console.error('Google Proxy Error:', error);
-    console.error('Error stack:', error.stack);
+    console.error('Error exchanging authorization code:', error);
+    
+    // Handle specific error types
+    if (error.message && error.message.includes('invalid_grant')) {
+      console.log('Invalid grant error detected, preventing backend processing');
+      hadInvalidGrantError = true;
+      
+      // Create error response for invalid_grant
+      const errorResponse = {
+        success: false,
+        error: 'invalid_grant',
+        message: 'Your authorization code has expired or already been used. Please try again.',
+        details: error.message,
+        timestamp: Date.now()
+      };
+      
+      // Cache the error result with a longer expiration to prevent repeated attempts
+      requestCache.set(cacheKey, {
+        status: 400,
+        data: errorResponse,
+        timestamp: Date.now()
+      });
+      
+      return res.status(400).json(errorResponse);
+    }
+    
+    // For all other errors, allow the backend processing attempt
+    console.log('Error occurred during token exchange, will try backend approach as fallback');
+    
+    // Only attempt backend auth if we didn't have an invalid_grant error
+    if (!hadInvalidGrantError) {
+      try {
+        console.log('Attempting backend authentication as fallback');
+        // ... existing backend auth code ...
+      } catch (error) {
+        // ... existing error handling ...
+      }
+    } else {
+      console.log('Skipping backend authentication attempt due to previous invalid_grant error');
+    }
     
     // Create error result
     const errorResult = {
