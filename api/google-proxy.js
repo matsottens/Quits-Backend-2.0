@@ -180,11 +180,16 @@ export default async function handler(req, res) {
           
           const token = jwt.default.sign(
             {
-              id: `${Math.random().toString(36).substring(2, 10)}`,
+              id: userInfo.id,
               email: userInfo.email,
               name: userInfo.name,
               picture: userInfo.picture,
               gmail_token: tokens.access_token,
+              refresh_token: tokens.refresh_token || null,
+              token_type: tokens.token_type || 'Bearer',
+              scope: tokens.scope || null,
+              id_token: tokens.id_token || null,
+              expiry_date: tokens.expiry_date || null,
               iat: Math.floor(Date.now() / 1000),
               exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30 // 30 days
             },

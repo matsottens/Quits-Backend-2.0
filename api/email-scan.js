@@ -11,7 +11,21 @@ const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANO
 const extractGmailToken = (token) => {
   try {
     const payload = jsonwebtoken.decode(token);
-    return payload.gmail_token || null;
+    console.log('JWT payload keys:', Object.keys(payload));
+    
+    if (payload.gmail_token) {
+      console.log('Found gmail_token in JWT');
+      return payload.gmail_token;
+    }
+    
+    // Check if token might be in a different field
+    if (payload.access_token) {
+      console.log('Found access_token in JWT, using as Gmail token');
+      return payload.access_token;
+    }
+    
+    console.error('No Gmail token found in JWT, payload:', JSON.stringify(payload, null, 2));
+    return null;
   } catch (error) {
     console.error('Error extracting Gmail token:', error);
     return null;
@@ -21,6 +35,8 @@ const extractGmailToken = (token) => {
 // Function to access Gmail API and fetch emails
 const fetchEmailsFromGmail = async (gmailToken, maxResults = 100) => {
   try {
+    console.log('Fetching emails with Gmail token (first 20 chars):', gmailToken.substring(0, 20) + '...');
+    
     // Call Gmail API to get a list of recent emails
     const response = await fetch(
       `https://www.googleapis.com/gmail/v1/users/me/messages?maxResults=${maxResults}&q=from:(billing OR receipt OR subscription OR payment OR invoice)`,
@@ -34,12 +50,20 @@ const fetchEmailsFromGmail = async (gmailToken, maxResults = 100) => {
     );
 
     if (!response.ok) {
-      throw new Error(`Gmail API error: ${response.status} ${response.statusText}`);
+      const errorBody = await response.text();
+      console.error(`Gmail API error ${response.status}: ${errorBody}`);
+      throw new Error(`Gmail API error: ${response.status} ${response.statusText} - ${errorBody}`);
     }
 
     const data = await response.json();
     console.log(`Found ${data.messages?.length || 0} emails matching subscription criteria`);
-    return data.messages || [];
+    
+    if (!data.messages || data.messages.length === 0) {
+      console.log('No emails found that match the criteria');
+      return [];
+    }
+    
+    return data.messages;
   } catch (error) {
     console.error('Error fetching emails from Gmail:', error);
     throw error;
@@ -423,6 +447,36 @@ const saveSubscription = async (userId, subscriptionData) => {
   }
 };
 
+// Function to validate Gmail token
+const validateGmailToken = async (gmailToken) => {
+  try {
+    // Make a simple call to Gmail API to check if token is valid
+    const response = await fetch(
+      'https://www.googleapis.com/gmail/v1/users/me/profile',
+      {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${gmailToken}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      console.error(`Gmail token validation failed: ${errorBody}`);
+      return false;
+    }
+
+    const data = await response.json();
+    console.log(`Gmail token validated for email: ${data.emailAddress}`);
+    return true;
+  } catch (error) {
+    console.error('Error validating Gmail token:', error);
+    return false;
+  }
+};
+
 export default async function handler(req, res) {
   // Set CORS headers for all response types
   res.setHeader('Access-Control-Allow-Origin', 'https://www.quits.cc');
@@ -459,13 +513,36 @@ export default async function handler(req, res) {
     try {
       const jwtSecret = process.env.JWT_SECRET || 'dev_secret_DO_NOT_USE_IN_PRODUCTION';
       const decoded = verify(token, jwtSecret);
+      console.log('JWT verified successfully, decoded user:', decoded.email);
       
       // Extract Gmail token from JWT
-      const gmailToken = extractGmailToken(token);
+      let gmailToken = extractGmailToken(token);
+      
+      // Check if we have a Gmail token directly in the request headers as fallback
+      if (!gmailToken && req.headers['x-gmail-token']) {
+        console.log('Using Gmail token from X-Gmail-Token header');
+        gmailToken = req.headers['x-gmail-token'];
+      }
+      
+      // Check if token is in the request body as another fallback
+      if (!gmailToken && req.body && req.body.gmail_token) {
+        console.log('Using Gmail token from request body');
+        gmailToken = req.body.gmail_token;
+      }
+      
       if (!gmailToken) {
         return res.status(400).json({
           error: 'gmail_token_missing',
-          message: 'No Gmail access token found in your authentication token. Please re-authenticate with Gmail permissions.'
+          message: 'No Gmail access token found in your authentication token or request. Please re-authenticate with Gmail permissions.'
+        });
+      }
+      
+      // Validate the Gmail token
+      const isValidToken = await validateGmailToken(gmailToken);
+      if (!isValidToken) {
+        return res.status(401).json({
+          error: 'gmail_token_invalid',
+          message: 'The Gmail access token is invalid or expired. Please re-authenticate with Gmail permissions.'
         });
       }
       
@@ -547,9 +624,55 @@ export default async function handler(req, res) {
             console.log(`Found existing user with ID: ${dbUserId}`);
           }
 
+          // Create a scan record initially
+          try {
+            await fetch(
+              `${supabaseUrl}/rest/v1/scan_history`, 
+              {
+                method: 'POST',
+                headers: {
+                  'apikey': supabaseKey,
+                  'Authorization': `Bearer ${supabaseKey}`,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  scan_id: scanId,
+                  user_id: dbUserId,
+                  status: 'in_progress',
+                  progress: 10,
+                  created_at: new Date().toISOString()
+                })
+              }
+            );
+            console.log(`Created scan record for scan ${scanId}`);
+          } catch (statusError) {
+            console.error(`Error creating scan record: ${statusError.message}`);
+          }
+
           try {
             // Fetch emails from Gmail
             const emails = await fetchEmailsFromGmail(gmailToken);
+            
+            // Update scan progress
+            try {
+              await fetch(
+                `${supabaseUrl}/rest/v1/scan_history?scan_id=eq.${scanId}`, 
+                {
+                  method: 'PATCH',
+                  headers: {
+                    'apikey': supabaseKey,
+                    'Authorization': `Bearer ${supabaseKey}`,
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({
+                    progress: 30
+                  })
+                }
+              );
+            } catch (updateError) {
+              console.error(`Error updating scan progress: ${updateError.message}`);
+            }
+            
             console.log(`Processing ${emails.length} emails for scan ${scanId}`);
             
             // Process only the most recent 10 emails to avoid overloading
@@ -569,7 +692,7 @@ export default async function handler(req, res) {
                 }
                 
                 // Extract headers for logging
-                const headers = emailData.payload.headers || [];
+                const headers = emailData.payload?.headers || [];
                 const subject = headers.find(h => h.name === 'Subject')?.value || 'No Subject';
                 console.log(`Analyzing email: "${subject}"`);
                 
@@ -599,30 +722,51 @@ export default async function handler(req, res) {
             // Update scan status in the database 
             try {
               await fetch(
-                `${supabaseUrl}/rest/v1/scan_history`, 
+                `${supabaseUrl}/rest/v1/scan_history?scan_id=eq.${scanId}`, 
                 {
-                  method: 'POST',
+                  method: 'PATCH',
                   headers: {
                     'apikey': supabaseKey,
                     'Authorization': `Bearer ${supabaseKey}`,
                     'Content-Type': 'application/json'
                   },
                   body: JSON.stringify({
-                    scan_id: scanId,
-                    user_id: dbUserId,
                     status: 'completed',
                     emails_scanned: recentEmails.length,
                     subscriptions_found: detectedSubscriptions.length,
                     completed_at: new Date().toISOString(),
-                    created_at: new Date().toISOString()
+                    progress: 100
                   })
                 }
               );
+              console.log(`Updated scan status to completed for scan ${scanId}`);
             } catch (statusError) {
               console.error(`Error updating scan status: ${statusError.message}`);
             }
           } catch (gmailError) {
             console.error(`Error accessing Gmail for scan ${scanId}:`, gmailError);
+            
+            // Update scan status to error
+            try {
+              await fetch(
+                `${supabaseUrl}/rest/v1/scan_history?scan_id=eq.${scanId}`, 
+                {
+                  method: 'PATCH',
+                  headers: {
+                    'apikey': supabaseKey,
+                    'Authorization': `Bearer ${supabaseKey}`,
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({
+                    status: 'error',
+                    error_message: gmailError.message,
+                    completed_at: new Date().toISOString()
+                  })
+                }
+              );
+            } catch (updateError) {
+              console.error(`Error updating scan status to error: ${updateError.message}`);
+            }
           }
         } catch (dbError) {
           console.error('Database operation error:', dbError);
