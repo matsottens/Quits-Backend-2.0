@@ -1,5 +1,6 @@
 // Email scan endpoint
-import { verify } from 'jsonwebtoken';
+import jsonwebtoken from 'jsonwebtoken';
+const { verify } = jsonwebtoken;
 
 export default async function handler(req, res) {
   // Set CORS headers for all response types
@@ -35,7 +36,7 @@ export default async function handler(req, res) {
     
     // Verify the token
     try {
-      const jwtSecret = process.env.JWT_SECRET;
+      const jwtSecret = process.env.JWT_SECRET || 'dev_secret_DO_NOT_USE_IN_PRODUCTION';
       if (!jwtSecret) {
         throw new Error('JWT_SECRET environment variable is not set');
       }

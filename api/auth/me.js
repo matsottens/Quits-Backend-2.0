@@ -1,17 +1,21 @@
-// Auth/me endpoint to get user profile
-import { handleCors, setCorsHeaders, getPath } from '../middleware.js';
-import { verify } from 'jsonwebtoken';
+// Auth/me endpoint for user verification
+import jsonwebtoken from 'jsonwebtoken';
+const { verify } = jsonwebtoken;
 
 export default async function handler(req, res) {
-  // Handle CORS preflight
-  if (handleCors(req, res)) {
-    return; // If it was an OPTIONS request, we're done
+  // Set CORS headers for all response types
+  res.setHeader('Access-Control-Allow-Origin', 'https://www.quits.cc');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH');
+  res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token, Pragma, X-API-Key, X-Api-Version, X-Device-ID');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours
+
+  // Handle preflight OPTIONS request
+  if (req.method === 'OPTIONS') {
+    console.log('Handling OPTIONS preflight request for auth/me');
+    return res.status(204).end();
   }
-  
-  // Log basic request information for debugging
-  const path = getPath(req);
-  console.log(`Auth/me Handler - Processing ${req.method} request for: ${path}`);
-  
+
   // Add no-cache headers
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.setHeader('Pragma', 'no-cache');
@@ -35,7 +39,7 @@ export default async function handler(req, res) {
 
     // Verify the token
     try {
-      const jwtSecret = process.env.JWT_SECRET;
+      const jwtSecret = process.env.JWT_SECRET || 'dev_secret_DO_NOT_USE_IN_PRODUCTION';
       if (!jwtSecret) {
         throw new Error('JWT_SECRET environment variable is not set');
       }

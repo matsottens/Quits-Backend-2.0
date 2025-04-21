@@ -1,5 +1,6 @@
 // Auth/me endpoint for user verification
-import { verify } from 'jsonwebtoken';
+import jsonwebtoken from 'jsonwebtoken';
+const { verify } = jsonwebtoken;
 
 export default async function handler(req, res) {
   // Set CORS headers for all response types
