@@ -1,4 +1,4 @@
-// Catch-all handler for subscription endpoints
+// Subscription API endpoint for /api/subscription path
 import jsonwebtoken from 'jsonwebtoken';
 const { verify } = jsonwebtoken;
 
@@ -12,7 +12,7 @@ export default async function handler(req, res) {
 
   // Handle preflight OPTIONS request
   if (req.method === 'OPTIONS') {
-    console.log(`Handling OPTIONS preflight request for ${req.url}`);
+    console.log(`Handling OPTIONS preflight request for /api/subscription`);
     return res.status(204).end();
   }
 
@@ -20,7 +20,7 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.setHeader('Pragma', 'no-cache');
 
-  console.log(`Subscription catch-all handler processing: ${req.url}`);
+  console.log(`API subscription handler processing: ${req.url}`);
 
   try {
     // Handle GET requests for fetching subscriptions
@@ -98,7 +98,7 @@ export default async function handler(req, res) {
       return res.status(405).json({ error: 'Method not allowed' });
     }
   } catch (error) {
-    console.error('Subscription handler error:', error);
+    console.error('API subscription handler error:', error);
     return res.status(500).json({
       error: 'server_error',
       message: 'An error occurred processing your request'
