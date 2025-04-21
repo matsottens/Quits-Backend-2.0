@@ -177,7 +177,13 @@ export default async function handler(req, res) {
                 status: scan.status || 'in_progress',
                 scanId: scanId,
                 progress: scan.progress || 50,
-                message: 'Scan in progress'
+                message: 'Scan in progress',
+                stats: {
+                  emails_found: scan.emails_found || 0,
+                  emails_to_process: scan.emails_to_process || 0,
+                  emails_processed: scan.emails_processed || 0,
+                  subscriptions_found: scan.subscriptions_found || 0
+                }
               });
             }
           }

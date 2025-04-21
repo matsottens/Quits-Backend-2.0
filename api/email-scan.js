@@ -95,6 +95,62 @@ const fetchEmailContent = async (gmailToken, messageId) => {
   }
 };
 
+// Helper function to extract email body text
+const extractEmailBody = (email) => {
+  let body = '';
+  
+  // Check if there's a simple body
+  if (email.payload?.body?.data) {
+    // Decode base64 data
+    try {
+      body = Buffer.from(email.payload.body.data, 'base64').toString('utf-8');
+    } catch (err) {
+      console.error('Error decoding email body:', err);
+    }
+    return body;
+  }
+  
+  // Check for multipart message
+  if (email.payload?.parts) {
+    // First try to find plain text part
+    const textPart = email.payload.parts.find(part => part.mimeType === 'text/plain');
+    if (textPart?.body?.data) {
+      try {
+        return Buffer.from(textPart.body.data, 'base64').toString('utf-8');
+      } catch (err) {
+        console.error('Error decoding plain text part:', err);
+      }
+    }
+    
+    // If no plain text, try HTML
+    const htmlPart = email.payload.parts.find(part => part.mimeType === 'text/html');
+    if (htmlPart?.body?.data) {
+      try {
+        // Get HTML and do basic HTML-to-text conversion
+        const html = Buffer.from(htmlPart.body.data, 'base64').toString('utf-8');
+        // Remove HTML tags, but preserve line breaks
+        return html.replace(/<[^>]*>/g, ' ')
+                  .replace(/\s+/g, ' ')
+                  .trim();
+      } catch (err) {
+        console.error('Error decoding HTML part:', err);
+      }
+    }
+    
+    // Try to recursively extract from nested parts
+    for (const part of email.payload.parts) {
+      if (part.parts) {
+        const nestedBody = extractEmailBody({ payload: part });
+        if (nestedBody) {
+          return nestedBody;
+        }
+      }
+    }
+  }
+  
+  return body;
+};
+
 // Function to analyze email with Gemini AI
 const analyzeEmailWithGemini = async (emailContent) => {
   try {
@@ -237,144 +293,184 @@ JSON Output:
 
 // Function to analyze email for subscription data (fallback method)
 const analyzeEmailForSubscriptions = (email) => {
-  // Get headers
-  const headers = email.payload.headers || [];
-  const subject = headers.find(h => h.name.toLowerCase() === 'subject')?.value || '';
-  const from = headers.find(h => h.name.toLowerCase() === 'from')?.value || '';
-  const date = headers.find(h => h.name.toLowerCase() === 'date')?.value || '';
-  
-  // Get email body
-  let body = '';
-  if (email.payload.body && email.payload.body.data) {
-    // Decode base64 data
-    body = Buffer.from(email.payload.body.data, 'base64').toString('utf-8');
-  } else if (email.payload.parts) {
-    // Handle multipart messages
-    for (const part of email.payload.parts) {
-      if (part.mimeType === 'text/plain' && part.body?.data) {
-        body += Buffer.from(part.body.data, 'base64').toString('utf-8');
-      }
-    }
+  // Extract email body (prefer text over HTML)
+  const body = extractEmailBody(email);
+  if (!body) {
+    return { isSubscription: false, confidence: 0 };
   }
-
-  // Basic heuristic analysis - look for subscription patterns
-  const subscriptionPatterns = [
-    { regex: /thank you for( your)? (subscribing|subscription)/i, weight: 0.7 },
-    { regex: /your (subscription|membership|plan)/i, weight: 0.6 },
-    { regex: /billing (information|confirmation|receipt)/i, weight: 0.8 },
-    { regex: /welcome to/i, weight: 0.5 },
-    { regex: /subscription confirmation/i, weight: 0.9 },
-    { regex: /payment (confirmed|processed|receipt)/i, weight: 0.7 },
-    { regex: /monthly|yearly|weekly|quarterly/i, weight: 0.5 },
-    { regex: /invoice/i, weight: 0.6 },
-    { regex: /next billing date/i, weight: 0.8 },
-    { regex: /renewal/i, weight: 0.7 },
-  ];
-
-  // Pricing patterns
-  const priceRegex = /\$([\d,]+\.\d{2})|(\d+\.\d{2}) (USD|EUR|GBP)/g;
   
-  // Subscription service name patterns
-  const serviceNamePatterns = [
-    { regex: /netflix/i, name: 'Netflix' },
-    { regex: /spotify/i, name: 'Spotify' },
-    { regex: /apple music/i, name: 'Apple Music' },
-    { regex: /amazon prime/i, name: 'Amazon Prime' },
-    { regex: /hulu/i, name: 'Hulu' },
-    { regex: /disney\+/i, name: 'Disney+' },
-    { regex: /youtube premium/i, name: 'YouTube Premium' },
-    { regex: /hbo max/i, name: 'HBO Max' },
-    { regex: /paramount\+/i, name: 'Paramount+' },
-    { regex: /peacock/i, name: 'Peacock' },
+  // Extract important metadata
+  const headers = email.payload?.headers || [];
+  const subject = headers.find(h => h.name === 'Subject')?.value || '';
+  const from = headers.find(h => h.name === 'From')?.value || '';
+  const date = headers.find(h => h.name === 'Date')?.value || '';
+  
+  // Key subscription-related terms
+  const subscriptionTerms = [
+    'subscription', 'subscribe', 'subscribed', 'plan', 'membership', 'member',
+    'billing', 'payment', 'receipt', 'invoice', 'charge', 'transaction',
+    'renew', 'renewal', 'renewed', 'recurring', 'monthly', 'yearly', 'annual',
+    'premium', 'account', 'activated', 'welcome', 'trial', 'free trial',
+    'thank you for your purchase', 'successfully subscribed', 'your purchase',
+    'has been processed', 'payment confirmation', 'payment successful'
   ];
-
-  // Billing cycle patterns
-  const billingCyclePatterns = [
-    { regex: /monthly|per month|each month/i, cycle: 'monthly' },
-    { regex: /yearly|per year|annual|annually/i, cycle: 'yearly' },
-    { regex: /weekly|per week/i, cycle: 'weekly' },
-    { regex: /quarterly/i, cycle: 'quarterly' },
+  
+  // Common service names to look for (these will be matched case-insensitive)
+  const serviceNames = [
+    'Netflix', 'Spotify', 'Apple Music', 'Amazon Prime', 'Disney+', 'Hulu', 'HBO Max',
+    'YouTube Premium', 'Xbox Game Pass', 'PlayStation Plus', 'Nintendo Online',
+    'Adobe Creative Cloud', 'Microsoft 365', 'Office 365', 'Google One', 'iCloud',
+    'Dropbox', 'OneDrive', 'LinkedIn Premium', 'GitHub Pro', 'Slack', 'Zoom',
+    'Canva', 'Notion', 'Evernote', 'LastPass', '1Password', 'ExpressVPN', 'NordVPN',
+    'Audible', 'Kindle Unlimited', 'Medium', 'Substack', 'Patreon', 'Twitch',
+    'Crunchyroll', 'Funimation', 'Vimeo', 'Facebook', 'Twitter', 'Instagram'
   ];
-
-  // Calculate confidence score based on patterns
+  
+  // Combine lowercase service names for checking
+  const lowerServiceNames = serviceNames.map(name => name.toLowerCase());
+  
+  // Calculate initial confidence based on term matches
   let confidence = 0;
-  for (const pattern of subscriptionPatterns) {
-    if (pattern.regex.test(subject) || pattern.regex.test(body)) {
-      confidence += pattern.weight;
-    }
-  }
-  confidence = Math.min(confidence, 0.95); // Cap at 0.95
+  let matchCount = 0;
   
-  // Extract price
-  const priceMatches = [...body.matchAll(priceRegex)];
-  let price = null;
-  if (priceMatches.length > 0) {
-    // Use the first price found or the most likely one
-    const priceStr = priceMatches[0][1] || priceMatches[0][2];
-    price = parseFloat(priceStr.replace(',', ''));
-  }
+  // Check subject and body for subscription terms
+  const lowerSubject = subject.toLowerCase();
+  const lowerBody = body.toLowerCase();
+  const lowerFrom = from.toLowerCase();
   
-  // Extract service name
-  let serviceName = null;
-  for (const pattern of serviceNamePatterns) {
-    if (pattern.regex.test(subject) || pattern.regex.test(from) || pattern.regex.test(body)) {
-      serviceName = pattern.name;
-      break;
+  // First, check for service name matches
+  const detectedServiceNames = [];
+  for (const serviceName of serviceNames) {
+    if (lowerSubject.includes(serviceName.toLowerCase()) || 
+        lowerBody.includes(serviceName.toLowerCase()) || 
+        lowerFrom.includes(serviceName.toLowerCase())) {
+      detectedServiceNames.push(serviceName);
     }
   }
   
-  // If no match from patterns, try to extract from the sender
-  if (!serviceName && from) {
-    // Extract company name from email address
-    const emailMatch = from.match(/@([^>]+)\.com/i);
+  // Identify primary service name
+  let serviceName = detectedServiceNames.length > 0 ? detectedServiceNames[0] : null;
+  
+  // If no direct service name match, try to extract from sender domain
+  if (!serviceName) {
+    // Extract domain from the sender email
+    const emailMatch = from.match(/[^@<>]+@([^@<>.]+\.[^@<>.]+)/);
     if (emailMatch && emailMatch[1]) {
-      serviceName = emailMatch[1].charAt(0).toUpperCase() + emailMatch[1].slice(1);
-    } else {
-      // Try to extract from the sender name
-      const nameMatch = from.match(/^"?([^"<]+)/);
-      if (nameMatch && nameMatch[1]) {
-        serviceName = nameMatch[1].trim();
+      const domain = emailMatch[1].split('.')[0];
+      serviceName = domain.charAt(0).toUpperCase() + domain.slice(1); // Capitalize first letter
+    }
+  }
+  
+  // Check for subscription terms
+  for (const term of subscriptionTerms) {
+    if (lowerSubject.includes(term) || lowerBody.includes(term)) {
+      matchCount++;
+      
+      // Add more weight to important terms in the subject line
+      if (lowerSubject.includes(term)) {
+        confidence += 0.05;
+      } else {
+        confidence += 0.02;
       }
     }
   }
+
+  // If we have at least 2 matches, it's potentially a subscription
+  const isSubscription = matchCount >= 2 || (serviceName && matchCount >= 1);
   
-  // Extract billing cycle
-  let billingCycle = null;
-  for (const pattern of billingCyclePatterns) {
-    if (pattern.regex.test(body)) {
-      billingCycle = pattern.cycle;
-      break;
+  // Boost confidence if service name was detected
+  if (serviceName) {
+    confidence += 0.15;
+  }
+  
+  // Boost confidence based on pattern matches
+  // Check for price/amount patterns
+  const priceMatches = body.match(/\$\d+(\.\d{2})?|\d+\.\d{2}(USD|EUR|GBP)?|€\d+(\.\d{2})?|£\d+(\.\d{2})?/g) || [];
+  if (priceMatches.length > 0) {
+    confidence += 0.1;
+  }
+  
+  // Extract price from matches
+  let price = null;
+  let currency = 'USD';
+  
+  if (priceMatches.length > 0) {
+    // Get the first match
+    const priceText = priceMatches[0];
+    
+    // Extract the currency symbol
+    if (priceText.includes('$')) {
+      currency = 'USD';
+    } else if (priceText.includes('€')) {
+      currency = 'EUR';
+    } else if (priceText.includes('£')) {
+      currency = 'GBP';
+    }
+    
+    // Extract the numeric amount
+    const numericMatch = priceText.match(/\d+(\.\d{2})?/);
+    if (numericMatch) {
+      price = parseFloat(numericMatch[0]);
     }
   }
   
-  // Generate next billing date (today + 1 month if monthly, today + 1 year if yearly)
-  const nextDate = new Date();
-  if (billingCycle === 'yearly') {
-    nextDate.setFullYear(nextDate.getFullYear() + 1);
-  } else if (billingCycle === 'quarterly') {
-    nextDate.setMonth(nextDate.getMonth() + 3);
-  } else {
-    // Default to monthly
-    nextDate.setMonth(nextDate.getMonth() + 1);
-  }
-  const nextBillingDate = nextDate.toISOString().split('T')[0];
+  // Check for billing cycle patterns
+  const monthlyPattern = /monthly|per month|\/month|month-to-month|billed monthly/i;
+  const yearlyPattern = /yearly|per year|\/year|annual|annually|billed yearly/i;
+  const weeklyPattern = /weekly|per week|\/week|billed weekly/i;
+  const quarterlyPattern = /quarterly|every 3 months|3-month|billed quarterly/i;
   
-  // Return in Gemini format for compatibility
-  if (confidence > 0.5 && (serviceName || from) && price) {
-    return {
-      isSubscription: true,
-      serviceName: serviceName || 'Unknown Service',
-      amount: price,
-      currency: 'USD', // Default
-      billingFrequency: billingCycle || 'monthly', // Default to monthly
-      nextBillingDate,
-      confidence: confidence,
-    };
+  let billingFrequency = 'unknown';
+  
+  if (monthlyPattern.test(body) || monthlyPattern.test(subject)) {
+    billingFrequency = 'monthly';
+    confidence += 0.05;
+  } else if (yearlyPattern.test(body) || yearlyPattern.test(subject)) {
+    billingFrequency = 'yearly';
+    confidence += 0.05;
+  } else if (weeklyPattern.test(body) || weeklyPattern.test(subject)) {
+    billingFrequency = 'weekly';
+    confidence += 0.05;
+  } else if (quarterlyPattern.test(body) || quarterlyPattern.test(subject)) {
+    billingFrequency = 'quarterly';
+    confidence += 0.05;
+  } else {
+    // Default to monthly if price found but no billing frequency
+    billingFrequency = 'monthly';
+  }
+  
+  // Cap confidence at 0.9 for fallback method
+  confidence = Math.min(confidence, 0.9);
+  
+  // Generate a future date based on billing frequency
+  const today = new Date();
+  let nextBillingDate = null;
+  
+  if (price) {
+    if (billingFrequency === 'monthly') {
+      nextBillingDate = new Date(today.getFullYear(), today.getMonth() + 1, today.getDate());
+    } else if (billingFrequency === 'yearly') {
+      nextBillingDate = new Date(today.getFullYear() + 1, today.getMonth(), today.getDate());
+    } else if (billingFrequency === 'weekly') {
+      nextBillingDate = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
+    } else if (billingFrequency === 'quarterly') {
+      nextBillingDate = new Date(today.getFullYear(), today.getMonth() + 3, today.getDate());
+    }
   }
   
   return {
-    isSubscription: false,
-    confidence: 0.8 // Reasonable confidence it's not a subscription
+    isSubscription,
+    confidence,
+    serviceName,
+    amount: price,
+    currency,
+    billingFrequency,
+    nextBillingDate: nextBillingDate ? nextBillingDate.toISOString() : null,
+    matchCount,
+    detectedTerms: subscriptionTerms.filter(term => lowerSubject.includes(term) || lowerBody.includes(term)),
+    emailSubject: subject,
+    emailFrom: from,
+    emailDate: date
   };
 };
 
@@ -675,14 +771,64 @@ export default async function handler(req, res) {
             
             console.log(`Processing ${emails.length} emails for scan ${scanId}`);
             
-            // Process only the most recent 10 emails to avoid overloading
-            const recentEmails = emails.slice(0, 10);
+            // Process more emails to improve detection chances
+            const recentEmails = emails.slice(0, 50); // Increased from 10 to 50
             const detectedSubscriptions = [];
+            let processedCount = 0;
+            
+            // Update progress for UI
+            try {
+              await fetch(
+                `${supabaseUrl}/rest/v1/scan_history?scan_id=eq.${scanId}`, 
+                {
+                  method: 'PATCH',
+                  headers: {
+                    'apikey': supabaseKey,
+                    'Authorization': `Bearer ${supabaseKey}`,
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({
+                    progress: 40,
+                    emails_found: emails.length,
+                    emails_to_process: recentEmails.length 
+                  })
+                }
+              );
+            } catch (updateError) {
+              console.error(`Error updating scan details: ${updateError.message}`);
+            }
             
             // Process each email
             for (const message of recentEmails) {
               try {
-                console.log(`Processing email ${message.id}`);
+                processedCount++;
+                const progressPercent = Math.min(90, 40 + Math.floor((processedCount / recentEmails.length) * 50));
+                
+                // Update progress every 5 emails or on the last email
+                if (processedCount % 5 === 0 || processedCount === recentEmails.length) {
+                  try {
+                    await fetch(
+                      `${supabaseUrl}/rest/v1/scan_history?scan_id=eq.${scanId}`, 
+                      {
+                        method: 'PATCH',
+                        headers: {
+                          'apikey': supabaseKey,
+                          'Authorization': `Bearer ${supabaseKey}`,
+                          'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                          progress: progressPercent,
+                          emails_processed: processedCount,
+                          subscriptions_found: detectedSubscriptions.length
+                        })
+                      }
+                    );
+                  } catch (progressError) {
+                    console.error(`Error updating progress: ${progressError.message}`);
+                  }
+                }
+                
+                console.log(`Processing email ${processedCount}/${recentEmails.length} (${message.id})`);
                 
                 // Get full message content
                 const emailData = await fetchEmailContent(gmailToken, message.id);
@@ -697,7 +843,22 @@ export default async function handler(req, res) {
                 console.log(`Analyzing email: "${subject}"`);
                 
                 // Analyze with Gemini AI
-                const analysis = await analyzeEmailWithGemini(emailData);
+                let analysis = await analyzeEmailWithGemini(emailData);
+                
+                // If not detected by Gemini or confidence is low, try pattern matching
+                if (!analysis.isSubscription || analysis.confidence < 0.3) {
+                  console.log(`Gemini analysis: Not a subscription (${analysis.confidence?.toFixed(2) || 0} confidence), trying pattern matching...`);
+                  
+                  // Try our own pattern matching
+                  const backupAnalysis = analyzeEmailForSubscriptions(emailData);
+                  
+                  // Use pattern match result only if it detects a subscription with better confidence
+                  if (backupAnalysis.isSubscription && 
+                      (backupAnalysis.confidence > analysis.confidence || !analysis.isSubscription)) {
+                    console.log(`Pattern matching found potential subscription: ${backupAnalysis.serviceName || 'Unknown'} (${backupAnalysis.confidence.toFixed(2)} confidence)`);
+                    analysis = backupAnalysis;
+                  }
+                }
                 
                 // If this is a subscription with good confidence, save it
                 if (analysis.isSubscription && analysis.confidence > 0.3) {
