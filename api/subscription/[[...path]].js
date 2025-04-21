@@ -3,10 +3,21 @@ import jsonwebtoken from 'jsonwebtoken';
 import { createClient } from '@supabase/supabase-js';
 const { verify } = jsonwebtoken;
 
-// Initialize Supabase client
+// Initialize Supabase client with debugging
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY;
-const supabase = createClient(supabaseUrl, supabaseKey);
+console.log(`[PATH HANDLER] Supabase URL defined: ${!!supabaseUrl}`);
+console.log(`[PATH HANDLER] Supabase key defined: ${!!supabaseKey}`);
+console.log(`[PATH HANDLER] Supabase URL prefix: ${supabaseUrl?.substring(0, 10) || 'undefined'}...`);
+console.log(`[PATH HANDLER] Supabase key prefix: ${supabaseKey?.substring(0, 5) || 'undefined'}...`);
+
+let supabase;
+try {
+  supabase = createClient(supabaseUrl, supabaseKey);
+  console.log('[PATH HANDLER] Supabase client created successfully');
+} catch (clientError) {
+  console.error('[PATH HANDLER] Error creating Supabase client:', clientError);
+}
 
 export default async function handler(req, res) {
   // Set CORS headers for all response types
@@ -27,12 +38,33 @@ export default async function handler(req, res) {
   res.setHeader('Pragma', 'no-cache');
 
   console.log(`Subscription catch-all handler processing: ${req.url}`);
+  
+  // Log environment details
+  console.log('[PATH HANDLER] Environment variables check:');
+  console.log(`[PATH HANDLER] SUPABASE_URL defined: ${!!process.env.SUPABASE_URL}`);
+  console.log(`[PATH HANDLER] SUPABASE_ANON_KEY defined: ${!!process.env.SUPABASE_ANON_KEY}`);
+  console.log(`[PATH HANDLER] SUPABASE_SERVICE_KEY defined: ${!!process.env.SUPABASE_SERVICE_KEY}`);
+  console.log(`[PATH HANDLER] NODE_ENV: ${process.env.NODE_ENV}`);
+  console.log(`[PATH HANDLER] VERCEL_ENV: ${process.env.VERCEL_ENV}`);
 
   try {
     // Parse the path to determine which operation to perform
     const path = req.query.path || [];
     const isSpecificSubscription = path.length > 0;
     const subscriptionId = isSpecificSubscription ? path[0] : null;
+    
+    // Check if Supabase client was initialized successfully
+    if (!supabase) {
+      console.error('[PATH HANDLER] Supabase client not initialized');
+      return res.status(500).json({
+        error: 'supabase_not_initialized',
+        message: 'Database client could not be initialized',
+        details: {
+          supabase_url_defined: !!supabaseUrl,
+          supabase_key_defined: !!supabaseKey
+        }
+      });
+    }
     
     // Extract token from Authorization header
     const authHeader = req.headers.authorization;
@@ -52,6 +84,47 @@ export default async function handler(req, res) {
         return res.status(401).json({ error: 'Invalid user ID in token' });
       }
       
+      // For now, return mock data to prevent errors while debugging
+      console.log('[PATH HANDLER] Returning mock data for path handler while debugging Supabase connection');
+      return res.status(200).json({
+        success: true,
+        subscriptions: [
+          {
+            id: 'mock_sub_123',
+            name: 'Netflix (Mock from Path Handler)',
+            price: 15.99,
+            billingCycle: 'monthly',
+            nextBillingDate: '2023-05-15',
+            category: 'entertainment',
+            is_manual: true
+          },
+          {
+            id: 'mock_sub_124',
+            name: 'Spotify (Mock from Path Handler)',
+            price: 9.99,
+            billingCycle: 'monthly',
+            nextBillingDate: '2023-05-10',
+            category: 'music',
+            is_manual: true
+          }
+        ],
+        meta: {
+          total: 2,
+          totalMonthly: 25.98,
+          totalYearly: 0,
+          totalAnnualized: 311.76,
+          mock_data: true,
+          path_handler: true,
+          debug_info: {
+            supabase_url_defined: !!process.env.SUPABASE_URL,
+            supabase_key_defined: !!process.env.SUPABASE_ANON_KEY || !!process.env.SUPABASE_SERVICE_KEY,
+            path: path,
+            request_url: req.url
+          }
+        }
+      });
+      
+      // The rest of the code will not execute during debugging, but leaving it for when we fix the Supabase connection
       // Handle different HTTP methods
       if (req.method === 'GET') {
         // For specific subscription
@@ -287,7 +360,12 @@ export default async function handler(req, res) {
     return res.status(500).json({
       error: 'server_error',
       message: 'An error occurred processing your request',
-      details: process.env.NODE_ENV === 'production' ? undefined : error.stack
+      details: process.env.NODE_ENV === 'production' ? undefined : error.stack,
+      debug_info: {
+        supabase_url_defined: !!process.env.SUPABASE_URL,
+        supabase_key_defined: !!process.env.SUPABASE_ANON_KEY || !!process.env.SUPABASE_SERVICE_KEY,
+        error_message: error.message
+      }
     });
   }
 } 
