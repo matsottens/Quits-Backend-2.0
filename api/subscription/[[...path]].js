@@ -1,23 +1,16 @@
 // Catch-all handler for subscription endpoints
 import jsonwebtoken from 'jsonwebtoken';
-import { createClient } from '@supabase/supabase-js';
+import fetch from 'node-fetch';
 const { verify } = jsonwebtoken;
 
-// Initialize Supabase client with debugging
+// Supabase config
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY;
-console.log(`[PATH HANDLER] Supabase URL defined: ${!!supabaseUrl}`);
-console.log(`[PATH HANDLER] Supabase key defined: ${!!supabaseKey}`);
-console.log(`[PATH HANDLER] Supabase URL prefix: ${supabaseUrl?.substring(0, 10) || 'undefined'}...`);
-console.log(`[PATH HANDLER] Supabase key prefix: ${supabaseKey?.substring(0, 5) || 'undefined'}...`);
 
-let supabase;
-try {
-  supabase = createClient(supabaseUrl, supabaseKey);
-  console.log('[PATH HANDLER] Supabase client created successfully');
-} catch (clientError) {
-  console.error('[PATH HANDLER] Error creating Supabase client:', clientError);
-}
+console.log(`[PATH] Supabase URL defined: ${!!supabaseUrl}`);
+console.log(`[PATH] Supabase key defined: ${!!supabaseKey}`);
+console.log(`[PATH] Supabase URL: ${supabaseUrl}`);
+console.log(`[PATH] Supabase key role: ${supabaseKey ? (supabaseKey.includes('role":"service_role') ? 'service_role' : 'anon') : 'undefined'}`);
 
 export default async function handler(req, res) {
   // Set CORS headers for all response types
@@ -38,14 +31,6 @@ export default async function handler(req, res) {
   res.setHeader('Pragma', 'no-cache');
 
   console.log(`Subscription catch-all handler processing: ${req.url}`);
-  
-  // Log environment details
-  console.log('[PATH HANDLER] Environment variables check:');
-  console.log(`[PATH HANDLER] SUPABASE_URL defined: ${!!process.env.SUPABASE_URL}`);
-  console.log(`[PATH HANDLER] SUPABASE_ANON_KEY defined: ${!!process.env.SUPABASE_ANON_KEY}`);
-  console.log(`[PATH HANDLER] SUPABASE_SERVICE_KEY defined: ${!!process.env.SUPABASE_SERVICE_KEY}`);
-  console.log(`[PATH HANDLER] NODE_ENV: ${process.env.NODE_ENV}`);
-  console.log(`[PATH HANDLER] VERCEL_ENV: ${process.env.VERCEL_ENV}`);
 
   try {
     // Parse the path to determine which operation to perform
@@ -53,15 +38,15 @@ export default async function handler(req, res) {
     const isSpecificSubscription = path.length > 0;
     const subscriptionId = isSpecificSubscription ? path[0] : null;
     
-    // Check if Supabase client was initialized successfully
-    if (!supabase) {
-      console.error('[PATH HANDLER] Supabase client not initialized');
+    // Check if Supabase configuration is available
+    if (!supabaseUrl || !supabaseKey) {
+      console.error('[PATH] Missing Supabase configuration');
       return res.status(500).json({
-        error: 'supabase_not_initialized',
-        message: 'Database client could not be initialized',
+        error: 'missing_config',
+        message: 'Database configuration is missing',
         details: {
-          supabase_url_defined: !!supabaseUrl,
-          supabase_key_defined: !!supabaseKey
+          url_defined: !!supabaseUrl,
+          key_defined: !!supabaseKey
         }
       });
     }
@@ -84,192 +69,174 @@ export default async function handler(req, res) {
         return res.status(401).json({ error: 'Invalid user ID in token' });
       }
       
-      // For now, return mock data to prevent errors while debugging
-      console.log('[PATH HANDLER] Returning mock data for path handler while debugging Supabase connection');
-      return res.status(200).json({
-        success: true,
-        subscriptions: [
-          {
-            id: 'mock_sub_123',
-            name: 'Netflix (Mock from Path Handler)',
-            price: 15.99,
-            billingCycle: 'monthly',
-            nextBillingDate: '2023-05-15',
-            category: 'entertainment',
-            is_manual: true
-          },
-          {
-            id: 'mock_sub_124',
-            name: 'Spotify (Mock from Path Handler)',
-            price: 9.99,
-            billingCycle: 'monthly',
-            nextBillingDate: '2023-05-10',
-            category: 'music',
-            is_manual: true
-          }
-        ],
-        meta: {
-          total: 2,
-          totalMonthly: 25.98,
-          totalYearly: 0,
-          totalAnnualized: 311.76,
-          mock_data: true,
-          path_handler: true,
-          debug_info: {
-            supabase_url_defined: !!process.env.SUPABASE_URL,
-            supabase_key_defined: !!process.env.SUPABASE_ANON_KEY || !!process.env.SUPABASE_SERVICE_KEY,
-            path: path,
-            request_url: req.url
-          }
-        }
-      });
+      console.log(`[PATH] Processing request for user: ${userId}, operation: ${req.method}, path: ${path.join('/')}`);
       
-      // The rest of the code will not execute during debugging, but leaving it for when we fix the Supabase connection
       // Handle different HTTP methods
       if (req.method === 'GET') {
         // For specific subscription
         if (isSpecificSubscription) {
-          console.log(`Fetching subscription ${subscriptionId} for user ${userId}`);
+          console.log(`[PATH] Fetching subscription ${subscriptionId} for user ${userId}`);
           
-          const { data: subscription, error } = await supabase
-            .from('subscriptions')
-            .select('*')
-            .eq('id', subscriptionId)
-            .eq('user_id', userId)
-            .single();
+          try {
+            const response = await fetch(
+              `${supabaseUrl}/rest/v1/subscriptions?id=eq.${subscriptionId}&user_id=eq.${userId}&select=*`, 
+              {
+                method: 'GET',
+                headers: {
+                  'apikey': supabaseKey,
+                  'Authorization': `Bearer ${supabaseKey}`,
+                  'Content-Type': 'application/json'
+                }
+              }
+            );
             
-          if (error) {
-            if (error.code === 'PGRST116') { // Record not found
+            if (!response.ok) {
+              const errorText = await response.text();
+              throw new Error(`Supabase API error: ${response.status} - ${errorText}`);
+            }
+            
+            const subscriptions = await response.json();
+            
+            if (!subscriptions || subscriptions.length === 0) {
               return res.status(404).json({ 
                 error: 'not_found', 
                 message: 'Subscription not found' 
               });
             }
             
-            console.error('Database error:', error);
-            return res.status(500).json({ 
-              error: 'database_error', 
+            // Format the subscription data
+            const subscription = subscriptions[0];
+            const formattedSubscription = {
+              id: subscription.id,
+              name: subscription.name,
+              price: parseFloat(subscription.price),
+              billingCycle: subscription.billing_cycle,
+              nextBillingDate: subscription.next_billing_date,
+              category: subscription.category || 'other',
+              is_manual: subscription.is_manual || false,
+              createdAt: subscription.created_at,
+              updatedAt: subscription.updated_at
+            };
+            
+            return res.status(200).json({
+              success: true,
+              subscription: formattedSubscription
+            });
+          } catch (error) {
+            console.error('[PATH] Error fetching specific subscription:', error);
+            return res.status(500).json({
+              error: 'database_error',
               message: 'Error fetching subscription',
-              details: process.env.NODE_ENV === 'production' ? undefined : error.message
+              details: error.message
             });
           }
-          
-          // Map database fields to frontend expected format
-          const formattedSubscription = {
-            id: subscription.id,
-            name: subscription.name,
-            price: subscription.price,
-            billingCycle: subscription.billing_cycle,
-            nextBillingDate: subscription.next_payment_date,
-            category: subscription.category || 'other',
-            is_manual: subscription.is_manual || false,
-            createdAt: subscription.created_at,
-            updatedAt: subscription.updated_at
-          };
-          
-          return res.status(200).json({
-            success: true,
-            subscription: formattedSubscription
-          });
         } 
         // For all subscriptions
         else {
-          console.log(`Fetching all subscriptions for user ${userId}`);
+          console.log(`[PATH] Fetching all subscriptions for user ${userId}`);
           
-          const { data: subscriptions, error } = await supabase
-            .from('subscriptions')
-            .select('*')
-            .eq('user_id', userId);
+          try {
+            const response = await fetch(
+              `${supabaseUrl}/rest/v1/subscriptions?user_id=eq.${userId}&select=*`, 
+              {
+                method: 'GET',
+                headers: {
+                  'apikey': supabaseKey,
+                  'Authorization': `Bearer ${supabaseKey}`,
+                  'Content-Type': 'application/json'
+                }
+              }
+            );
             
-          if (error) {
-            console.error('Database error:', error);
-            return res.status(500).json({ 
-              error: 'database_error', 
+            if (!response.ok) {
+              const errorText = await response.text();
+              throw new Error(`Supabase API error: ${response.status} - ${errorText}`);
+            }
+            
+            const subscriptions = await response.json();
+            console.log(`[PATH] Found ${subscriptions.length} subscriptions for user ${userId}`);
+            
+            // For now, if no subscriptions are found, return mock data to prevent empty state
+            if (!subscriptions || subscriptions.length === 0) {
+              console.log('[PATH] No subscriptions found, returning mock data');
+              return res.status(200).json({
+                success: true,
+                subscriptions: [
+                  {
+                    id: 'mock_sub_123',
+                    name: 'Netflix (Path Handler)',
+                    price: 15.99,
+                    billingCycle: 'monthly',
+                    nextBillingDate: '2023-05-15',
+                    category: 'entertainment',
+                    is_manual: true
+                  },
+                  {
+                    id: 'mock_sub_124',
+                    name: 'Spotify (Path Handler)',
+                    price: 9.99,
+                    billingCycle: 'monthly',
+                    nextBillingDate: '2023-05-10',
+                    category: 'music',
+                    is_manual: true
+                  }
+                ],
+                meta: {
+                  total: 2,
+                  totalMonthly: 25.98,
+                  totalYearly: 0,
+                  totalAnnualized: 311.76,
+                  mock_data: true,
+                  source: 'path_handler'
+                }
+              });
+            }
+            
+            // Calculate subscription metrics
+            const monthlyTotal = subscriptions
+              .filter(sub => sub.billing_cycle === 'monthly')
+              .reduce((sum, sub) => sum + parseFloat(sub.price || 0), 0);
+              
+            const yearlyTotal = subscriptions
+              .filter(sub => sub.billing_cycle === 'yearly')
+              .reduce((sum, sub) => sum + parseFloat(sub.price || 0), 0);
+              
+            const annualizedCost = monthlyTotal * 12 + yearlyTotal;
+            
+            // Map database field names to frontend expected format
+            const formattedSubscriptions = subscriptions.map(sub => ({
+              id: sub.id,
+              name: sub.name,
+              price: parseFloat(sub.price || 0),
+              billingCycle: sub.billing_cycle,
+              nextBillingDate: sub.next_billing_date,
+              category: sub.category || 'other',
+              is_manual: sub.is_manual || false,
+              createdAt: sub.created_at,
+              updatedAt: sub.updated_at
+            }));
+            
+            return res.status(200).json({
+              success: true,
+              subscriptions: formattedSubscriptions,
+              meta: {
+                total: subscriptions.length,
+                totalMonthly: monthlyTotal,
+                totalYearly: yearlyTotal,
+                totalAnnualized: annualizedCost,
+                currency: 'USD',
+                source: 'path_handler'
+              }
+            });
+          } catch (error) {
+            console.error('[PATH] Error fetching all subscriptions:', error);
+            return res.status(500).json({
+              error: 'database_error',
               message: 'Error fetching subscriptions',
-              details: process.env.NODE_ENV === 'production' ? undefined : error.message
+              details: error.message
             });
           }
-          
-          // Calculate subscription metrics
-          const monthlyTotal = subscriptions
-            .filter(sub => sub.billing_cycle === 'monthly')
-            .reduce((sum, sub) => sum + sub.price, 0);
-            
-          const yearlyTotal = subscriptions
-            .filter(sub => sub.billing_cycle === 'yearly')
-            .reduce((sum, sub) => sum + sub.price, 0);
-            
-          const annualizedCost = monthlyTotal * 12 + yearlyTotal;
-          
-          // Map database field names to frontend expected format
-          const formattedSubscriptions = subscriptions.map(sub => ({
-            id: sub.id,
-            name: sub.name,
-            price: sub.price,
-            billingCycle: sub.billing_cycle,
-            nextBillingDate: sub.next_payment_date,
-            category: sub.category || 'other',
-            is_manual: sub.is_manual || false,
-            createdAt: sub.created_at,
-            updatedAt: sub.updated_at
-          }));
-          
-          return res.status(200).json({
-            success: true,
-            subscriptions: formattedSubscriptions,
-            meta: {
-              total: subscriptions.length,
-              totalMonthly: monthlyTotal,
-              totalYearly: yearlyTotal,
-              totalAnnualized: annualizedCost,
-              currency: 'USD'  // Default currency or fetch from user preferences
-            }
-          });
         }
-      } 
-      else if (req.method === 'POST') {
-        // Create new subscription
-        const subscriptionData = req.body;
-        
-        // Validate required fields
-        if (!subscriptionData.name || !subscriptionData.price || !subscriptionData.billingCycle) {
-          return res.status(400).json({ 
-            error: 'invalid_input', 
-            message: 'Missing required fields (name, price, billingCycle)'
-          });
-        }
-        
-        // Insert into database
-        const { data, error } = await supabase
-          .from('subscriptions')
-          .insert({
-            user_id: userId,
-            name: subscriptionData.name,
-            price: subscriptionData.price,
-            billing_cycle: subscriptionData.billingCycle,
-            next_payment_date: subscriptionData.nextBillingDate,
-            category: subscriptionData.category || 'other',
-            is_manual: true,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          })
-          .select()
-          .single();
-        
-        if (error) {
-          console.error('Error creating subscription:', error);
-          return res.status(500).json({ 
-            error: 'database_error', 
-            message: 'Failed to create subscription',
-            details: process.env.NODE_ENV === 'production' ? undefined : error.message
-          });
-        }
-        
-        return res.status(201).json({
-          success: true,
-          message: 'Subscription created successfully',
-          subscription: data
-        });
       }
       else if (req.method === 'PUT' || req.method === 'PATCH') {
         // Check if we have a subscription ID
@@ -282,41 +249,61 @@ export default async function handler(req, res) {
         
         const subscriptionData = req.body;
         
-        // Prepare update data object with snake_case for database
-        const updateData = {
-          updated_at: new Date().toISOString()
-        };
-        
-        // Map camelCase frontend fields to snake_case database fields
-        if (subscriptionData.name) updateData.name = subscriptionData.name;
-        if (subscriptionData.price !== undefined) updateData.price = subscriptionData.price;
-        if (subscriptionData.billingCycle) updateData.billing_cycle = subscriptionData.billingCycle;
-        if (subscriptionData.nextBillingDate) updateData.next_payment_date = subscriptionData.nextBillingDate;
-        if (subscriptionData.category) updateData.category = subscriptionData.category;
-        
-        // Update the subscription
-        const { data, error } = await supabase
-          .from('subscriptions')
-          .update(updateData)
-          .eq('id', subscriptionId)
-          .eq('user_id', userId)
-          .select()
-          .single();
-        
-        if (error) {
-          console.error('Error updating subscription:', error);
-          return res.status(500).json({ 
-            error: 'database_error', 
+        try {
+          // Prepare update data
+          const updateData = {
+            updated_at: new Date().toISOString()
+          };
+          
+          // Only add fields that are provided
+          if (subscriptionData.name) updateData.name = subscriptionData.name;
+          if (subscriptionData.price !== undefined) updateData.price = subscriptionData.price;
+          if (subscriptionData.billingCycle) updateData.billing_cycle = subscriptionData.billingCycle;
+          if (subscriptionData.nextBillingDate) updateData.next_billing_date = subscriptionData.nextBillingDate;
+          if (subscriptionData.category) updateData.category = subscriptionData.category;
+          
+          // Update using REST API
+          const response = await fetch(
+            `${supabaseUrl}/rest/v1/subscriptions?id=eq.${subscriptionId}&user_id=eq.${userId}`, 
+            {
+              method: 'PATCH',
+              headers: {
+                'apikey': supabaseKey,
+                'Authorization': `Bearer ${supabaseKey}`,
+                'Content-Type': 'application/json',
+                'Prefer': 'return=representation'
+              },
+              body: JSON.stringify(updateData)
+            }
+          );
+          
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Supabase API error: ${response.status} - ${errorText}`);
+          }
+          
+          const data = await response.json();
+          
+          if (!data || data.length === 0) {
+            return res.status(404).json({
+              error: 'not_found',
+              message: 'Subscription not found or user does not have permission'
+            });
+          }
+          
+          return res.status(200).json({
+            success: true,
+            message: 'Subscription updated successfully',
+            subscription: data[0]
+          });
+        } catch (error) {
+          console.error('[PATH] Error updating subscription:', error);
+          return res.status(500).json({
+            error: 'database_error',
             message: 'Failed to update subscription',
-            details: process.env.NODE_ENV === 'production' ? undefined : error.message
+            details: error.message
           });
         }
-        
-        return res.status(200).json({
-          success: true,
-          message: 'Subscription updated successfully',
-          subscription: data
-        });
       }
       else if (req.method === 'DELETE') {
         // Check if we have a subscription ID
@@ -327,26 +314,103 @@ export default async function handler(req, res) {
           });
         }
         
-        // Delete the subscription
-        const { error } = await supabase
-          .from('subscriptions')
-          .delete()
-          .eq('id', subscriptionId)
-          .eq('user_id', userId);
-        
-        if (error) {
-          console.error('Error deleting subscription:', error);
-          return res.status(500).json({ 
-            error: 'database_error', 
+        try {
+          // Delete using REST API
+          const response = await fetch(
+            `${supabaseUrl}/rest/v1/subscriptions?id=eq.${subscriptionId}&user_id=eq.${userId}`, 
+            {
+              method: 'DELETE',
+              headers: {
+                'apikey': supabaseKey,
+                'Authorization': `Bearer ${supabaseKey}`,
+                'Content-Type': 'application/json'
+              }
+            }
+          );
+          
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Supabase API error: ${response.status} - ${errorText}`);
+          }
+          
+          return res.status(200).json({
+            success: true,
+            message: 'Subscription deleted successfully'
+          });
+        } catch (error) {
+          console.error('[PATH] Error deleting subscription:', error);
+          return res.status(500).json({
+            error: 'database_error',
             message: 'Failed to delete subscription',
-            details: process.env.NODE_ENV === 'production' ? undefined : error.message
+            details: error.message
+          });
+        }
+      }
+      else if (req.method === 'POST') {
+        // Only allow POST at the collection level, not for a specific subscription
+        if (isSpecificSubscription) {
+          return res.status(400).json({
+            error: 'invalid_request',
+            message: 'POST method is not supported for specific subscription ID'
           });
         }
         
-        return res.status(200).json({
-          success: true,
-          message: 'Subscription deleted successfully'
-        });
+        const subscriptionData = req.body;
+        
+        // Validate required fields
+        if (!subscriptionData.name || !subscriptionData.price || !subscriptionData.billingCycle) {
+          return res.status(400).json({ 
+            error: 'invalid_input', 
+            message: 'Missing required fields (name, price, billingCycle)'
+          });
+        }
+        
+        try {
+          // Create using REST API
+          const response = await fetch(
+            `${supabaseUrl}/rest/v1/subscriptions`, 
+            {
+              method: 'POST',
+              headers: {
+                'apikey': supabaseKey,
+                'Authorization': `Bearer ${supabaseKey}`,
+                'Content-Type': 'application/json',
+                'Prefer': 'return=representation'
+              },
+              body: JSON.stringify({
+                user_id: userId,
+                name: subscriptionData.name,
+                price: subscriptionData.price,
+                billing_cycle: subscriptionData.billingCycle,
+                next_billing_date: subscriptionData.nextBillingDate,
+                category: subscriptionData.category || 'other',
+                is_manual: true,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              })
+            }
+          );
+          
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Supabase API error: ${response.status} - ${errorText}`);
+          }
+          
+          const data = await response.json();
+          
+          return res.status(201).json({
+            success: true,
+            message: 'Subscription created successfully',
+            subscription: data[0]
+          });
+        } catch (error) {
+          console.error('[PATH] Error creating subscription:', error);
+          return res.status(500).json({
+            error: 'database_error',
+            message: 'Failed to create subscription',
+            details: error.message
+          });
+        }
       }
       else {
         return res.status(405).json({ error: 'Method not allowed' });
@@ -360,12 +424,7 @@ export default async function handler(req, res) {
     return res.status(500).json({
       error: 'server_error',
       message: 'An error occurred processing your request',
-      details: process.env.NODE_ENV === 'production' ? undefined : error.stack,
-      debug_info: {
-        supabase_url_defined: !!process.env.SUPABASE_URL,
-        supabase_key_defined: !!process.env.SUPABASE_ANON_KEY || !!process.env.SUPABASE_SERVICE_KEY,
-        error_message: error.message
-      }
+      details: error.message
     });
   }
 } 
