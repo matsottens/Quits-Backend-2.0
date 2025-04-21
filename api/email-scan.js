@@ -700,7 +700,7 @@ export default async function handler(req, res) {
                 const analysis = await analyzeEmailWithGemini(emailData);
                 
                 // If this is a subscription with good confidence, save it
-                if (analysis.isSubscription && analysis.confidence > 0.6) {
+                if (analysis.isSubscription && analysis.confidence > 0.3) {
                   console.log(`Detected subscription: ${analysis.serviceName || 'Unknown'} (${analysis.confidence.toFixed(2)} confidence)`);
                   detectedSubscriptions.push(analysis);
                   
@@ -711,9 +711,9 @@ export default async function handler(req, res) {
                   }
                 } else {
                   console.log(`Not a subscription (${analysis.confidence.toFixed(2)} confidence)`);
-              }
-            } catch (emailError) {
-              console.error(`Error processing email ${message.id}:`, emailError);
+                }
+              } catch (emailError) {
+                console.error(`Error processing email ${message.id}:`, emailError);
               }
             }
             
