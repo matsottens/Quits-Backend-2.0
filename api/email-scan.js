@@ -37,9 +37,14 @@ const fetchEmailsFromGmail = async (gmailToken, maxResults = 100) => {
   try {
     console.log('Fetching emails with Gmail token (first 20 chars):', gmailToken.substring(0, 20) + '...');
     
+    // Use a broader query to find more potential subscription emails
+    // Include both from: and subject: searches for broader matching
+    const query = 'from:(billing OR receipt OR subscription OR payment OR invoice OR confirm OR welcome OR account OR membership) OR subject:(subscription OR payment OR invoice OR confirm OR receipt OR welcome OR billing OR membership OR monthly OR thank you)';
+    console.log('Using Gmail search query:', query);
+    
     // Call Gmail API to get a list of recent emails
     const response = await fetch(
-      `https://www.googleapis.com/gmail/v1/users/me/messages?maxResults=${maxResults}&q=from:(billing OR receipt OR subscription OR payment OR invoice)`,
+      `https://www.googleapis.com/gmail/v1/users/me/messages?maxResults=${maxResults}&q=${encodeURIComponent(query)}`,
       {
         method: 'GET',
         headers: {
@@ -892,8 +897,11 @@ export default async function handler(req, res) {
                     'Content-Type': 'application/json'
                   },
                   body: JSON.stringify({
-            status: 'completed',
-                    emails_scanned: recentEmails.length,
+                    status: 'completed',
+                    emails_found: emails.length,
+                    emails_to_process: recentEmails.length,
+                    emails_scanned: processedCount,
+                    emails_processed: processedCount,
                     subscriptions_found: detectedSubscriptions.length,
                     completed_at: new Date().toISOString(),
                     progress: 100
@@ -901,6 +909,7 @@ export default async function handler(req, res) {
                 }
               );
               console.log(`Updated scan status to completed for scan ${scanId}`);
+              console.log(`Final stats: Found ${emails.length} emails, processed ${processedCount}, detected ${detectedSubscriptions.length} subscriptions`);
             } catch (statusError) {
               console.error(`Error updating scan status: ${statusError.message}`);
             }

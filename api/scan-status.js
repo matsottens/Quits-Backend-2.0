@@ -149,6 +149,12 @@ export default async function handler(req, res) {
                 scanId: scanId,
                 progress: 100,
                 completedAt: scan.completed_at,
+                stats: {
+                  emails_found: scan.emails_found || 0,
+                  emails_to_process: scan.emails_to_process || 0,
+                  emails_processed: scan.emails_scanned || 0,
+                  subscriptions_found: scan.subscriptions_found || 0
+                },
                 results: {
                   totalEmailsScanned: scan.emails_scanned || 0,
                   subscriptionsFound: subscriptions.map(sub => ({
