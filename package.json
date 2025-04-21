@@ -12,6 +12,7 @@
     "node": ">=18.x"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.39.3",
     "express": "^5.1.0",
     "cors": "^2.8.5",
     "jsonwebtoken": "^9.0.2",
