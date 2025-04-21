@@ -188,35 +188,15 @@ export default async function handler(req, res) {
           
           // For now, if no subscriptions are found, return mock data to prevent empty state
           if (!subscriptions || subscriptions.length === 0) {
-            console.log('No subscriptions found, returning mock data');
+            console.log('No subscriptions found, returning empty array');
             return res.status(200).json({
               success: true,
-              subscriptions: [
-                {
-                  id: 'mock_sub_123',
-                  name: 'Netflix',
-                  price: 15.99,
-                  billingCycle: 'monthly',
-                  nextBillingDate: '2023-05-15',
-                  category: 'entertainment',
-                  is_manual: true
-                },
-                {
-                  id: 'mock_sub_124',
-                  name: 'Spotify',
-                  price: 9.99,
-                  billingCycle: 'monthly',
-                  nextBillingDate: '2023-05-10',
-                  category: 'music',
-                  is_manual: true
-            }
-          ],
-          meta: {
-                total: 2,
-            totalMonthly: 25.98,
+              subscriptions: [],
+              meta: {
+                total: 0,
+                totalMonthly: 0,
                 totalYearly: 0,
-                totalAnnualized: 311.76,
-                mock_data: true,
+                totalAnnualized: 0,
                 db_user_id: dbUserId
               }
             });
