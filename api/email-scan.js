@@ -401,7 +401,7 @@ const saveSubscription = async (userId, subscriptionData) => {
       const existingSubscriptions = await checkResponse.json();
       if (existingSubscriptions && existingSubscriptions.length > 0) {
         console.log(`Subscription for ${subscriptionData.serviceName} already exists, skipping`);
-        return null;
+  return null;
       }
     }
     
@@ -711,9 +711,9 @@ export default async function handler(req, res) {
                   }
                 } else {
                   console.log(`Not a subscription (${analysis.confidence.toFixed(2)} confidence)`);
-                }
-              } catch (emailError) {
-                console.error(`Error processing email ${message.id}:`, emailError);
+              }
+            } catch (emailError) {
+              console.error(`Error processing email ${message.id}:`, emailError);
               }
             }
             
@@ -731,7 +731,7 @@ export default async function handler(req, res) {
                     'Content-Type': 'application/json'
                   },
                   body: JSON.stringify({
-                    status: 'completed',
+            status: 'completed',
                     emails_scanned: recentEmails.length,
                     subscriptions_found: detectedSubscriptions.length,
                     completed_at: new Date().toISOString(),
@@ -758,7 +758,7 @@ export default async function handler(req, res) {
                     'Content-Type': 'application/json'
                   },
                   body: JSON.stringify({
-                    status: 'error',
+            status: 'error',
                     error_message: gmailError.message,
                     completed_at: new Date().toISOString()
                   })
@@ -780,7 +780,7 @@ export default async function handler(req, res) {
     }
   } catch (error) {
     console.error('Email scan error:', error);
-    return res.status(500).json({
+    return res.status(500).json({ 
       error: 'server_error',
       message: 'An error occurred processing your request',
       details: error.message

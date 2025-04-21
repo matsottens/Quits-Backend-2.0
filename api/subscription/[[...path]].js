@@ -56,18 +56,18 @@ export default async function handler(req, res) {
       });
     }
     
-    // Extract token from Authorization header
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ error: 'Missing or invalid authorization header' });
-    }
+      // Extract token from Authorization header
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ error: 'Missing or invalid authorization header' });
+      }
 
-    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
-    
-    // Verify the token
-    try {
-      const jwtSecret = process.env.JWT_SECRET || 'dev_secret_DO_NOT_USE_IN_PRODUCTION';
-      const decoded = verify(token, jwtSecret);
+      const token = authHeader.substring(7); // Remove 'Bearer ' prefix
+      
+      // Verify the token
+      try {
+        const jwtSecret = process.env.JWT_SECRET || 'dev_secret_DO_NOT_USE_IN_PRODUCTION';
+        const decoded = verify(token, jwtSecret);
       const userId = decoded.id || decoded.sub; // Use sub as fallback (common in JWT)
       
       if (!userId) {
@@ -95,25 +95,25 @@ export default async function handler(req, res) {
           console.error('[PATH] User lookup failed:', errorText);
           
           // Return mock data for now
-          return res.status(200).json({
-            success: true,
-            subscriptions: [
-              {
+        return res.status(200).json({
+          success: true,
+          subscriptions: [
+            {
                 id: 'mock_sub_123',
                 name: 'Netflix (Path Handler - User Lookup Failed)',
-                price: 15.99,
+              price: 15.99,
                 billingCycle: 'monthly',
                 nextBillingDate: '2023-05-15',
-                category: 'entertainment',
+              category: 'entertainment',
                 is_manual: true
-              },
-              {
+            },
+            {
                 id: 'mock_sub_124',
                 name: 'Spotify (Path Handler - User Lookup Failed)',
-                price: 9.99,
+              price: 9.99,
                 billingCycle: 'monthly',
                 nextBillingDate: '2023-05-10',
-                category: 'music',
+              category: 'music',
                 is_manual: true
               }
             ],
@@ -342,11 +342,11 @@ export default async function handler(req, res) {
                       nextBillingDate: '2023-05-10',
                       category: 'music',
                       is_manual: true
-                    }
-                  ],
-                  meta: {
+            }
+          ],
+          meta: {
                     total: 2,
-                    totalMonthly: 25.98,
+            totalMonthly: 25.98,
                     totalYearly: 0,
                     totalAnnualized: 311.76,
                     mock_data: true,
@@ -569,9 +569,9 @@ export default async function handler(req, res) {
             
             const data = await response.json();
             
-            return res.status(201).json({
-              success: true,
-              message: 'Subscription created successfully',
+      return res.status(201).json({
+        success: true,
+        message: 'Subscription created successfully',
               subscription: data[0]
             });
           } catch (error) {
