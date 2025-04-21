@@ -1,6 +1,11 @@
 // Scan status endpoint
 import jsonwebtoken from 'jsonwebtoken';
+import fetch from 'node-fetch';
 const { verify } = jsonwebtoken;
+
+// Supabase config
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY;
 
 // Helper function to extract Gmail token from JWT
 const extractGmailToken = (token) => {
@@ -55,13 +60,139 @@ export default async function handler(req, res) {
     try {
       const jwtSecret = process.env.JWT_SECRET || 'dev_secret_DO_NOT_USE_IN_PRODUCTION';
       const decoded = verify(token, jwtSecret);
+      const userId = decoded.id || decoded.sub;
       
-      // Check if the scan exists in our global cache
+      // For newer scans, check the database
+      if (supabaseUrl && supabaseKey) {
+        try {
+          // First, look up the database user ID
+          const userLookupResponse = await fetch(
+            `${supabaseUrl}/rest/v1/users?select=id,email,google_id&or=(email.eq.${encodeURIComponent(decoded.email)},google_id.eq.${encodeURIComponent(userId)})`, 
+            {
+              method: 'GET',
+              headers: {
+                'apikey': supabaseKey,
+                'Authorization': `Bearer ${supabaseKey}`,
+                'Content-Type': 'application/json'
+              }
+            }
+          );
+          
+          if (!userLookupResponse.ok) {
+            throw new Error(`User lookup failed: ${await userLookupResponse.text()}`);
+          }
+          
+          const users = await userLookupResponse.json();
+          
+          // Verify user exists
+          if (!users || users.length === 0) {
+            console.log(`User not found in database for email: ${decoded.email}`);
+            // Fall back to mock data (consider this scan as pending)
+            return res.status(200).json({
+              success: true,
+              status: 'pending',
+              scanId: scanId,
+              progress: 0,
+              message: 'Scan is being initialized'
+            });
+          }
+          
+          const dbUserId = users[0].id;
+          
+          // Look up scan in the database
+          const scanLookupResponse = await fetch(
+            `${supabaseUrl}/rest/v1/scan_history?scan_id=eq.${scanId}&user_id=eq.${dbUserId}&select=*`, 
+            {
+              method: 'GET',
+              headers: {
+                'apikey': supabaseKey,
+                'Authorization': `Bearer ${supabaseKey}`,
+                'Content-Type': 'application/json'
+              }
+            }
+          );
+          
+          if (!scanLookupResponse.ok) {
+            throw new Error(`Scan lookup failed: ${await scanLookupResponse.text()}`);
+          }
+          
+          const scanData = await scanLookupResponse.json();
+          
+          // If scan found in database, return its status
+          if (scanData && scanData.length > 0) {
+            const scan = scanData[0];
+            
+            if (scan.status === 'completed') {
+              // Fetch detected subscriptions
+              const subsResponse = await fetch(
+                `${supabaseUrl}/rest/v1/subscriptions?user_id=eq.${dbUserId}&source=eq.email_scan&select=*&order=created_at.desc`, 
+                {
+                  method: 'GET',
+                  headers: {
+                    'apikey': supabaseKey,
+                    'Authorization': `Bearer ${supabaseKey}`,
+                    'Content-Type': 'application/json'
+                  }
+                }
+              );
+              
+              if (!subsResponse.ok) {
+                throw new Error(`Subscription lookup failed: ${await subsResponse.text()}`);
+              }
+              
+              const subscriptions = await subsResponse.json();
+              
+              // Return completion status with detected subscriptions
+              return res.status(200).json({
+                success: true,
+                status: 'completed',
+                scanId: scanId,
+                progress: 100,
+                completedAt: scan.completed_at,
+                results: {
+                  totalEmailsScanned: scan.emails_scanned || 0,
+                  subscriptionsFound: subscriptions.map(sub => ({
+                    id: sub.id,
+                    service_name: sub.name,
+                    price: parseFloat(sub.price || 0),
+                    currency: 'USD',
+                    billing_cycle: sub.billing_cycle,
+                    next_billing_date: sub.next_billing_date,
+                    confidence: sub.confidence || 0.8
+                  }))
+                }
+              });
+            } else if (scan.status === 'error') {
+              return res.status(200).json({
+                success: false,
+                status: 'error',
+                scanId: scanId,
+                error: scan.error_message || 'Unknown error',
+                message: 'Scan encountered an error'
+              });
+            } else {
+              // In progress or pending
+              return res.status(200).json({
+                success: true,
+                status: scan.status || 'in_progress',
+                scanId: scanId,
+                progress: scan.progress || 50,
+                message: 'Scan in progress'
+              });
+            }
+          }
+        } catch (dbError) {
+          console.error('Database error checking scan status:', dbError);
+          // Continue to fallback logic below
+        }
+      }
+      
+      // Check if the scan exists in our global cache (legacy support)
       if (global.scanStatus && global.scanStatus[scanId]) {
         const scanStatus = global.scanStatus[scanId];
         
         // Verify the scan belongs to this user
-        if (scanStatus.userId !== decoded.id) {
+        if (scanStatus.userId && scanStatus.userId !== userId) {
           return res.status(403).json({ error: 'Forbidden', message: 'You do not have access to this scan' });
         }
         
@@ -93,79 +224,67 @@ export default async function handler(req, res) {
         }
       }
       
-      // If we get here, the scan either doesn't exist or we don't have its status
-      // For demo purposes, we'll generate a mock response based on the scan ID
-      // In a real implementation, you would query a database
-      
-      // Use the scanId to simulate different states for demo purposes
-      const idSum = scanId.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0);
-      
-      if (idSum % 3 === 0) {
-        // Pending status
-        return res.status(200).json({
-          success: true,
-          status: 'pending',
-          scanId: scanId,
-          progress: 0,
-          message: 'Scan is queued and will start soon'
-        });
-      } else if (idSum % 3 === 1) {
-        // In progress
-        const progress = Math.floor(Math.random() * 90) + 10; // Random progress between 10-99%
-        return res.status(200).json({
-          success: true,
-          status: 'in_progress',
-          scanId: scanId,
-          progress: progress,
-          message: 'Scan in progress'
-        });
-      } else {
-        // Completed with mock data
-        return res.status(200).json({
-          success: true,
-          status: 'completed',
-          scanId: scanId,
-          progress: 100,
-          results: {
-            totalEmailsScanned: 1243,
-            subscriptionsFound: [
-              {
-                id: 'rec_123',
-                service_name: 'Netflix',
-                email_from: 'info@netflix.com',
-                email_subject: 'Your Netflix Subscription',
-                email_date: new Date().toISOString(),
-                price: 15.99,
-                currency: 'USD',
-                billing_cycle: 'monthly',
-                confidence: 0.95
-              },
-              {
-                id: 'rec_124',
-                service_name: 'Spotify',
-                email_from: 'no-reply@spotify.com',
-                email_subject: 'Your Spotify Premium Receipt',
-                email_date: new Date().toISOString(),
-                price: 9.99,
-                currency: 'USD',
-                billing_cycle: 'monthly',
-                confidence: 0.92
-              },
-              {
-                id: 'rec_125',
-                service_name: 'Amazon Prime',
-                email_from: 'auto-confirm@amazon.com',
-                email_subject: 'Your Amazon Prime Membership Receipt',
-                email_date: new Date().toISOString(),
-                price: 119,
-                currency: 'USD',
-                billing_cycle: 'yearly',
-                confidence: 0.89
+      // If we get here, assume the scan is in progress and create an entry in the database
+      // This handles the case where we got a scan ID but don't have the status yet
+      try {
+        console.log(`Creating pending scan record for scanId ${scanId}`);
+        // First, look up the database user ID again if we don't have it
+        let dbUserId = null;
+        if (!dbUserId) {
+          const userLookupResponse = await fetch(
+            `${supabaseUrl}/rest/v1/users?select=id,email,google_id&or=(email.eq.${encodeURIComponent(decoded.email)},google_id.eq.${encodeURIComponent(userId)})`, 
+            {
+              method: 'GET',
+              headers: {
+                'apikey': supabaseKey,
+                'Authorization': `Bearer ${supabaseKey}`,
+                'Content-Type': 'application/json'
               }
-            ]
+            }
+          );
+          
+          if (userLookupResponse.ok) {
+            const users = await userLookupResponse.json();
+            if (users && users.length > 0) {
+              dbUserId = users[0].id;
+            }
           }
-        });
+        }
+        
+        if (dbUserId) {
+          // Create a scan record
+          await fetch(
+            `${supabaseUrl}/rest/v1/scan_history`, 
+            {
+              method: 'POST',
+              headers: {
+                'apikey': supabaseKey,
+                'Authorization': `Bearer ${supabaseKey}`,
+                'Content-Type': 'application/json',
+                'Prefer': 'return=representation'
+              },
+              body: JSON.stringify({
+                scan_id: scanId,
+                user_id: dbUserId,
+                status: 'in_progress',
+                progress: 30,
+                created_at: new Date().toISOString()
+              })
+            }
+          );
+        }
+      } catch (createError) {
+        console.error('Error creating scan record:', createError);
       }
+      
+      // Return an in-progress status
+      return res.status(200).json({
+        success: true,
+        status: 'in_progress',
+        scanId: scanId,
+        progress: 30,
+        message: 'Scan in progress'
+      });
     } catch (tokenError) {
       console.error('Token verification error:', tokenError);
       return res.status(401).json({ error: 'Invalid or expired token' });
@@ -174,7 +293,8 @@ export default async function handler(req, res) {
     console.error('Scan status error:', error);
     return res.status(500).json({ 
       error: 'server_error',
-      message: 'An error occurred processing your request'
+      message: 'An error occurred processing your request',
+      details: error.message
     });
   }
 } 

@@ -3,6 +3,10 @@ import jsonwebtoken from 'jsonwebtoken';
 import fetch from 'node-fetch';
 const { verify } = jsonwebtoken;
 
+// Supabase config
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY;
+
 // Helper function to extract Gmail token from JWT
 const extractGmailToken = (token) => {
   try {
@@ -34,6 +38,7 @@ const fetchEmailsFromGmail = async (gmailToken, maxResults = 100) => {
     }
 
     const data = await response.json();
+    console.log(`Found ${data.messages?.length || 0} emails matching subscription criteria`);
     return data.messages || [];
   } catch (error) {
     console.error('Error fetching emails from Gmail:', error);
@@ -66,7 +71,147 @@ const fetchEmailContent = async (gmailToken, messageId) => {
   }
 };
 
-// Function to analyze email for subscription data
+// Function to analyze email with Gemini AI
+const analyzeEmailWithGemini = async (emailContent) => {
+  try {
+    // Check if Gemini API key exists
+    if (!process.env.GEMINI_API_KEY) {
+      console.warn('GEMINI_API_KEY not found, using fallback analysis');
+      return analyzeEmailForSubscriptions(emailContent);
+    }
+
+    // Format email data for the prompt
+    const headers = emailContent.payload.headers || [];
+    const subject = headers.find(h => h.name.toLowerCase() === 'subject')?.value || '';
+    const from = headers.find(h => h.name.toLowerCase() === 'from')?.value || '';
+    const date = headers.find(h => h.name.toLowerCase() === 'date')?.value || '';
+
+    // Extract email body
+    let body = '';
+    if (emailContent.payload.body && emailContent.payload.body.data) {
+      // Decode base64 data
+      body = Buffer.from(emailContent.payload.body.data, 'base64').toString('utf-8');
+    } else if (emailContent.payload.parts) {
+      // Handle multipart messages
+      for (const part of emailContent.payload.parts) {
+        if (part.mimeType === 'text/plain' && part.body?.data) {
+          body += Buffer.from(part.body.data, 'base64').toString('utf-8');
+        }
+      }
+    }
+
+    // Format the complete email
+    const formattedEmail = `
+From: ${from}
+Subject: ${subject}
+Date: ${date}
+
+${body}
+    `;
+
+    console.log(`Analyzing email "${subject}" with Gemini AI...`);
+    
+    // Call Gemini API
+    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': process.env.GEMINI_API_KEY
+      },
+      body: JSON.stringify({
+        contents: [{
+          parts: [{
+            text: `
+You are a specialized AI system designed to analyze emails and identify subscription services.
+
+Analyze the following email content to determine if it relates to a subscription service.
+Look for indicators such as:
+- Regular payment mentions (monthly, annually, etc.)
+- Subscription confirmation or renewal notices
+- Billing details for recurring services
+- Trial period information
+- Account or membership information
+
+If this email is about a subscription, extract the following details:
+- Service name: The name of the subscription service
+- Price: The amount charged (ignore one-time fees, focus on recurring charges)
+- Currency: USD, EUR, etc.
+- Billing frequency: monthly, yearly, quarterly, weekly, etc.
+- Next billing date: When the next payment will occur (in YYYY-MM-DD format if possible)
+
+FORMAT YOUR RESPONSE AS A JSON OBJECT with the following structure:
+
+For subscription emails:
+{
+  "isSubscription": true,
+  "serviceName": "The service name",
+  "amount": 19.99,
+  "currency": "USD",
+  "billingFrequency": "monthly", 
+  "nextBillingDate": "YYYY-MM-DD",
+  "confidence": 0.95 // Your confidence level between 0 and 1
+}
+
+For non-subscription emails:
+{
+  "isSubscription": false,
+  "confidence": 0.95 // Your confidence level between 0 and 1
+}
+
+Always consider the entire email context, including sender, subject line, and body content when making your determination.
+
+Email Content:
+--- START EMAIL CONTENT ---
+${formattedEmail}
+--- END EMAIL CONTENT ---
+
+JSON Output:
+`
+          }]
+        }],
+        generationConfig: {
+          temperature: 0.2,
+          maxOutputTokens: 1024,
+        }
+      })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error('Gemini API error:', errorData);
+      throw new Error(`Gemini API error: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    
+    // Extract text from response
+    const geminiText = data.candidates[0].content.parts[0].text;
+    console.log('Gemini API response received, extracting JSON data');
+    
+    // Extract JSON from text (handle cases where text may contain markdown or other content)
+    const jsonMatch = geminiText.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        const result = JSON.parse(jsonMatch[0]);
+        console.log('Parsed result:', result.isSubscription ? 'Subscription detected' : 'Not a subscription');
+        return result;
+      } catch (parseError) {
+        console.error('Error parsing Gemini response JSON:', parseError);
+        console.error('Raw response:', geminiText);
+        return analyzeEmailForSubscriptions(emailContent);
+      }
+    } else {
+      console.warn('Unexpected Gemini response format, using fallback analysis');
+      console.warn('Raw response:', geminiText);
+      return analyzeEmailForSubscriptions(emailContent);
+    }
+  } catch (error) {
+    console.error('Error analyzing email with Gemini:', error);
+    return analyzeEmailForSubscriptions(emailContent);
+  }
+};
+
+// Function to analyze email for subscription data (fallback method)
 const analyzeEmailForSubscriptions = (email) => {
   // Get headers
   const headers = email.payload.headers || [];
@@ -82,7 +227,7 @@ const analyzeEmailForSubscriptions = (email) => {
   } else if (email.payload.parts) {
     // Handle multipart messages
     for (const part of email.payload.parts) {
-      if (part.mimeType === 'text/plain' && part.body.data) {
+      if (part.mimeType === 'text/plain' && part.body?.data) {
         body += Buffer.from(part.body.data, 'base64').toString('utf-8');
       }
     }
@@ -178,22 +323,104 @@ const analyzeEmailForSubscriptions = (email) => {
     }
   }
   
-  // Return subscription data if confidence is high enough
+  // Generate next billing date (today + 1 month if monthly, today + 1 year if yearly)
+  const nextDate = new Date();
+  if (billingCycle === 'yearly') {
+    nextDate.setFullYear(nextDate.getFullYear() + 1);
+  } else if (billingCycle === 'quarterly') {
+    nextDate.setMonth(nextDate.getMonth() + 3);
+  } else {
+    // Default to monthly
+    nextDate.setMonth(nextDate.getMonth() + 1);
+  }
+  const nextBillingDate = nextDate.toISOString().split('T')[0];
+  
+  // Return in Gemini format for compatibility
   if (confidence > 0.5 && (serviceName || from) && price) {
     return {
-      email_subject: subject,
-      email_from: from,
-      email_date: date,
-      service_name: serviceName || 'Unknown Service',
-      price: price,
+      isSubscription: true,
+      serviceName: serviceName || 'Unknown Service',
+      amount: price,
       currency: 'USD', // Default
-      billing_cycle: billingCycle || 'monthly', // Default to monthly
+      billingFrequency: billingCycle || 'monthly', // Default to monthly
+      nextBillingDate,
       confidence: confidence,
-      next_billing_date: null, // Hard to extract reliably
     };
   }
   
-  return null;
+  return {
+    isSubscription: false,
+    confidence: 0.8 // Reasonable confidence it's not a subscription
+  };
+};
+
+// Function to save detected subscription to database
+const saveSubscription = async (userId, subscriptionData) => {
+  try {
+    // First check if a similar subscription already exists
+    const checkResponse = await fetch(
+      `${supabaseUrl}/rest/v1/subscriptions?user_id=eq.${userId}&name=ilike.${encodeURIComponent('%' + subscriptionData.serviceName + '%')}`, 
+      {
+        method: 'GET',
+        headers: {
+          'apikey': supabaseKey,
+          'Authorization': `Bearer ${supabaseKey}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+    
+    if (!checkResponse.ok) {
+      const errorText = await checkResponse.text();
+      console.error(`Failed to check existing subscriptions: ${errorText}`);
+    } else {
+      const existingSubscriptions = await checkResponse.json();
+      if (existingSubscriptions && existingSubscriptions.length > 0) {
+        console.log(`Subscription for ${subscriptionData.serviceName} already exists, skipping`);
+        return null;
+      }
+    }
+    
+    // Create subscription using REST API
+    console.log(`Creating subscription for ${subscriptionData.serviceName}`);
+    const response = await fetch(
+      `${supabaseUrl}/rest/v1/subscriptions`, 
+      {
+        method: 'POST',
+        headers: {
+          'apikey': supabaseKey,
+          'Authorization': `Bearer ${supabaseKey}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation'
+        },
+        body: JSON.stringify({
+          user_id: userId,
+          name: subscriptionData.serviceName,
+          price: subscriptionData.amount,
+          billing_cycle: subscriptionData.billingFrequency,
+          next_billing_date: subscriptionData.nextBillingDate,
+          category: 'other', // Default category
+          is_manual: false, // Mark as auto-detected
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          source: 'email_scan',
+          confidence: subscriptionData.confidence
+        })
+      }
+    );
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Supabase API error: ${response.status} - ${errorText}`);
+    }
+    
+    const result = await response.json();
+    console.log(`Successfully created subscription for ${subscriptionData.serviceName}`);
+    return result;
+  } catch (error) {
+    console.error('Error saving subscription:', error);
+    throw error;
+  }
 };
 
 export default async function handler(req, res) {
@@ -245,89 +472,163 @@ export default async function handler(req, res) {
       // Generate a scan ID
       const scanId = 'scan_' + Math.random().toString(36).substring(2, 15);
       
-      // Start email scanning process asynchronously
-      (async () => {
-        try {
-          // Store the scan status in a global cache or database (mock for now)
-          global.scanStatus = global.scanStatus || {};
-          global.scanStatus[scanId] = {
-            status: 'in_progress',
-            progress: 10,
-            userId: decoded.id,
-            startTime: Date.now(),
-            results: null
-          };
-          
-          // Fetch emails from Gmail
-          const limit = req.body?.limit || 100;
-          console.log(`Fetching up to ${limit} emails for scan ${scanId}...`);
-          const messages = await fetchEmailsFromGmail(gmailToken, limit);
-          
-          // Update progress
-          global.scanStatus[scanId].progress = 30;
-          
-          // Process each email to look for subscriptions
-          console.log(`Processing ${messages.length} emails for scan ${scanId}...`);
-          const subscriptions = [];
-          let processedCount = 0;
-          
-          for (const message of messages.slice(0, 50)) { // Process max 50 to avoid rate limits
-            try {
-              processedCount++;
-              global.scanStatus[scanId].progress = 30 + Math.floor((processedCount / 50) * 60);
-              
-              // Fetch email content
-              const email = await fetchEmailContent(gmailToken, message.id);
-              if (!email) continue;
-              
-              // Analyze email for subscription data
-              const subscriptionData = analyzeEmailForSubscriptions(email);
-              if (subscriptionData) {
-                subscriptions.push({
-                  id: `sub_${Math.random().toString(36).substring(2, 10)}`,
-                  ...subscriptionData
-                });
-              }
-            } catch (emailError) {
-              console.error(`Error processing email ${message.id}:`, emailError);
-              // Continue with next email
-            }
-          }
-          
-          // Update scan status with results
-          global.scanStatus[scanId] = {
-            ...global.scanStatus[scanId],
-            status: 'completed',
-            progress: 100,
-            completedAt: Date.now(),
-            results: {
-              totalEmailsScanned: processedCount,
-              subscriptionsFound: subscriptions
-            }
-          };
-          
-          console.log(`Scan ${scanId} completed, found ${subscriptions.length} subscriptions`);
-        } catch (scanError) {
-          console.error(`Error during scan ${scanId}:`, scanError);
-          // Update scan status with error
-          global.scanStatus = global.scanStatus || {};
-          global.scanStatus[scanId] = {
-            ...global.scanStatus[scanId],
-            status: 'error',
-            error: scanError.message
-          };
-        }
-      })();
-      
-      // Respond immediately with the scan ID
-      return res.status(202).json({
+      // Immediately respond to client that scanning has started
+      res.status(202).json({
         success: true,
         message: 'Email scan initiated successfully',
-        scanId: scanId,
+        scanId,
         estimatedTime: '30 seconds',
         user: {
+          id: decoded.id || decoded.sub,
           email: decoded.email
         }
+      });
+      
+      // Start the scanning process asynchronously
+      (async () => {
+        console.log(`Fetching up to 100 emails for scan ${scanId}...`);
+        try {
+          // Find or create user in the database
+          const userLookupResponse = await fetch(
+            `${supabaseUrl}/rest/v1/users?select=id,email,google_id&or=(email.eq.${encodeURIComponent(decoded.email)},google_id.eq.${encodeURIComponent(decoded.id || decoded.sub)})`, 
+            {
+              method: 'GET',
+              headers: {
+                'apikey': supabaseKey,
+                'Authorization': `Bearer ${supabaseKey}`,
+                'Content-Type': 'application/json'
+              }
+            }
+          );
+          
+          if (!userLookupResponse.ok) {
+            console.error(`User lookup failed: ${await userLookupResponse.text()}`);
+            return;
+          }
+          
+          const users = await userLookupResponse.json();
+          
+          // Create a new user if not found
+          let dbUserId;
+          if (!users || users.length === 0) {
+            console.log(`User not found in database, creating new user for: ${decoded.email}`);
+            
+            const createUserResponse = await fetch(
+              `${supabaseUrl}/rest/v1/users`, 
+              {
+                method: 'POST',
+                headers: {
+                  'apikey': supabaseKey,
+                  'Authorization': `Bearer ${supabaseKey}`,
+                  'Content-Type': 'application/json',
+                  'Prefer': 'return=representation'
+                },
+                body: JSON.stringify({
+                  email: decoded.email,
+                  google_id: decoded.id || decoded.sub,
+                  name: decoded.name || decoded.email.split('@')[0],
+                  avatar_url: decoded.picture || null,
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString()
+                })
+              }
+            );
+            
+            if (!createUserResponse.ok) {
+              console.error(`Failed to create user: ${await createUserResponse.text()}`);
+              return;
+            }
+            
+            const newUser = await createUserResponse.json();
+            dbUserId = newUser[0].id;
+            console.log(`Created new user with ID: ${dbUserId}`);
+          } else {
+            dbUserId = users[0].id;
+            console.log(`Found existing user with ID: ${dbUserId}`);
+          }
+
+          try {
+            // Fetch emails from Gmail
+            const emails = await fetchEmailsFromGmail(gmailToken);
+            console.log(`Processing ${emails.length} emails for scan ${scanId}`);
+            
+            // Process only the most recent 10 emails to avoid overloading
+            const recentEmails = emails.slice(0, 10);
+            const detectedSubscriptions = [];
+            
+            // Process each email
+            for (const message of recentEmails) {
+              try {
+                console.log(`Processing email ${message.id}`);
+                
+                // Get full message content
+                const emailData = await fetchEmailContent(gmailToken, message.id);
+                if (!emailData) {
+                  console.log(`Failed to fetch email ${message.id}, skipping`);
+                  continue;
+                }
+                
+                // Extract headers for logging
+                const headers = emailData.payload.headers || [];
+                const subject = headers.find(h => h.name === 'Subject')?.value || 'No Subject';
+                console.log(`Analyzing email: "${subject}"`);
+                
+                // Analyze with Gemini AI
+                const analysis = await analyzeEmailWithGemini(emailData);
+                
+                // If this is a subscription with good confidence, save it
+                if (analysis.isSubscription && analysis.confidence > 0.6) {
+                  console.log(`Detected subscription: ${analysis.serviceName || 'Unknown'} (${analysis.confidence.toFixed(2)} confidence)`);
+                  detectedSubscriptions.push(analysis);
+                  
+                  try {
+                    await saveSubscription(dbUserId, analysis);
+                  } catch (saveError) {
+                    console.error(`Error saving subscription: ${saveError.message}`);
+                  }
+                } else {
+                  console.log(`Not a subscription (${analysis.confidence.toFixed(2)} confidence)`);
+                }
+              } catch (emailError) {
+                console.error(`Error processing email ${message.id}:`, emailError);
+              }
+            }
+            
+            console.log(`Scan ${scanId} complete. Detected ${detectedSubscriptions.length} subscriptions.`);
+            
+            // Update scan status in the database 
+            try {
+              await fetch(
+                `${supabaseUrl}/rest/v1/scan_history`, 
+                {
+                  method: 'POST',
+                  headers: {
+                    'apikey': supabaseKey,
+                    'Authorization': `Bearer ${supabaseKey}`,
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({
+                    scan_id: scanId,
+                    user_id: dbUserId,
+                    status: 'completed',
+                    emails_scanned: recentEmails.length,
+                    subscriptions_found: detectedSubscriptions.length,
+                    completed_at: new Date().toISOString(),
+                    created_at: new Date().toISOString()
+                  })
+                }
+              );
+            } catch (statusError) {
+              console.error(`Error updating scan status: ${statusError.message}`);
+            }
+          } catch (gmailError) {
+            console.error(`Error accessing Gmail for scan ${scanId}:`, gmailError);
+          }
+        } catch (dbError) {
+          console.error('Database operation error:', dbError);
+        }
+      })().catch(error => {
+        console.error(`Unhandled error in scan ${scanId}:`, error);
       });
     } catch (tokenError) {
       console.error('Token verification error:', tokenError);
@@ -335,9 +636,10 @@ export default async function handler(req, res) {
     }
   } catch (error) {
     console.error('Email scan error:', error);
-    return res.status(500).json({ 
+    return res.status(500).json({
       error: 'server_error',
-      message: 'An error occurred processing your request'
+      message: 'An error occurred processing your request',
+      details: error.message
     });
   }
 } 
