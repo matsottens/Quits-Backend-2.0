@@ -197,6 +197,9 @@ export default async function handler(req, res) {
       });
     }
 
+    // Generate a random nonce for CSP
+    const nonce = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+    
     console.log('Generating HTML response with token');
     // Generate HTML page with token in localStorage and auto-redirect
     const htmlResponse = `
@@ -219,7 +222,7 @@ export default async function handler(req, res) {
         <p>Redirecting to dashboard...</p>
         <div id="debugInfo"></div>
         
-        <script>
+        <script nonce="${nonce}">
           // Helper to show debug information
           function debug(message) {
             console.log("[Auth Debug] " + message);
@@ -324,8 +327,8 @@ export default async function handler(req, res) {
 
     // Set content type to HTML and send the response
     res.setHeader('Content-Type', 'text/html');
-    // Allow inline scripts with unsafe-inline
-    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'");
+    // Allow scripts with the nonce
+    res.setHeader('Content-Security-Policy', `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://www.quits.cc https://api.quits.cc`);
     console.log('Sending HTML response with token');
     return res.send(htmlResponse);
 
