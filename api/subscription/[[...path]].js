@@ -12,6 +12,11 @@ console.log(`[PATH] Supabase key defined: ${!!supabaseKey}`);
 console.log(`[PATH] Supabase URL: ${supabaseUrl}`);
 console.log(`[PATH] Supabase key role: ${supabaseKey ? (supabaseKey.includes('role":"service_role') ? 'service_role' : 'anon') : 'undefined'}`);
 
+// Helper function to check if Gemini AI scanning is available
+const isGeminiScanningAvailable = () => {
+  return !!process.env.GEMINI_API_KEY;
+};
+
 export default async function handler(req, res) {
   // Set CORS headers for all response types
   res.setHeader('Access-Control-Allow-Origin', 'https://www.quits.cc');
@@ -232,6 +237,28 @@ export default async function handler(req, res) {
             console.log(`[PATH] Fetching all subscriptions for user ${dbUserId}`);
             
             try {
+              // Check for scan request parameter
+              const shouldScan = req.query.scan === 'true';
+              const gmailToken = decoded.gmail_token;
+              
+              // If scan is requested and we have a Gmail token, initiate a background scan
+              if (shouldScan && gmailToken && isGeminiScanningAvailable()) {
+                console.log('[PATH] Initiating background email scan for subscriptions');
+                
+                // Call the scan-subscriptions endpoint in the background
+                fetch(`${process.env.API_BASE_URL || 'https://api.quits.cc'}/scan-subscriptions`, {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({ background: true })
+                }).catch(error => {
+                  console.error('[PATH] Error initiating background scan:', error);
+                });
+              }
+              
+              // Fetch manual and auto-detected subscriptions
               const response = await fetch(
                 `${supabaseUrl}/rest/v1/subscriptions?user_id=eq.${dbUserId}&select=*`, 
                 {
@@ -252,9 +279,49 @@ export default async function handler(req, res) {
               const subscriptions = await response.json();
               console.log(`[PATH] Found ${subscriptions.length} subscriptions for user ${dbUserId}`);
               
-              // For now, if no subscriptions are found, return mock data to prevent empty state
+              // If no subscriptions are found, return suggestion to scan emails
               if (!subscriptions || subscriptions.length === 0) {
-                console.log('[PATH] No subscriptions found, returning mock data');
+                console.log('[PATH] No subscriptions found');
+                
+                // Check if we can offer email scanning
+                if (isGeminiScanningAvailable() && gmailToken) {
+                  console.log('[PATH] Suggesting email scanning with Gemini AI');
+                  return res.status(200).json({
+                    success: true,
+                    subscriptions: [
+                      {
+                        id: 'mock_sub_123',
+                        name: 'Netflix (Suggested)',
+                        price: 15.99,
+                        billingCycle: 'monthly',
+                        nextBillingDate: '2023-05-15',
+                        category: 'entertainment',
+                        is_manual: true
+                      },
+                      {
+                        id: 'mock_sub_124',
+                        name: 'Spotify (Suggested)',
+                        price: 9.99,
+                        billingCycle: 'monthly',
+                        nextBillingDate: '2023-05-10',
+                        category: 'music',
+                        is_manual: true
+                      }
+                    ],
+                    meta: {
+                      total: 2,
+                      totalMonthly: 25.98,
+                      totalYearly: 0,
+                      totalAnnualized: 311.76,
+                      mock_data: true,
+                      source: 'path_handler',
+                      can_scan_emails: true,
+                      db_user_id: dbUserId
+                    }
+                  });
+                }
+                
+                // If no scanning available, just return mock data
                 return res.status(200).json({
                   success: true,
                   subscriptions: [
@@ -284,6 +351,7 @@ export default async function handler(req, res) {
                     totalAnnualized: 311.76,
                     mock_data: true,
                     source: 'path_handler',
+                    can_scan_emails: false,
                     db_user_id: dbUserId
                   }
                 });
@@ -309,6 +377,8 @@ export default async function handler(req, res) {
                 nextBillingDate: sub.next_billing_date,
                 category: sub.category || 'other',
                 is_manual: sub.is_manual || false,
+                is_detected: sub.source === 'email_scan',
+                confidence: sub.confidence,
                 createdAt: sub.created_at,
                 updatedAt: sub.updated_at
               }));
@@ -323,7 +393,10 @@ export default async function handler(req, res) {
                   totalAnnualized: annualizedCost,
                   currency: 'USD',
                   source: 'path_handler',
-                  db_user_id: dbUserId
+                  db_user_id: dbUserId,
+                  can_scan_emails: !!(isGeminiScanningAvailable() && gmailToken),
+                  auto_detected_count: subscriptions.filter(sub => sub.source === 'email_scan').length,
+                  manual_count: subscriptions.filter(sub => !sub.source || sub.source !== 'email_scan').length
                 }
               });
             } catch (error) {
