@@ -331,7 +331,17 @@ const analyzeEmailForSubscriptions = (email) => {
     'renew', 'renewal', 'renewed', 'recurring', 'monthly', 'yearly', 'annual',
     'premium', 'account', 'activated', 'welcome', 'trial', 'free trial',
     'thank you for your purchase', 'successfully subscribed', 'your purchase',
-    'has been processed', 'payment confirmation', 'payment successful'
+    'has been processed', 'payment confirmation', 'payment successful',
+    // Add more subscription terms
+    'automatically renew', 'auto-renew', 'periodic billing', 'service fee',
+    'membership fee', 'subscription fee', 'continue your access', 'continue access',
+    'access expires', 'access will expire', 'your plan', 'active subscription',
+    'cancel anytime', 'cancel your subscription', 'your subscription',
+    'subscription details', 'manage subscription', 'upgrade plan', 'downgrade plan',
+    'billed', 'amount due', 'next payment', 'upcoming payment', 'pay monthly',
+    'pay annually', 'monthly plan', 'annual plan', 'billing cycle',
+    'your account has been charged', 'credit card was charged',
+    'order confirmation', 'trial period', 'trial ends', 'extended trial'
   ];
   
   // Common service names to look for (these will be matched case-insensitive)
@@ -342,7 +352,33 @@ const analyzeEmailForSubscriptions = (email) => {
     'Dropbox', 'OneDrive', 'LinkedIn Premium', 'GitHub Pro', 'Slack', 'Zoom',
     'Canva', 'Notion', 'Evernote', 'LastPass', '1Password', 'ExpressVPN', 'NordVPN',
     'Audible', 'Kindle Unlimited', 'Medium', 'Substack', 'Patreon', 'Twitch',
-    'Crunchyroll', 'Funimation', 'Vimeo', 'Facebook', 'Twitter', 'Instagram'
+    'Crunchyroll', 'Funimation', 'Vimeo', 'Facebook', 'Twitter', 'Instagram',
+    // Add more services
+    'Disney Plus', 'HBO', 'Apple TV+', 'Apple TV Plus', 'Paramount+', 'Paramount Plus',
+    'Peacock', 'Discovery+', 'Discovery Plus', 'ESPN+', 'ESPN Plus', 'Starz', 'Showtime',
+    'BritBox', 'AMC+', 'AMC Plus', 'Sling TV', 'YouTubeTV', 'YouTube TV', 'Philo',
+    'fuboTV', 'Tidal', 'Pandora', 'Deezer', 'SoundCloud', 'Apple Arcade',
+    'Google Play Pass', 'EA Play', 'Ubisoft+', 'Ubisoft Plus', 'Nintendo Switch Online',
+    'Microsoft Game Pass', 'PlayStation Now', 'GeForce Now', 'Stadia', 'Luna',
+    'Photoshop', 'Lightroom', 'InDesign', 'Premiere Pro', 'Final Cut Pro', 'Logic Pro',
+    'AutoCAD', 'Sketch', 'Figma Pro', 'Adobe XD', 'Affinity', 'QuickBooks', 'Xero',
+    'FreshBooks', 'Wave', 'Mailchimp', 'Constant Contact', 'ConvertKit', 'ActiveCampaign',
+    'HubSpot', 'Salesforce', 'Pipedrive', 'Zendesk', 'Freshdesk', 'Intercom',
+    'Squarespace', 'Wix', 'Weebly', 'WordPress.com', 'Shopify', 'BigCommerce', 'WooCommerce',
+    'Magento', 'eBay', 'Etsy', 'Grammarly', 'ProWritingAid', 'Duolingo', 'Babbel',
+    'Rosetta Stone', 'Skillshare', 'MasterClass', 'Coursera', 'Udemy', 'Brilliant',
+    'Headspace', 'Calm', 'Peloton', 'BeachBody', 'ClassPass', 'Planet Fitness',
+    'LA Fitness', 'New York Times', 'Wall Street Journal', 'Washington Post',
+    'Financial Times', 'Harvard Business Review', 'The Economist', 'The Guardian',
+    'The Telegraph', 'The Athletic', 'The Information', 'Barron\'s', 'Bloomberg',
+    'Reuters', 'The New Yorker', 'The Atlantic', 'Netflix Account', 'Amazon Subscription',
+    'Hulu Account', 'Prime Video', 'Prime Membership', 'ProtonMail', 'ProtonVPN',
+    'Surfshark', 'CyberGhost', 'IPVanish', 'Private Internet Access', 'TunnelBear',
+    'McAfee', 'Norton', 'Bitdefender', 'Kaspersky', 'ESET', 'Avast', 'AVG',
+    'TrueBill', 'Mint', 'YNAB', 'Personal Capital', 'Credit Karma', 'Bluehost',
+    'GoDaddy', 'HostGator', 'Namecheap', 'SiteGround', 'DreamHost', 'Cloudflare',
+    'DigitalOcean', 'Linode', 'AWS', 'Google Cloud', 'Azure', 'Trello', 'Asana',
+    'Monday.com', 'ClickUp', 'Todoist', 'Airtable', 'Adobe Acrobat'
   ];
   
   // Combine lowercase service names for checking
@@ -394,8 +430,8 @@ const analyzeEmailForSubscriptions = (email) => {
     }
   }
 
-  // If we have at least 2 matches, it's potentially a subscription
-  const isSubscription = matchCount >= 2 || (serviceName && matchCount >= 1);
+  // If we have at least 1 match, it's potentially a subscription
+  const isSubscription = matchCount >= 1 || (serviceName && matchCount >= 1);
   
   // Boost confidence if service name was detected
   if (serviceName) {
@@ -861,15 +897,26 @@ export default async function handler(req, res) {
                 const subject = headers.find(h => h.name === 'Subject')?.value || 'No Subject';
                 console.log(`Analyzing email: "${subject}"`);
                 
+                // Add debug info about email content
+                console.log(`Email from: "${headers.find(h => h.name === 'From')?.value || 'Unknown'}""`);
+                const bodyPreview = extractEmailBody(emailData).slice(0, 200) + "...";
+                console.log(`Email preview: "${bodyPreview}"`);
+                
                 // Analyze with Gemini AI
                 let analysis = await analyzeEmailWithGemini(emailData);
                 
+                // Log detailed analysis results
+                console.log('Gemini analysis result:', JSON.stringify(analysis));
+                
                 // If not detected by Gemini or confidence is low, try pattern matching
-                if (!analysis.isSubscription || analysis.confidence < 0.3) {
+                if (!analysis.isSubscription || analysis.confidence < 0.15) {
                   console.log(`Gemini analysis: Not a subscription (${analysis.confidence?.toFixed(2) || 0} confidence), trying pattern matching...`);
                   
                   // Try our own pattern matching
                   const backupAnalysis = analyzeEmailForSubscriptions(emailData);
+                  
+                  // Log detailed backup analysis
+                  console.log('Pattern matching result:', JSON.stringify(backupAnalysis));
                   
                   // Use pattern match result only if it detects a subscription with better confidence
                   if (backupAnalysis.isSubscription && 
@@ -879,8 +926,15 @@ export default async function handler(req, res) {
                   }
                 }
                 
+                // Add more information about why it's not detected
+                if (!analysis.isSubscription) {
+                  console.log(`Email rejected: Not identified as a subscription (confidence: ${analysis.confidence.toFixed(2)})`);
+                } else if (analysis.confidence <= 0.15) {
+                  console.log(`Email rejected: Confidence too low (${analysis.confidence.toFixed(2)} < 0.15)`);
+                }
+                
                 // If this is a subscription with good confidence, save it
-                if (analysis.isSubscription && analysis.confidence > 0.3) {
+                if (analysis.isSubscription && analysis.confidence > 0.15) {
                   console.log(`Detected subscription: ${analysis.serviceName || 'Unknown'} (${analysis.confidence.toFixed(2)} confidence)`);
                   detectedSubscriptions.push(analysis);
                   
