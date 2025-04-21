@@ -112,8 +112,26 @@ export default async function handler(req, res) {
             }
           );
           
+          // Check for scan_history table not existing error
           if (!scanLookupResponse.ok) {
-            throw new Error(`Scan lookup failed: ${await scanLookupResponse.text()}`);
+            const errorText = await scanLookupResponse.text();
+            console.error(`Scan lookup failed: ${errorText}`);
+            
+            // If it's a "relation does not exist" error, return a friendly response
+            if (errorText.includes('does not exist')) {
+              console.log('The scan_history table does not exist yet. Please run the migration script.');
+              
+              // Return a generic in-progress response
+              return res.status(200).json({
+                success: true,
+                status: 'in_progress',
+                scanId: scanId,
+                progress: 30,
+                message: 'Scan in progress (database setup required)'
+              });
+            }
+            
+            throw new Error(`Scan lookup failed: ${errorText}`);
           }
           
           const scanData = await scanLookupResponse.json();

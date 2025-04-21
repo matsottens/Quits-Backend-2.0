@@ -39,12 +39,14 @@ const fetchEmailsFromGmail = async (gmailToken, maxResults = 100) => {
     
     // Use a broader query to find more potential subscription emails
     // Include both from: and subject: searches for broader matching
-    const query = 'from:(billing OR receipt OR subscription OR payment OR invoice OR confirm OR welcome OR account OR membership) OR subject:(subscription OR payment OR invoice OR confirm OR receipt OR welcome OR billing OR membership OR monthly OR thank you)';
-    console.log('Using Gmail search query:', query);
+    const query = ''; // Empty query to get all emails for testing
+    console.log('Using Gmail search query:', query || '(empty query - will return all emails)');
     
     // Call Gmail API to get a list of recent emails
-    const response = await fetch(
-      `https://www.googleapis.com/gmail/v1/users/me/messages?maxResults=${maxResults}&q=${encodeURIComponent(query)}`,
+    const apiUrl = `https://www.googleapis.com/gmail/v1/users/me/messages?maxResults=${maxResults}${query ? '&q=' + encodeURIComponent(query) : ''}`;
+    console.log('Gmail API URL:', apiUrl);
+    
+    const response = await fetch(apiUrl,
       {
         method: 'GET',
         headers: {
@@ -61,10 +63,12 @@ const fetchEmailsFromGmail = async (gmailToken, maxResults = 100) => {
     }
 
     const data = await response.json();
-    console.log(`Found ${data.messages?.length || 0} emails matching subscription criteria`);
+    console.log('Gmail API response structure:', Object.keys(data));
+    console.log(`Found ${data.messages?.length || 0} emails matching criteria`);
+    console.log('Sample message IDs:', data.messages?.slice(0, 3).map(m => m.id).join(', ') || 'none');
     
     if (!data.messages || data.messages.length === 0) {
-      console.log('No emails found that match the criteria');
+      console.log('No emails found in the Gmail account');
       return [];
     }
     
@@ -78,8 +82,10 @@ const fetchEmailsFromGmail = async (gmailToken, maxResults = 100) => {
 // Function to fetch the content of a specific email
 const fetchEmailContent = async (gmailToken, messageId) => {
   try {
-    const response = await fetch(
-      `https://www.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=full`,
+    console.log(`Fetching content for email ${messageId}`);
+    const apiUrl = `https://www.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=full`;
+    
+    const response = await fetch(apiUrl,
       {
         method: 'GET',
         headers: {
@@ -90,10 +96,18 @@ const fetchEmailContent = async (gmailToken, messageId) => {
     );
 
     if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`Gmail API error ${response.status} fetching email content: ${errorText}`);
       throw new Error(`Gmail API error: ${response.status} ${response.statusText}`);
     }
 
-    return await response.json();
+    const data = await response.json();
+    console.log(`Email ${messageId} fetched successfully, structure:`, 
+      data.payload ? 
+        `MIME type: ${data.payload.mimeType}, parts: ${data.payload.parts?.length || 0}` : 
+        'No payload');
+        
+    return data;
   } catch (error) {
     console.error(`Error fetching email content for ${messageId}:`, error);
     return null;
