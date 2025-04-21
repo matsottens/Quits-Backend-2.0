@@ -1,56 +1,41 @@
-// Debug Environment Variables endpoint
-import { setCorsHeaders } from './utils.js';
-
-export default async function handler(req, res) {
+// Debug endpoint to display environment variables for troubleshooting
+export default function handler(req, res) {
   // Set CORS headers
-  setCorsHeaders(req, res);
-  
-  // Add no-cache headers
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-  res.setHeader('Pragma', 'no-cache');
-  res.setHeader('Expires', '0');
-  
-  // Check for OPTIONS preflight request
+  res.setHeader('Access-Control-Allow-Origin', 'https://www.quits.cc');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  // Handle preflight request
   if (req.method === 'OPTIONS') {
-    return res.status(204).end();
+    res.status(204).end();
+    return;
   }
-  
-  // Prepare environment information without exposing actual secrets
-  const envInfo = {
-    // Google OAuth config
-    GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID ? 
-      `${process.env.GOOGLE_CLIENT_ID.substring(0, 8)}...${process.env.GOOGLE_CLIENT_ID.substring(process.env.GOOGLE_CLIENT_ID.length - 5)}` : 
-      'Not set',
-    GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET ? 
-      `${process.env.GOOGLE_CLIENT_SECRET.substring(0, 5)}...` : 
-      'Not set',
-    JWT_SECRET: process.env.JWT_SECRET ? 
-      `Present (${process.env.JWT_SECRET.length} chars)` : 
-      'Not set',
-    
-    // Environment settings
-    NODE_ENV: process.env.NODE_ENV || 'Not set',
-    VERCEL_ENV: process.env.VERCEL_ENV || 'Not set',
-    CLIENT_URL: process.env.CLIENT_URL || 'Not set',
-    CORS_ORIGIN: process.env.CORS_ORIGIN || 'Not set',
-    
-    // Runtime info
-    serverTime: new Date().toISOString(),
-    platform: process.platform,
-    nodeVersion: process.version,
-    memoryUsage: process.memoryUsage(),
-  };
-  
-  // Return the environment information
-  return res.status(200).json({
-    message: 'Debug environment information',
-    environment: envInfo,
-    requestHeaders: {
-      accept: req.headers.accept,
-      'user-agent': req.headers['user-agent'],
-      origin: req.headers.origin,
-      host: req.headers.host,
-      referer: req.headers.referer,
-    },
-  });
+
+  // Only allow GET requests
+  if (req.method !== 'GET') {
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
+  }
+
+  try {
+    // Get environment variables but mask sensitive values
+    const safeEnv = {
+      NODE_ENV: process.env.NODE_ENV || 'not set',
+      VERCEL_ENV: process.env.VERCEL_ENV || 'not set',
+      GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID ? 'set' : 'not set',
+      GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET ? 'set' : 'not set',
+      JWT_SECRET: process.env.JWT_SECRET ? 'set' : 'not set',
+      REDIRECT_URI: process.env.REDIRECT_URI || 'not set',
+      NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'not set',
+    };
+
+    res.status(200).json({
+      message: 'Debug environment information',
+      environment: safeEnv,
+      serverTime: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('Error in debug-env endpoint:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
 } 

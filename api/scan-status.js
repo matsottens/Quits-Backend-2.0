@@ -2,6 +2,17 @@
 import jsonwebtoken from 'jsonwebtoken';
 const { verify } = jsonwebtoken;
 
+// Helper function to extract Gmail token from JWT
+const extractGmailToken = (token) => {
+  try {
+    const payload = jsonwebtoken.decode(token);
+    return payload.gmail_token || null;
+  } catch (error) {
+    console.error('Error extracting Gmail token:', error);
+    return null;
+  }
+};
+
 export default async function handler(req, res) {
   // Set CORS headers for all response types
   res.setHeader('Access-Control-Allow-Origin', 'https://www.quits.cc');
@@ -43,19 +54,73 @@ export default async function handler(req, res) {
     // Verify the token
     try {
       const jwtSecret = process.env.JWT_SECRET || 'dev_secret_DO_NOT_USE_IN_PRODUCTION';
-      if (!jwtSecret) {
-        throw new Error('JWT_SECRET environment variable is not set');
-      }
-      
       const decoded = verify(token, jwtSecret);
       
-      // Simulate scan status based on random status
-      // In a real implementation, you would fetch the actual status from a database
-      const statuses = ['pending', 'in_progress', 'completed'];
-      const randomStatus = statuses[Math.floor(Math.random() * statuses.length)];
+      // Check if the scan exists in our global cache
+      if (global.scanStatus && global.scanStatus[scanId]) {
+        const scanStatus = global.scanStatus[scanId];
+        
+        // Verify the scan belongs to this user
+        if (scanStatus.userId !== decoded.id) {
+          return res.status(403).json({ error: 'Forbidden', message: 'You do not have access to this scan' });
+        }
+        
+        // Return the appropriate response based on scan status
+        if (scanStatus.status === 'in_progress') {
+          return res.status(200).json({
+            success: true,
+            status: 'in_progress',
+            scanId: scanId,
+            progress: scanStatus.progress || 0,
+            message: 'Scan in progress'
+          });
+        } else if (scanStatus.status === 'completed') {
+          return res.status(200).json({
+            success: true,
+            status: 'completed',
+            scanId: scanId,
+            progress: 100,
+            results: scanStatus.results || { totalEmailsScanned: 0, subscriptionsFound: [] }
+          });
+        } else if (scanStatus.status === 'error') {
+          return res.status(200).json({
+            success: false,
+            status: 'error',
+            scanId: scanId,
+            error: scanStatus.error || 'Unknown error',
+            message: 'Scan encountered an error'
+          });
+        }
+      }
       
-      // If status is completed, return mock data
-      if (randomStatus === 'completed') {
+      // If we get here, the scan either doesn't exist or we don't have its status
+      // For demo purposes, we'll generate a mock response based on the scan ID
+      // In a real implementation, you would query a database
+      
+      // Use the scanId to simulate different states for demo purposes
+      const idSum = scanId.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0);
+      
+      if (idSum % 3 === 0) {
+        // Pending status
+        return res.status(200).json({
+          success: true,
+          status: 'pending',
+          scanId: scanId,
+          progress: 0,
+          message: 'Scan is queued and will start soon'
+        });
+      } else if (idSum % 3 === 1) {
+        // In progress
+        const progress = Math.floor(Math.random() * 90) + 10; // Random progress between 10-99%
+        return res.status(200).json({
+          success: true,
+          status: 'in_progress',
+          scanId: scanId,
+          progress: progress,
+          message: 'Scan in progress'
+        });
+      } else {
+        // Completed with mock data
         return res.status(200).json({
           success: true,
           status: 'completed',
@@ -66,55 +131,39 @@ export default async function handler(req, res) {
             subscriptionsFound: [
               {
                 id: 'rec_123',
-                name: 'Netflix',
-                email: 'info@netflix.com',
+                service_name: 'Netflix',
+                email_from: 'info@netflix.com',
+                email_subject: 'Your Netflix Subscription',
+                email_date: new Date().toISOString(),
                 price: 15.99,
                 currency: 'USD',
-                billingCycle: 'monthly',
+                billing_cycle: 'monthly',
                 confidence: 0.95
               },
               {
                 id: 'rec_124',
-                name: 'Spotify',
-                email: 'no-reply@spotify.com',
+                service_name: 'Spotify',
+                email_from: 'no-reply@spotify.com',
+                email_subject: 'Your Spotify Premium Receipt',
+                email_date: new Date().toISOString(),
                 price: 9.99,
                 currency: 'USD',
-                billingCycle: 'monthly',
+                billing_cycle: 'monthly',
                 confidence: 0.92
               },
               {
                 id: 'rec_125',
-                name: 'Amazon Prime',
-                email: 'auto-confirm@amazon.com',
+                service_name: 'Amazon Prime',
+                email_from: 'auto-confirm@amazon.com',
+                email_subject: 'Your Amazon Prime Membership Receipt',
+                email_date: new Date().toISOString(),
                 price: 119,
                 currency: 'USD',
-                billingCycle: 'yearly',
+                billing_cycle: 'yearly',
                 confidence: 0.89
               }
-            ],
-            meta: {
-              scanDuration: '45 seconds',
-              emailsWithSubscriptions: 37
-            }
+            ]
           }
-        });
-      } else if (randomStatus === 'in_progress') {
-        // Return progress status
-        return res.status(200).json({
-          success: true,
-          status: 'in_progress',
-          scanId: scanId,
-          progress: Math.floor(Math.random() * 90) + 10, // Random progress between 10-99%
-          message: 'Scan in progress'
-        });
-      } else {
-        // Return pending status
-        return res.status(200).json({
-          success: true,
-          status: 'pending',
-          scanId: scanId,
-          progress: 0,
-          message: 'Scan is queued and will start soon'
         });
       }
     } catch (tokenError) {

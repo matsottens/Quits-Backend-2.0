@@ -178,17 +178,17 @@ export default async function handler(req, res) {
           const jwt = await import('jsonwebtoken');
           console.log('Generating JWT token');
           
-          const jwtPayload = { 
-            id: userInfo.id,
-            email: userInfo.email,
-            gmail_token: tokens.access_token,
-            createdAt: new Date().toISOString()
-          };
-          
           const token = jwt.default.sign(
-            jwtPayload,
-            jwtSecret,
-            { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+            {
+              id: `${Math.random().toString(36).substring(2, 10)}`,
+              email: userInfo.email,
+              name: userInfo.name,
+              picture: userInfo.picture,
+              gmail_token: tokens.access_token,
+              iat: Math.floor(Date.now() / 1000),
+              exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30 // 30 days
+            },
+            jwtSecret
           );
           
           console.log('JWT token generated successfully, length:', token.length);
