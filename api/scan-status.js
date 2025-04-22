@@ -200,7 +200,7 @@ export default async function handler(req, res) {
                 success: true,
                 status: scan.status || 'in_progress',
                 scanId: scanId,
-                progress: scan.progress || 50,
+                progress: scan.progress || 30,
                 message: 'Scan in progress',
                 stats: {
                   emails_found: scan.emails_found || 0,
@@ -313,7 +313,13 @@ export default async function handler(req, res) {
         status: 'in_progress',
         scanId: scanId,
         progress: 30,
-        message: 'Scan in progress'
+        message: 'Scan in progress',
+        stats: {
+          emails_found: 0,
+          emails_to_process: 0,
+          emails_processed: 0,
+          subscriptions_found: 0
+        }
       });
     } catch (tokenError) {
       console.error('Token verification error:', tokenError);
