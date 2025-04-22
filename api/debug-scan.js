@@ -12,7 +12,49 @@ const addTestSubscription = async (dbUserId) => {
   try {
     console.log(`DEBUG-SCAN: Adding test subscription for user ${dbUserId}`);
     
+    // Get the structure of the subscriptions table first
+    try {
+      console.log(`DEBUG-SCAN: Checking subscriptions table structure`);
+      const structureResponse = await fetch(
+        `${supabaseUrl}/rest/v1/subscriptions?limit=1`, 
+        {
+          method: 'GET',
+          headers: {
+            'apikey': supabaseKey,
+            'Authorization': `Bearer ${supabaseKey}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+      
+      if (structureResponse.ok) {
+        console.log(`DEBUG-SCAN: Subscription table exists and is accessible`);
+      } else {
+        console.error(`DEBUG-SCAN: Error checking subscriptions table: ${await structureResponse.text()}`);
+      }
+    } catch (structureError) {
+      console.error(`DEBUG-SCAN: Error checking table structure: ${structureError.message}`);
+    }
+    
     // Create a subscription in the database
+    const subscriptionData = {
+      user_id: dbUserId,
+      name: "Debug Subscription (Manually Created)",
+      price: 9.99,
+      currency: "USD",
+      billing_cycle: "monthly",
+      next_billing_date: new Date(new Date().setMonth(new Date().getMonth() + 1)).toISOString(),
+      provider: "Debug Provider",
+      category: "Debug",
+      is_manual: true,
+      notes: "Created by debug endpoint",
+      source: "debug_endpoint",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    
+    console.log(`DEBUG-SCAN: Attempting to create subscription with fields: ${Object.keys(subscriptionData).join(', ')}`);
+    
     const response = await fetch(
       `${supabaseUrl}/rest/v1/subscriptions`, 
       {
@@ -23,24 +65,51 @@ const addTestSubscription = async (dbUserId) => {
           'Content-Type': 'application/json',
           'Prefer': 'return=representation'
         },
-        body: JSON.stringify({
-          user_id: dbUserId,
-          name: "Debug Subscription (Manually Created)",
-          price: 9.99,
-          currency: "USD",
-          billing_cycle: "monthly",
-          next_billing_date: new Date(new Date().setMonth(new Date().getMonth() + 1)).toISOString(),
-          confidence: 0.95,
-          source: "debug_endpoint",
-          active: true,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        })
+        body: JSON.stringify(subscriptionData)
       }
     );
     
     if (!response.ok) {
-      throw new Error(`Failed to create subscription: ${await response.text()}`);
+      const errorText = await response.text();
+      console.error(`DEBUG-SCAN: Failed to create subscription with error: ${errorText}`);
+      
+      // Try a minimalist approach with only required fields if first attempt fails
+      if (errorText.includes("could not find") || errorText.includes("column") || errorText.includes("does not exist")) {
+        console.log(`DEBUG-SCAN: Trying again with only essential fields`);
+        
+        const minimalData = {
+          user_id: dbUserId,
+          name: "Debug Subscription (Essential Fields)",
+          price: 9.99,
+          billing_cycle: "monthly",
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+        
+        const retryResponse = await fetch(
+          `${supabaseUrl}/rest/v1/subscriptions`, 
+          {
+            method: 'POST',
+            headers: {
+              'apikey': supabaseKey,
+              'Authorization': `Bearer ${supabaseKey}`,
+              'Content-Type': 'application/json',
+              'Prefer': 'return=representation'
+            },
+            body: JSON.stringify(minimalData)
+          }
+        );
+        
+        if (!retryResponse.ok) {
+          throw new Error(`Second attempt also failed: ${await retryResponse.text()}`);
+        }
+        
+        const retrySubscription = await retryResponse.json();
+        console.log(`DEBUG-SCAN: Successfully added minimal subscription with ID: ${retrySubscription[0]?.id}`);
+        return true;
+      }
+      
+      throw new Error(`Failed to create subscription: ${errorText}`);
     }
     
     const subscription = await response.json();

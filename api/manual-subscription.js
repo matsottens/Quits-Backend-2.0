@@ -130,8 +130,11 @@ export default async function handler(req, res) {
         currency: subscriptionData.currency || 'USD',
         billing_cycle: subscriptionData.billing_cycle || 'monthly',
         next_billing_date: subscriptionData.next_billing_date || new Date(new Date().setMonth(new Date().getMonth() + 1)).toISOString(),
+        provider: subscriptionData.provider || '',
+        category: subscriptionData.category || '',
+        is_manual: true,
+        notes: subscriptionData.notes || '',
         source: 'manual',
-        active: true,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
