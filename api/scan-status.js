@@ -336,23 +336,4 @@ export default async function handler(req, res) {
       details: error.message
     });
   }
-
-  // Add detailed logging for each response type
-  // For the in-progress response:
-  return res.status(200).json({
-    success: true,
-    status: scan.status || 'in_progress',
-    scanId: scanId,
-    progress: scan.progress || 30,
-    message: 'Scan in progress',
-    stats: {
-      emails_found: scan.emails_found || 0,
-      emails_to_process: scan.emails_to_process || 0,
-      emails_processed: scan.emails_processed || 0,
-      subscriptions_found: scan.subscriptions_found || 0
-    }
-  });
-  
-  // Add logging after sending response
-  console.log(`STATUS-DEBUG: Sent in_progress response for scan ${scanId} with progress ${scan.progress || 30}%`);
 } 
