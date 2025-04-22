@@ -747,6 +747,29 @@ export default async function handler(req, res) {
         console.log(`SCAN-DEBUG: Gmail token (first 10 chars): ${gmailToken.substring(0, 10)}`);
         
         try {
+          // Set up a ping interval to keep updating the status even if emails are slow to fetch
+          const startTime = Date.now();
+          let pingCount = 0;
+          
+          const pingInterval = setInterval(async () => {
+            pingCount++;
+            const elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
+            console.log(`SCAN-DEBUG: [PING #${pingCount}] Scan still in progress after ${elapsedSeconds} seconds`);
+            
+            try {
+              // Update scan progress to show we're still alive
+              const currentProgress = Math.min(85, 30 + pingCount * 5); // Incrementally increase progress
+              await updateScanStatus(scanId, dbUserId, {
+                progress: currentProgress
+              });
+              console.log(`SCAN-DEBUG: Updated progress to ${currentProgress}% as ping`);
+            } catch (pingError) {
+              console.error(`SCAN-DEBUG: Error updating ping progress: ${pingError.message}`);
+            }
+          }, 5000); // Ping every 5 seconds
+          
+          // Remember to clear the interval when done or on error
+          
           // Find or create user in the database
           const userLookupResponse = await fetch(
             `${supabaseUrl}/rest/v1/users?select=id,email,google_id&or=(email.eq.${encodeURIComponent(decoded.email)},google_id.eq.${encodeURIComponent(decoded.id || decoded.sub)})`, 
@@ -990,6 +1013,9 @@ export default async function handler(req, res) {
             
             console.log(`SCAN-DEBUG: ============== SCANNING PROCESS COMPLETED ==============`);
             
+            // Clear the ping interval
+            clearInterval(pingInterval);
+            
             // Update scan record with final status
             await fetch(
               `${supabaseUrl}/rest/v1/scan_history?scan_id=eq.${scanId}`, 
@@ -1011,6 +1037,9 @@ export default async function handler(req, res) {
             );
           } catch (gmailError) {
             console.error(`SCAN-DEBUG: Error accessing Gmail for scan ${scanId}:`, gmailError);
+            
+            // Clear the ping interval on error
+            clearInterval(pingInterval);
             
             // Update scan status to error
             try {
