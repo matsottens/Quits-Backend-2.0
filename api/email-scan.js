@@ -1,11 +1,18 @@
 // Email scan endpoint
 import jsonwebtoken from 'jsonwebtoken';
 import fetch from 'node-fetch';
+import cheerio from 'cheerio';
+import { createClient } from '@supabase/supabase-js';
+import jwt from 'jsonwebtoken';
+import { extractEmailBody, analyzeEmailForSubscriptions } from './email-utils.js';
 const { verify } = jsonwebtoken;
 
 // Supabase config
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY;
+
+// Export the helper functions for use in other modules
+export { extractEmailBody, analyzeEmailForSubscriptions };
 
 // Helper function to extract Gmail token from JWT
 const extractGmailToken = (token) => {
@@ -37,9 +44,18 @@ const fetchEmailsFromGmail = async (accessToken) => {
   console.log('SCAN-DEBUG: Starting Gmail fetch process with token (first 10 chars):', accessToken.substring(0, 10));
   
   try {
-    // Use empty query to get all emails (for testing)
-    const gmailApiUrl = `https://www.googleapis.com/gmail/v1/users/me/messages?maxResults=50&q=`;
-    console.log('SCAN-DEBUG: Fetching emails with URL:', gmailApiUrl);
+    // Create a search query that targets subscription-related emails
+    // Include terms for subscription, billing, payment, etc.
+    // Also include specific services we want to find
+    const searchQuery = 'subject:(subscription OR payment OR receipt OR invoice OR billing OR "thank you" OR confirmation OR renewal OR membership OR "order confirmation" OR "your plan" OR babbel OR vercel OR "nba league" OR "league pass") OR from:(billing OR receipt OR subscription OR payment OR account OR babbel OR vercel OR nba.com OR zeit OR basketball)';
+    
+    // Encode the query for URL use
+    const encodedQuery = encodeURIComponent(searchQuery);
+    
+    // Construct the Gmail API URL with the search query
+    const gmailApiUrl = `https://www.googleapis.com/gmail/v1/users/me/messages?maxResults=50&q=${encodedQuery}`;
+    console.log('SCAN-DEBUG: Fetching emails with search query:', searchQuery);
+    console.log('SCAN-DEBUG: Gmail API URL:', gmailApiUrl);
     
     const response = await fetch(gmailApiUrl, {
       headers: {
@@ -59,11 +75,34 @@ const fetchEmailsFromGmail = async (accessToken) => {
     console.log('SCAN-DEBUG: Gmail API response structure:', Object.keys(data).join(', '));
     
     if (!data.messages || data.messages.length === 0) {
-      console.log('SCAN-DEBUG: No messages found in Gmail account');
-      return [];
+      console.log('SCAN-DEBUG: No messages found matching the subscription search query');
+      
+      // If no messages found with the targeted query, try a broader query
+      console.log('SCAN-DEBUG: Trying with a simpler query to find any recent emails');
+      const fallbackUrl = `https://www.googleapis.com/gmail/v1/users/me/messages?maxResults=50`;
+      
+      const fallbackResponse = await fetch(fallbackUrl, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`
+        }
+      });
+      
+      if (!fallbackResponse.ok) {
+        throw new Error(`Fallback Gmail API error: ${fallbackResponse.status}`);
+      }
+      
+      const fallbackData = await fallbackResponse.json();
+      
+      if (!fallbackData.messages || fallbackData.messages.length === 0) {
+        console.log('SCAN-DEBUG: No messages found in Gmail account at all');
+        return [];
+      }
+      
+      console.log(`SCAN-DEBUG: Found ${fallbackData.messages.length} emails with fallback query`);
+      return fallbackData.messages;
     }
     
-    console.log(`SCAN-DEBUG: Found ${data.messages.length} emails in Gmail`);
+    console.log(`SCAN-DEBUG: Found ${data.messages.length} emails matching subscription search criteria`);
     // Log the first 5 message IDs for debugging
     const messagePreview = data.messages.slice(0, 5).map(m => m.id).join(', ');
     console.log(`SCAN-DEBUG: First 5 message IDs: ${messagePreview}`);
@@ -112,62 +151,6 @@ const fetchEmailContent = async (gmailToken, messageId) => {
     console.error(`SCAN-DEBUG: Exception fetching email content: ${error.message}`);
     return null;
   }
-};
-
-// Helper function to extract email body text
-const extractEmailBody = (email) => {
-  let body = '';
-  
-  // Check if there's a simple body
-  if (email.payload?.body?.data) {
-    // Decode base64 data
-    try {
-      body = Buffer.from(email.payload.body.data, 'base64').toString('utf-8');
-    } catch (err) {
-      console.error('Error decoding email body:', err);
-    }
-    return body;
-  }
-  
-  // Check for multipart message
-  if (email.payload?.parts) {
-    // First try to find plain text part
-    const textPart = email.payload.parts.find(part => part.mimeType === 'text/plain');
-    if (textPart?.body?.data) {
-      try {
-        return Buffer.from(textPart.body.data, 'base64').toString('utf-8');
-      } catch (err) {
-        console.error('Error decoding plain text part:', err);
-      }
-    }
-    
-    // If no plain text, try HTML
-    const htmlPart = email.payload.parts.find(part => part.mimeType === 'text/html');
-    if (htmlPart?.body?.data) {
-      try {
-        // Get HTML and do basic HTML-to-text conversion
-        const html = Buffer.from(htmlPart.body.data, 'base64').toString('utf-8');
-        // Remove HTML tags, but preserve line breaks
-        return html.replace(/<[^>]*>/g, ' ')
-                  .replace(/\s+/g, ' ')
-                  .trim();
-      } catch (err) {
-        console.error('Error decoding HTML part:', err);
-      }
-    }
-    
-    // Try to recursively extract from nested parts
-    for (const part of email.payload.parts) {
-      if (part.parts) {
-        const nestedBody = extractEmailBody({ payload: part });
-        if (nestedBody) {
-          return nestedBody;
-        }
-      }
-    }
-  }
-  
-  return body;
 };
 
 // Function to analyze email with Gemini AI
@@ -306,227 +289,10 @@ JSON Output:
     }
   } catch (error) {
     console.error('Error analyzing email with Gemini:', error);
+    // Fallback to pattern matching if Gemini API fails
+    console.log('Falling back to pattern matching for subscription detection');
     return analyzeEmailForSubscriptions(emailContent);
   }
-};
-
-// Function to analyze email for subscription data (fallback method)
-const analyzeEmailForSubscriptions = (email) => {
-  // Extract email body (prefer text over HTML)
-  const body = extractEmailBody(email);
-  if (!body) {
-    return { isSubscription: false, confidence: 0 };
-  }
-  
-  // Extract important metadata
-  const headers = email.payload?.headers || [];
-  const subject = headers.find(h => h.name === 'Subject')?.value || '';
-  const from = headers.find(h => h.name === 'From')?.value || '';
-  const date = headers.find(h => h.name === 'Date')?.value || '';
-  
-  // Key subscription-related terms
-  const subscriptionTerms = [
-    'subscription', 'subscribe', 'subscribed', 'plan', 'membership', 'member',
-    'billing', 'payment', 'receipt', 'invoice', 'charge', 'transaction',
-    'renew', 'renewal', 'renewed', 'recurring', 'monthly', 'yearly', 'annual',
-    'premium', 'account', 'activated', 'welcome', 'trial', 'free trial',
-    'thank you for your purchase', 'successfully subscribed', 'your purchase',
-    'has been processed', 'payment confirmation', 'payment successful',
-    // Add more subscription terms
-    'automatically renew', 'auto-renew', 'periodic billing', 'service fee',
-    'membership fee', 'subscription fee', 'continue your access', 'continue access',
-    'access expires', 'access will expire', 'your plan', 'active subscription',
-    'cancel anytime', 'cancel your subscription', 'your subscription',
-    'subscription details', 'manage subscription', 'upgrade plan', 'downgrade plan',
-    'billed', 'amount due', 'next payment', 'upcoming payment', 'pay monthly',
-    'pay annually', 'monthly plan', 'annual plan', 'billing cycle',
-    'your account has been charged', 'credit card was charged',
-    'order confirmation', 'trial period', 'trial ends', 'extended trial'
-  ];
-  
-  // Common service names to look for (these will be matched case-insensitive)
-  const serviceNames = [
-    'Netflix', 'Spotify', 'Apple Music', 'Amazon Prime', 'Disney+', 'Hulu', 'HBO Max',
-    'YouTube Premium', 'Xbox Game Pass', 'PlayStation Plus', 'Nintendo Online',
-    'Adobe Creative Cloud', 'Microsoft 365', 'Office 365', 'Google One', 'iCloud',
-    'Dropbox', 'OneDrive', 'LinkedIn Premium', 'GitHub Pro', 'Slack', 'Zoom',
-    'Canva', 'Notion', 'Evernote', 'LastPass', '1Password', 'ExpressVPN', 'NordVPN',
-    'Audible', 'Kindle Unlimited', 'Medium', 'Substack', 'Patreon', 'Twitch',
-    'Crunchyroll', 'Funimation', 'Vimeo', 'Facebook', 'Twitter', 'Instagram',
-    // Add more services
-    'Disney Plus', 'HBO', 'Apple TV+', 'Apple TV Plus', 'Paramount+', 'Paramount Plus',
-    'Peacock', 'Discovery+', 'Discovery Plus', 'ESPN+', 'ESPN Plus', 'Starz', 'Showtime',
-    'BritBox', 'AMC+', 'AMC Plus', 'Sling TV', 'YouTubeTV', 'YouTube TV', 'Philo',
-    'fuboTV', 'Tidal', 'Pandora', 'Deezer', 'SoundCloud', 'Apple Arcade',
-    'Google Play Pass', 'EA Play', 'Ubisoft+', 'Ubisoft Plus', 'Nintendo Switch Online',
-    'Microsoft Game Pass', 'PlayStation Now', 'GeForce Now', 'Stadia', 'Luna',
-    'Photoshop', 'Lightroom', 'InDesign', 'Premiere Pro', 'Final Cut Pro', 'Logic Pro',
-    'AutoCAD', 'Sketch', 'Figma Pro', 'Adobe XD', 'Affinity', 'QuickBooks', 'Xero',
-    'FreshBooks', 'Wave', 'Mailchimp', 'Constant Contact', 'ConvertKit', 'ActiveCampaign',
-    'HubSpot', 'Salesforce', 'Pipedrive', 'Zendesk', 'Freshdesk', 'Intercom',
-    'Squarespace', 'Wix', 'Weebly', 'WordPress.com', 'Shopify', 'BigCommerce', 'WooCommerce',
-    'Magento', 'eBay', 'Etsy', 'Grammarly', 'ProWritingAid', 'Duolingo', 'Babbel',
-    'Rosetta Stone', 'Skillshare', 'MasterClass', 'Coursera', 'Udemy', 'Brilliant',
-    'Headspace', 'Calm', 'Peloton', 'BeachBody', 'ClassPass', 'Planet Fitness',
-    'LA Fitness', 'New York Times', 'Wall Street Journal', 'Washington Post',
-    'Financial Times', 'Harvard Business Review', 'The Economist', 'The Guardian',
-    'The Telegraph', 'The Athletic', 'The Information', 'Barron\'s', 'Bloomberg',
-    'Reuters', 'The New Yorker', 'The Atlantic', 'Netflix Account', 'Amazon Subscription',
-    'Hulu Account', 'Prime Video', 'Prime Membership', 'ProtonMail', 'ProtonVPN',
-    'Surfshark', 'CyberGhost', 'IPVanish', 'Private Internet Access', 'TunnelBear',
-    'McAfee', 'Norton', 'Bitdefender', 'Kaspersky', 'ESET', 'Avast', 'AVG',
-    'TrueBill', 'Mint', 'YNAB', 'Personal Capital', 'Credit Karma', 'Bluehost',
-    'GoDaddy', 'HostGator', 'Namecheap', 'SiteGround', 'DreamHost', 'Cloudflare',
-    'DigitalOcean', 'Linode', 'AWS', 'Google Cloud', 'Azure', 'Trello', 'Asana',
-    'Monday.com', 'ClickUp', 'Todoist', 'Airtable', 'Adobe Acrobat'
-  ];
-  
-  // Combine lowercase service names for checking
-  const lowerServiceNames = serviceNames.map(name => name.toLowerCase());
-  
-  // Calculate initial confidence based on term matches
-  let confidence = 0;
-  let matchCount = 0;
-  
-  // Check subject and body for subscription terms
-  const lowerSubject = subject.toLowerCase();
-  const lowerBody = body.toLowerCase();
-  const lowerFrom = from.toLowerCase();
-  
-  // First, check for service name matches
-  const detectedServiceNames = [];
-  for (const serviceName of serviceNames) {
-    if (lowerSubject.includes(serviceName.toLowerCase()) || 
-        lowerBody.includes(serviceName.toLowerCase()) || 
-        lowerFrom.includes(serviceName.toLowerCase())) {
-      detectedServiceNames.push(serviceName);
-    }
-  }
-  
-  // Identify primary service name
-  let serviceName = detectedServiceNames.length > 0 ? detectedServiceNames[0] : null;
-  
-  // If no direct service name match, try to extract from sender domain
-  if (!serviceName) {
-    // Extract domain from the sender email
-    const emailMatch = from.match(/[^@<>]+@([^@<>.]+\.[^@<>.]+)/);
-    if (emailMatch && emailMatch[1]) {
-      const domain = emailMatch[1].split('.')[0];
-      serviceName = domain.charAt(0).toUpperCase() + domain.slice(1); // Capitalize first letter
-    }
-  }
-  
-  // Check for subscription terms
-  for (const term of subscriptionTerms) {
-    if (lowerSubject.includes(term) || lowerBody.includes(term)) {
-      matchCount++;
-      
-      // Add more weight to important terms in the subject line
-      if (lowerSubject.includes(term)) {
-        confidence += 0.05;
-      } else {
-        confidence += 0.02;
-      }
-    }
-  }
-
-  // If we have at least 1 match, it's potentially a subscription
-  const isSubscription = matchCount >= 1 || (serviceName && matchCount >= 1);
-  
-  // Boost confidence if service name was detected
-  if (serviceName) {
-    confidence += 0.15;
-  }
-  
-  // Boost confidence based on pattern matches
-  // Check for price/amount patterns
-  const priceMatches = body.match(/\$\d+(\.\d{2})?|\d+\.\d{2}(USD|EUR|GBP)?|€\d+(\.\d{2})?|£\d+(\.\d{2})?/g) || [];
-  if (priceMatches.length > 0) {
-    confidence += 0.1;
-  }
-  
-  // Extract price from matches
-  let price = null;
-  let currency = 'USD';
-  
-  if (priceMatches.length > 0) {
-    // Get the first match
-    const priceText = priceMatches[0];
-    
-    // Extract the currency symbol
-    if (priceText.includes('$')) {
-      currency = 'USD';
-    } else if (priceText.includes('€')) {
-      currency = 'EUR';
-    } else if (priceText.includes('£')) {
-      currency = 'GBP';
-    }
-    
-    // Extract the numeric amount
-    const numericMatch = priceText.match(/\d+(\.\d{2})?/);
-    if (numericMatch) {
-      price = parseFloat(numericMatch[0]);
-    }
-  }
-  
-  // Check for billing cycle patterns
-  const monthlyPattern = /monthly|per month|\/month|month-to-month|billed monthly/i;
-  const yearlyPattern = /yearly|per year|\/year|annual|annually|billed yearly/i;
-  const weeklyPattern = /weekly|per week|\/week|billed weekly/i;
-  const quarterlyPattern = /quarterly|every 3 months|3-month|billed quarterly/i;
-  
-  let billingFrequency = 'unknown';
-  
-  if (monthlyPattern.test(body) || monthlyPattern.test(subject)) {
-    billingFrequency = 'monthly';
-    confidence += 0.05;
-  } else if (yearlyPattern.test(body) || yearlyPattern.test(subject)) {
-    billingFrequency = 'yearly';
-    confidence += 0.05;
-  } else if (weeklyPattern.test(body) || weeklyPattern.test(subject)) {
-    billingFrequency = 'weekly';
-    confidence += 0.05;
-  } else if (quarterlyPattern.test(body) || quarterlyPattern.test(subject)) {
-    billingFrequency = 'quarterly';
-    confidence += 0.05;
-  } else {
-    // Default to monthly if price found but no billing frequency
-    billingFrequency = 'monthly';
-  }
-  
-  // Cap confidence at 0.9 for fallback method
-  confidence = Math.min(confidence, 0.9);
-  
-  // Generate a future date based on billing frequency
-  const today = new Date();
-  let nextBillingDate = null;
-  
-  if (price) {
-    if (billingFrequency === 'monthly') {
-      nextBillingDate = new Date(today.getFullYear(), today.getMonth() + 1, today.getDate());
-    } else if (billingFrequency === 'yearly') {
-      nextBillingDate = new Date(today.getFullYear() + 1, today.getMonth(), today.getDate());
-    } else if (billingFrequency === 'weekly') {
-      nextBillingDate = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
-    } else if (billingFrequency === 'quarterly') {
-      nextBillingDate = new Date(today.getFullYear(), today.getMonth() + 3, today.getDate());
-    }
-  }
-  
-  return {
-    isSubscription,
-    confidence,
-    serviceName,
-    amount: price,
-    currency,
-    billingFrequency,
-    nextBillingDate: nextBillingDate ? nextBillingDate.toISOString() : null,
-    matchCount,
-    detectedTerms: subscriptionTerms.filter(term => lowerSubject.includes(term) || lowerBody.includes(term)),
-    emailSubject: subject,
-    emailFrom: from,
-    emailDate: date
-  };
 };
 
 // Function to save detected subscription to database
@@ -981,8 +747,8 @@ export default async function handler(req, res) {
               console.log('SCAN-DEBUG: Gemini analysis result:', JSON.stringify(analysis));
               
               // If not detected by Gemini or confidence is low, try pattern matching
-              if (!analysis.isSubscription || analysis.confidence < 0.15) {
-                console.log(`SCAN-DEBUG: Gemini analysis: Not a subscription (${analysis.confidence?.toFixed(2) || 0} confidence), trying pattern matching...`);
+              if (!analysis.isSubscription || analysis.confidence < 0.25) {
+                console.log(`SCAN-DEBUG: Gemini analysis confidence (${analysis.confidence?.toFixed(2) || 0}) is low or not detected as subscription. Trying pattern matching...`);
                 
                 // Try our own pattern matching
                 const backupAnalysis = analyzeEmailForSubscriptions(emailData);
@@ -990,10 +756,16 @@ export default async function handler(req, res) {
                 // Log detailed backup analysis
                 console.log('SCAN-DEBUG: Pattern matching result:', JSON.stringify(backupAnalysis));
                 
-                // Use pattern match result only if it detects a subscription with better confidence
-                if (backupAnalysis.isSubscription && 
-                    (backupAnalysis.confidence > analysis.confidence || !analysis.isSubscription)) {
-                  console.log(`SCAN-DEBUG: Pattern matching found potential subscription: ${backupAnalysis.serviceName || 'Unknown'} (${backupAnalysis.confidence.toFixed(2)} confidence)`);
+                // Use pattern match result in these cases:
+                // 1. If it detects a subscription with better confidence
+                // 2. If Gemini didn't detect a subscription but pattern matching did
+                // 3. If pattern matching detected a specific target service (Babbel, Vercel, NBA)
+                if ((backupAnalysis.isSubscription && 
+                     (backupAnalysis.confidence > analysis.confidence || !analysis.isSubscription)) || 
+                    (backupAnalysis.serviceName && 
+                     ['Babbel', 'Vercel', 'NBA League Pass'].includes(backupAnalysis.serviceName))) {
+                    
+                  console.log(`SCAN-DEBUG: Using pattern matching result instead of Gemini. Pattern matching found: ${backupAnalysis.serviceName || 'Unknown'} (${backupAnalysis.confidence.toFixed(2)} confidence)`);
                   analysis = backupAnalysis;
                 }
               }
@@ -1006,7 +778,8 @@ export default async function handler(req, res) {
               }
               
               // If this is a subscription with good confidence, save it
-              if (analysis.isSubscription && analysis.confidence > 0.15) {
+              // Lower the threshold slightly to catch more potential subscriptions
+              if (analysis.isSubscription && analysis.confidence > 0.12) {
                 console.log(`SCAN-DEBUG: Detected subscription: ${analysis.serviceName || 'Unknown'} (${analysis.confidence.toFixed(2)} confidence)`);
                 detectedSubscriptions.push(analysis);
                 
