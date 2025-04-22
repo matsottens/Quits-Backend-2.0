@@ -145,50 +145,77 @@ export default async function handler(req, res) {
             
             if (scan.status === 'completed') {
               // Fetch detected subscriptions
-              const subsResponse = await fetch(
-                `${supabaseUrl}/rest/v1/subscriptions?user_id=eq.${dbUserId}&source=eq.email_scan&select=*&order=created_at.desc`, 
-                {
-                  method: 'GET',
-                  headers: {
-                    'apikey': supabaseKey,
-                    'Authorization': `Bearer ${supabaseKey}`,
-                    'Content-Type': 'application/json'
+              try {
+                // First try the query with source filter
+                const subsResponse = await fetch(
+                  `${supabaseUrl}/rest/v1/subscriptions?user_id=eq.${dbUserId}&select=*&order=created_at.desc`, 
+                  {
+                    method: 'GET',
+                    headers: {
+                      'apikey': supabaseKey,
+                      'Authorization': `Bearer ${supabaseKey}`,
+                      'Content-Type': 'application/json'
+                    }
                   }
+                );
+                
+                if (!subsResponse.ok) {
+                  throw new Error(`Subscription lookup failed: ${await subsResponse.text()}`);
                 }
-              );
-              
-              if (!subsResponse.ok) {
-                throw new Error(`Subscription lookup failed: ${await subsResponse.text()}`);
+                
+                const subscriptions = await subsResponse.json();
+                
+                // Return completion status with detected subscriptions
+                return res.status(200).json({
+                  success: true,
+                  status: 'completed',
+                  scanId: scanId,
+                  progress: 100,
+                  completedAt: scan.completed_at,
+                  stats: {
+                    emails_found: scan.emails_found || 0,
+                    emails_to_process: scan.emails_to_process || 0,
+                    emails_processed: scan.emails_scanned || 0,
+                    subscriptions_found: scan.subscriptions_found || 0
+                  },
+                  results: {
+                    totalEmailsScanned: scan.emails_scanned || 0,
+                    subscriptionsFound: subscriptions.map(sub => ({
+                      id: sub.id,
+                      service_name: sub.name,
+                      price: parseFloat(sub.price || 0),
+                      currency: 'USD',
+                      billing_cycle: sub.billing_cycle,
+                      next_billing_date: sub.next_billing_date,
+                      confidence: sub.confidence || 0.8
+                    }))
+                  }
+                });
+              } catch (subsError) {
+                console.error(`Error fetching subscriptions: ${subsError.message}`);
+                
+                // Return completion status without subscriptions data
+                return res.status(200).json({
+                  success: true,
+                  status: 'completed',
+                  scanId: scanId,
+                  progress: 100,
+                  completedAt: scan.completed_at,
+                  stats: {
+                    emails_found: scan.emails_found || 0,
+                    emails_to_process: scan.emails_to_process || 0,
+                    emails_processed: scan.emails_scanned || 0,
+                    subscriptions_found: scan.subscriptions_found || 0
+                  },
+                  results: {
+                    totalEmailsScanned: scan.emails_scanned || 0,
+                    subscriptionsFound: []
+                  },
+                  error: {
+                    subscription_fetch: subsError.message
+                  }
+                });
               }
-              
-              const subscriptions = await subsResponse.json();
-              
-              // Return completion status with detected subscriptions
-              return res.status(200).json({
-                success: true,
-                status: 'completed',
-                scanId: scanId,
-                progress: 100,
-                completedAt: scan.completed_at,
-                stats: {
-                  emails_found: scan.emails_found || 0,
-                  emails_to_process: scan.emails_to_process || 0,
-                  emails_processed: scan.emails_scanned || 0,
-                  subscriptions_found: scan.subscriptions_found || 0
-                },
-                results: {
-                  totalEmailsScanned: scan.emails_scanned || 0,
-                  subscriptionsFound: subscriptions.map(sub => ({
-                    id: sub.id,
-                    service_name: sub.name,
-                    price: parseFloat(sub.price || 0),
-                    currency: 'USD',
-                    billing_cycle: sub.billing_cycle,
-                    next_billing_date: sub.next_billing_date,
-                    confidence: sub.confidence || 0.8
-                  }))
-                }
-              });
             } else if (scan.status === 'error') {
               return res.status(200).json({
                 success: false,

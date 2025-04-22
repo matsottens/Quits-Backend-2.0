@@ -558,40 +558,81 @@ const saveSubscription = async (userId, subscriptionData) => {
     
     // Create subscription using REST API
     console.log(`Creating subscription for ${subscriptionData.serviceName}`);
-    const response = await fetch(
-      `${supabaseUrl}/rest/v1/subscriptions`, 
-      {
-        method: 'POST',
-        headers: {
-          'apikey': supabaseKey,
-          'Authorization': `Bearer ${supabaseKey}`,
-          'Content-Type': 'application/json',
-          'Prefer': 'return=representation'
-        },
-        body: JSON.stringify({
-          user_id: userId,
-          name: subscriptionData.serviceName,
-          price: subscriptionData.amount,
-          billing_cycle: subscriptionData.billingFrequency,
-          next_billing_date: subscriptionData.nextBillingDate,
-          category: 'other', // Default category
-          is_manual: false, // Mark as auto-detected
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          source: 'email_scan',
-          confidence: subscriptionData.confidence
-        })
+    
+    // Try first with minimal fields to avoid schema issues
+    try {
+      const minimalSubscriptionData = {
+        user_id: userId,
+        name: subscriptionData.serviceName,
+        price: subscriptionData.amount || 0,
+        billing_cycle: subscriptionData.billingFrequency || 'monthly',
+        next_billing_date: subscriptionData.nextBillingDate,
+        is_manual: false, // Mark as auto-detected
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      
+      console.log(`Attempting to create subscription with minimal fields: ${Object.keys(minimalSubscriptionData).join(', ')}`);
+      
+      const response = await fetch(
+        `${supabaseUrl}/rest/v1/subscriptions`, 
+        {
+          method: 'POST',
+          headers: {
+            'apikey': supabaseKey,
+            'Authorization': `Bearer ${supabaseKey}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=representation'
+          },
+          body: JSON.stringify(minimalSubscriptionData)
+        }
+      );
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Supabase API error: ${response.status} - ${errorText}`);
       }
-    );
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Supabase API error: ${response.status} - ${errorText}`);
+      
+      const result = await response.json();
+      console.log(`Successfully created subscription for ${subscriptionData.serviceName}`);
+      return result;
+    } catch (error) {
+      console.error(`Error creating subscription with standard fields: ${error.message}`);
+      
+      // Try with absolutely minimal fields as a fallback
+      console.log(`Trying again with only required fields`);
+      const essentialData = {
+        user_id: userId,
+        name: subscriptionData.serviceName,
+        price: subscriptionData.amount || 0,
+        billing_cycle: subscriptionData.billingFrequency || 'monthly',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      
+      const fallbackResponse = await fetch(
+        `${supabaseUrl}/rest/v1/subscriptions`, 
+        {
+          method: 'POST',
+          headers: {
+            'apikey': supabaseKey,
+            'Authorization': `Bearer ${supabaseKey}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=representation'
+          },
+          body: JSON.stringify(essentialData)
+        }
+      );
+      
+      if (!fallbackResponse.ok) {
+        const fallbackErrorText = await fallbackResponse.text();
+        throw new Error(`Fallback also failed: ${fallbackResponse.status} - ${fallbackErrorText}`);
+      }
+      
+      const fallbackResult = await fallbackResponse.json();
+      console.log(`Successfully created subscription with minimal fields for ${subscriptionData.serviceName}`);
+      return fallbackResult;
     }
-    
-    const result = await response.json();
-    console.log(`Successfully created subscription for ${subscriptionData.serviceName}`);
-    return result;
   } catch (error) {
     console.error('Error saving subscription:', error);
     throw error;
