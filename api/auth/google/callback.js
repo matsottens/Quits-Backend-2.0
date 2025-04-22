@@ -174,7 +174,9 @@ export default async function handler(req, res) {
         email: userInfo.email,
         gmail_token: tokens.access_token,
         refresh_token: tokens.refresh_token || null,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        // Include the Gmail email address to ensure we're accessing the right account
+        gmail_email: userInfo.email
       },
       jwtSecret,
       { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }

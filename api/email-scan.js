@@ -19,6 +19,15 @@ const extractGmailToken = (token) => {
     const payload = jsonwebtoken.decode(token);
     console.log('JWT payload keys:', Object.keys(payload));
     
+    // Log the email address associated with the token
+    if (payload.email) {
+      console.log('JWT contains email:', payload.email);
+    }
+    
+    if (payload.gmail_email) {
+      console.log('JWT contains gmail_email:', payload.gmail_email);
+    }
+    
     if (payload.gmail_token) {
       console.log('Found gmail_token in JWT');
       return payload.gmail_token;
@@ -43,6 +52,22 @@ const fetchEmailsFromGmail = async (accessToken) => {
   console.log('SCAN-DEBUG: Starting Gmail fetch process with token (first 10 chars):', accessToken.substring(0, 10));
   
   try {
+    // First get the Gmail profile to verify which account we're accessing
+    const profileResponse = await fetch('https://www.googleapis.com/gmail/v1/users/me/profile', {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`
+      }
+    });
+    
+    if (!profileResponse.ok) {
+      const errorText = await profileResponse.text();
+      console.error('SCAN-DEBUG: Gmail profile fetch error:', errorText);
+      throw new Error(`Gmail profile API error: ${profileResponse.status} - ${errorText}`);
+    }
+    
+    const profileData = await profileResponse.json();
+    console.log(`SCAN-DEBUG: Accessing Gmail account: ${profileData.emailAddress}`);
+    
     // Create a search query that targets subscription-related emails
     // Include terms for subscription, billing, payment, etc.
     // Also include specific services we want to find
@@ -441,16 +466,17 @@ const addTestSubscription = async (dbUserId) => {
     
     const testSubscription = {
       isSubscription: true,
-      serviceName: "Demo Subscription (System Generated)",
+      serviceName: "TEST SUBSCRIPTION - No Real Subscriptions Found",
       amount: 9.99,
       currency: "USD",
       billingFrequency: "monthly",
       nextBillingDate: new Date(new Date().setMonth(new Date().getMonth() + 1)).toISOString(),
       confidence: 0.95,
       // Add email metadata so it looks like a real detection
-      emailSubject: "Your Demo Subscription Confirmation",
-      emailFrom: "demo@quits.cc",
-      emailDate: new Date().toISOString()
+      emailSubject: "Your Test Subscription (No Real Subscriptions Found)",
+      emailFrom: "test@quits.cc",
+      emailDate: new Date().toISOString(),
+      notes: "This is a test subscription added because no real subscriptions were found in your Gmail account. You can delete this and run the scan again, or add subscriptions manually."
     };
     
     await saveSubscription(dbUserId, testSubscription);
@@ -458,6 +484,40 @@ const addTestSubscription = async (dbUserId) => {
     return true;
   } catch (error) {
     console.error(`SCAN-DEBUG: Error adding test subscription: ${error.message}`);
+    return false;
+  }
+};
+
+// Function to update scan status
+const updateScanStatus = async (scanId, dbUserId, updates) => {
+  try {
+    console.log(`SCAN-DEBUG: Updating scan status for scan ${scanId}: ${JSON.stringify(updates)}`);
+    
+    // Update the scan record in the database
+    const response = await fetch(
+      `${supabaseUrl}/rest/v1/scan_history?scan_id=eq.${scanId}`, 
+      {
+        method: 'PATCH',
+        headers: {
+          'apikey': supabaseKey,
+          'Authorization': `Bearer ${supabaseKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          ...updates,
+          updated_at: new Date().toISOString()
+        })
+      }
+    );
+    
+    if (!response.ok) {
+      throw new Error(`Failed to update scan status: ${await response.text()}`);
+    }
+    
+    console.log(`SCAN-DEBUG: Successfully updated scan status`);
+    return true;
+  } catch (error) {
+    console.error(`SCAN-DEBUG: Error updating scan status: ${error.message}`);
     return false;
   }
 };
