@@ -1,7 +1,6 @@
 // Email scan endpoint
 import jsonwebtoken from 'jsonwebtoken';
 import fetch from 'node-fetch';
-import cheerio from 'cheerio';
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 import { extractEmailBody, analyzeEmailForSubscriptions } from './email-utils.js';
