@@ -1,347 +1,347 @@
 // Helper utilities for email parsing and analysis
+import fetch from 'node-fetch';
+import * as cheerio from 'cheerio';
+import { createClient } from '@supabase/supabase-js';
+
+// Initialize Supabase client
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 /**
- * Extract email body from message object
- * @param {Object} email - Gmail message object
- * @returns {string} Extracted body text
+ * Extracts the text body from an email message
+ * @param {Object} message - The Gmail message object
+ * @returns {string} The extracted text content
  */
-export const extractEmailBody = (email) => {
-  let body = '';
+function extractEmailBody(message) {
+  console.log("SCAN-DEBUG: Extracting email body...");
   
-  // Check if there's a simple body
-  if (email.payload?.body?.data) {
-    // Decode base64 data
-    try {
-      body = Buffer.from(email.payload.body.data, 'base64').toString('utf-8');
-    } catch (err) {
-      console.error('Error decoding email body:', err);
-    }
-    return body;
+  if (!message || !message.payload) {
+    console.log("SCAN-DEBUG: Invalid message format - missing payload");
+    return '';
   }
-  
-  // Check for multipart message
-  if (email.payload?.parts) {
-    // First try to find plain text part
-    const textPart = email.payload.parts.find(part => part.mimeType === 'text/plain');
-    if (textPart?.body?.data) {
-      try {
-        return Buffer.from(textPart.body.data, 'base64').toString('utf-8');
-      } catch (err) {
-        console.error('Error decoding plain text part:', err);
-      }
+
+  // Try to get text from the message
+  let body = '';
+  const mimeType = message.payload.mimeType;
+  console.log(`SCAN-DEBUG: Message MIME type: ${mimeType}`);
+
+  if (mimeType === 'text/plain') {
+    // For plain text emails
+    if (message.payload.body && message.payload.body.data) {
+      body = Buffer.from(message.payload.body.data, 'base64').toString('utf-8');
     }
-    
-    // If no plain text, try HTML
-    const htmlPart = email.payload.parts.find(part => part.mimeType === 'text/html');
-    if (htmlPart?.body?.data) {
-      try {
-        // Get HTML and do basic HTML-to-text conversion
-        const html = Buffer.from(htmlPart.body.data, 'base64').toString('utf-8');
-        // Remove HTML tags, but preserve line breaks
-        return html.replace(/<[^>]*>/g, ' ')
-                  .replace(/\s+/g, ' ')
-                  .trim();
-      } catch (err) {
-        console.error('Error decoding HTML part:', err);
-      }
+  } else if (mimeType === 'text/html') {
+    // For HTML emails
+    if (message.payload.body && message.payload.body.data) {
+      const htmlBody = Buffer.from(message.payload.body.data, 'base64').toString('utf-8');
+      // Use cheerio to extract text from HTML
+      const $ = cheerio.load(htmlBody);
+      body = $('body').text();
     }
-    
-    // Try to recursively extract from nested parts
-    for (const part of email.payload.parts) {
-      if (part.parts) {
-        const nestedBody = extractEmailBody({ payload: part });
-        if (nestedBody) {
-          return nestedBody;
+  } else if (mimeType === 'multipart/alternative' || mimeType === 'multipart/mixed' || mimeType === 'multipart/related') {
+    // For multipart emails, try to find text/plain or text/html parts
+    if (message.payload.parts) {
+      console.log(`SCAN-DEBUG: Found ${message.payload.parts.length} parts in the email`);
+      
+      // First try to find a text/plain part
+      let plainTextPart = message.payload.parts.find(part => part.mimeType === 'text/plain');
+      
+      // If no text/plain, look for text/html
+      let htmlPart = message.payload.parts.find(part => part.mimeType === 'text/html');
+      
+      if (plainTextPart && plainTextPart.body && plainTextPart.body.data) {
+        body = Buffer.from(plainTextPart.body.data, 'base64').toString('utf-8');
+        console.log("SCAN-DEBUG: Using plain text part for body");
+      } else if (htmlPart && htmlPart.body && htmlPart.body.data) {
+        const htmlBody = Buffer.from(htmlPart.body.data, 'base64').toString('utf-8');
+        const $ = cheerio.load(htmlBody);
+        body = $('body').text();
+        console.log("SCAN-DEBUG: Using HTML part for body");
+      } else {
+        // Recursively search for parts within parts
+        const findTextRecursively = (parts) => {
+          for (const part of parts) {
+            if (part.mimeType === 'text/plain' && part.body && part.body.data) {
+              return Buffer.from(part.body.data, 'base64').toString('utf-8');
+            } else if (part.mimeType === 'text/html' && part.body && part.body.data) {
+              const htmlBody = Buffer.from(part.body.data, 'base64').toString('utf-8');
+              const $ = cheerio.load(htmlBody);
+              return $('body').text();
+            } else if (part.parts) {
+              const nestedResult = findTextRecursively(part.parts);
+              if (nestedResult) return nestedResult;
+            }
+          }
+          return null;
+        };
+        
+        const recursiveResult = findTextRecursively(message.payload.parts);
+        if (recursiveResult) {
+          body = recursiveResult;
+          console.log("SCAN-DEBUG: Found text in nested parts");
         }
       }
     }
   }
-  
+
+  // If we couldn't extract the body by standard means, try a more aggressive approach
+  if (!body) {
+    console.log("SCAN-DEBUG: Standard extraction failed, using fallback method");
+    body = extractTextFromNestedStructure(message.payload);
+  }
+
+  console.log(`SCAN-DEBUG: Email body extract length: ${body.length} characters`);
   return body;
-};
+}
 
 /**
- * Analyze an email for subscription data using pattern matching
- * @param {Object} email - Gmail message object
+ * Fallback method to extract text from a nested message structure
+ * @param {Object} part - A part of the email message
+ * @returns {string} The extracted text
+ */
+function extractTextFromNestedStructure(part) {
+  if (!part) return '';
+  
+  let text = '';
+  
+  // Extract from the current part's body if it exists
+  if (part.body && part.body.data) {
+    try {
+      // For text parts, decode and add to the result
+      const decoded = Buffer.from(part.body.data, 'base64').toString('utf-8');
+      if (part.mimeType === 'text/html') {
+        const $ = cheerio.load(decoded);
+        text += $('body').text();
+      } else {
+        text += decoded;
+      }
+    } catch (e) {
+      console.log(`SCAN-DEBUG: Error decoding part: ${e.message}`);
+    }
+  }
+  
+  // Recursively process any child parts
+  if (part.parts && Array.isArray(part.parts)) {
+    for (const childPart of part.parts) {
+      text += extractTextFromNestedStructure(childPart);
+    }
+  }
+  
+  return text;
+}
+
+/**
+ * Analyzes an email to detect if it's a subscription or receipt
+ * This is a fallback method when the Gemini API is not available or fails
+ * @param {Object} emailData - The email data including headers and body
  * @returns {Object} Analysis result with subscription details
  */
-export const analyzeEmailForSubscriptions = (email) => {
-  console.log('SCAN-DEBUG: Starting manual subscription analysis');
+function analyzeEmailForSubscriptions(emailData) {
+  console.log("SCAN-DEBUG: Analyzing email for subscriptions using pattern matching...");
   
-  // Extract email body (prefer text over HTML)
-  const body = extractEmailBody(email);
-  if (!body) {
-    console.log('SCAN-DEBUG: No email body found');
-    return { isSubscription: false, confidence: 0 };
-  }
-  
-  // Extract important metadata
-  const headers = email.payload?.headers || [];
-  const subject = headers.find(h => h.name === 'Subject')?.value || '';
-  const from = headers.find(h => h.name === 'From')?.value || '';
-  const date = headers.find(h => h.name === 'Date')?.value || '';
-  
-  // Log the email metadata for debugging
-  console.log(`SCAN-DEBUG: Analyzing email - Subject: "${subject}"`);
-  console.log(`SCAN-DEBUG: From: ${from}`);
-  console.log(`SCAN-DEBUG: Body length: ${body.length} characters`);
-  
-  // Key subscription-related terms
-  const subscriptionTerms = [
-    'subscription', 'subscribe', 'subscribed', 'plan', 'membership', 'member',
-    'billing', 'payment', 'receipt', 'invoice', 'charge', 'transaction',
-    'renew', 'renewal', 'renewed', 'recurring', 'monthly', 'yearly', 'annual',
-    'premium', 'account', 'activated', 'welcome', 'trial', 'free trial',
-    'thank you for your purchase', 'successfully subscribed', 'your purchase',
-    'has been processed', 'payment confirmation', 'payment successful',
-    'automatically renew', 'auto-renew', 'periodic billing', 'service fee',
-    'membership fee', 'subscription fee', 'continue your access', 'continue access',
-    'access expires', 'access will expire', 'your plan', 'active subscription',
-    'cancel anytime', 'cancel your subscription', 'your subscription',
-    'subscription details', 'manage subscription', 'upgrade plan', 'downgrade plan',
-    'billed', 'amount due', 'next payment', 'upcoming payment', 'pay monthly',
-    'pay annually', 'monthly plan', 'annual plan', 'billing cycle',
-    'your account has been charged', 'credit card was charged',
-    'order confirmation', 'trial period', 'trial ends', 'extended trial',
-    'developer plan', 'hosting plan', 'cloud hosting', 'platform fee',
-    'domain renewal', 'server costs', 'api access', 'bandwidth usage', 
-    'storage plan', 'computing resources', 'usage fees', 'service charges',
-    'account renewal', 'service renewal', 'pass renewal', 'league pass',
-    'content access', 'streaming access', 'viewing subscription', 'digital access',
-    'learning platform', 'education subscription', 'language learning',
-    'course access', 'learning materials', 'interactive lessons'
-  ];
-  
-  // Common service names to look for (these will be matched case-insensitive)
-  const serviceNames = [
-    'Netflix', 'Spotify', 'Apple Music', 'Amazon Prime', 'Disney+', 'Hulu', 'HBO Max',
-    'YouTube Premium', 'Xbox Game Pass', 'PlayStation Plus', 'Nintendo Online',
-    'Adobe Creative Cloud', 'Microsoft 365', 'Office 365', 'Google One', 'iCloud',
-    'Vercel', 'Netlify', 'Heroku', 'Firebase', 'MongoDB Atlas', 'Supabase',
-    'NBA League Pass', 'NBA TV', 'NFL Game Pass', 'MLB.tv', 'NHL.tv', 'ESPN+',
-    'Babbel', 'Lingoda', 'Memrise', 'Busuu', 'LingQ', 'Pimsleur',
-    'Vercel Pro', 'Vercel Enterprise', 'Vercel Teams', 'Vercel Platform',
-    'Babbel Live', 'Babbel Complete', 'Babbel Intensive', 'Learning With Babbel',
-    'NBA League Pass Premium', 'NBA League Pass Standard', 'NBA Team Pass'
-  ];
-  
-  // Lowercase everything for case-insensitive matching
-  const lowerSubject = subject.toLowerCase();
-  const lowerBody = body.toLowerCase();
-  const lowerFrom = from.toLowerCase();
-  
-  // Create regex patterns for higher-precision matches
-  const vercelPattern = /\b(vercel|zeit|nextjs platform)\b.*?\b(invoice|receipt|payment|subscription|charge|billing)\b/i;
-  const babbelPattern = /\b(babbel|language learning)\b.*?\b(invoice|receipt|payment|subscription|charge|billing|renewal)\b/i;
-  const nbaPattern = /\b(nba|basketball|league pass)\b.*?\b(invoice|receipt|payment|subscription|charge|billing|renewal)\b/i;
-  
-  // Check for high-precision pattern matches first
-  let detectedFromPatterns = [];
-  
-  if (vercelPattern.test(lowerSubject + ' ' + lowerBody) || 
-      lowerFrom.includes('vercel') || lowerFrom.includes('zeit.co')) {
-    detectedFromPatterns.push('Vercel');
-    console.log('SCAN-DEBUG: High-precision match for Vercel');
-  }
-  
-  if (babbelPattern.test(lowerSubject + ' ' + lowerBody) || 
-      lowerFrom.includes('babbel') || lowerFrom.includes('babel')) {
-    detectedFromPatterns.push('Babbel');
-    console.log('SCAN-DEBUG: High-precision match for Babbel');
-  }
-  
-  if (nbaPattern.test(lowerSubject + ' ' + lowerBody) || 
-      lowerFrom.includes('nba.com') || lowerFrom.includes('leaguepass')) {
-    detectedFromPatterns.push('NBA League Pass');
-    console.log('SCAN-DEBUG: High-precision match for NBA League Pass');
-  }
-  
-  // First, check for service name matches
-  const detectedServiceNames = [];
-  
-  // Give priority to pattern-detected services
-  if (detectedFromPatterns.length > 0) {
-    detectedServiceNames.push(...detectedFromPatterns);
-  }
-  
-  // Then check for direct name matches
-  for (const serviceName of serviceNames) {
-    const lowerServiceName = serviceName.toLowerCase();
-    if (lowerSubject.includes(lowerServiceName) || 
-        lowerBody.includes(lowerServiceName) || 
-        lowerFrom.includes(lowerServiceName)) {
-      if (!detectedServiceNames.includes(serviceName)) {
-        detectedServiceNames.push(serviceName);
-        console.log(`SCAN-DEBUG: Found service name match: ${serviceName}`);
-      }
-    }
-  }
-  
-  // Identify primary service name
-  let serviceName = detectedServiceNames.length > 0 ? detectedServiceNames[0] : null;
-  
-  // If no direct service name match, try to extract from sender domain
-  if (!serviceName) {
-    // Extract domain from the sender email
-    const emailMatch = from.match(/[^@<>]+@([^@<>.]+\.[^@<>.]+)/);
-    if (emailMatch && emailMatch[1]) {
-      const domain = emailMatch[1].split('.')[0];
-      serviceName = domain.charAt(0).toUpperCase() + domain.slice(1); // Capitalize first letter
-      console.log(`SCAN-DEBUG: Extracted service name from email domain: ${serviceName}`);
-    }
-  }
-  
-  // Check for subscription terms
-  let matchCount = 0;
+  const { subject, from, body } = emailData;
   let confidence = 0;
-  let matchedTerms = [];
-  
-  for (const term of subscriptionTerms) {
-    if (lowerSubject.includes(term) || lowerBody.includes(term)) {
-      matchCount++;
-      matchedTerms.push(term);
-      
-      // Add more weight to important terms in the subject line
-      if (lowerSubject.includes(term)) {
-        confidence += 0.05;
-      } else {
-        confidence += 0.02;
-      }
-    }
-  }
-  
-  // If we have specific service detections, lower the term match threshold
-  const isSubscription = (matchCount >= 3) || (serviceName && matchCount >= 1) || (detectedFromPatterns.length > 0);
-  
-  // Boost confidence if service name was detected through patterns
-  if (detectedFromPatterns.length > 0) {
-    confidence += 0.3;
-    console.log(`SCAN-DEBUG: Boosting confidence due to pattern match: +0.3`);
-  }
-  // Boost confidence if service name was detected through direct matching
-  else if (serviceName) {
-    confidence += 0.15;
-    console.log(`SCAN-DEBUG: Boosting confidence due to service name: +0.15`);
-  }
-  
-  // Boost confidence based on pattern matches
-  // Check for price/amount patterns
-  const priceMatches = body.match(/\$\d+(\.\d{2})?|\d+\.\d{2}(USD|EUR|GBP)?|€\d+(\.\d{2})?|£\d+(\.\d{2})?/g) || [];
-  if (priceMatches.length > 0) {
-    confidence += 0.1;
-    console.log(`SCAN-DEBUG: Found price matches: ${priceMatches.join(', ')}`);
-  }
-  
-  // Extract price from matches
-  let price = null;
-  let currency = 'USD';
-  
-  if (priceMatches.length > 0) {
-    // Get the first match
-    const priceText = priceMatches[0];
-    
-    // Extract the currency symbol
-    if (priceText.includes('$')) {
-      currency = 'USD';
-    } else if (priceText.includes('€')) {
-      currency = 'EUR';
-    } else if (priceText.includes('£')) {
-      currency = 'GBP';
-    }
-    
-    // Extract the numeric amount
-    const numericMatch = priceText.match(/\d+(\.\d{2})?/);
-    if (numericMatch) {
-      price = parseFloat(numericMatch[0]);
-      console.log(`SCAN-DEBUG: Extracted price: ${price} ${currency}`);
-    }
-  }
-  
-  // Check for billing cycle patterns
-  const monthlyPattern = /monthly|per month|\/month|month-to-month|billed monthly/i;
-  const yearlyPattern = /yearly|per year|\/year|annual|annually|billed yearly/i;
-  const weeklyPattern = /weekly|per week|\/week|billed weekly/i;
-  const quarterlyPattern = /quarterly|every 3 months|3-month|billed quarterly/i;
-  
-  let billingFrequency = 'unknown';
-  
-  if (monthlyPattern.test(body) || monthlyPattern.test(subject)) {
-    billingFrequency = 'monthly';
-    confidence += 0.05;
-    console.log(`SCAN-DEBUG: Detected monthly billing cycle`);
-  } else if (yearlyPattern.test(body) || yearlyPattern.test(subject)) {
-    billingFrequency = 'yearly';
-    confidence += 0.05;
-    console.log(`SCAN-DEBUG: Detected yearly billing cycle`);
-  } else if (weeklyPattern.test(body) || weeklyPattern.test(subject)) {
-    billingFrequency = 'weekly';
-    confidence += 0.05;
-    console.log(`SCAN-DEBUG: Detected weekly billing cycle`);
-  } else if (quarterlyPattern.test(body) || quarterlyPattern.test(subject)) {
-    billingFrequency = 'quarterly';
-    confidence += 0.05;
-    console.log(`SCAN-DEBUG: Detected quarterly billing cycle`);
-  } else {
-    // Default to monthly if price found but no billing frequency
-    billingFrequency = 'monthly';
-    console.log(`SCAN-DEBUG: No billing cycle found, defaulting to monthly`);
-  }
-  
-  // Special case adjustments for specific services (based on common pricing models)
-  if (serviceName) {
-    if (serviceName === 'Vercel' && !price) {
-      if (lowerBody.includes('pro') || lowerBody.includes('team')) {
-        price = 20;  // Common Vercel Pro plan price
-        billingFrequency = 'monthly';
-        console.log(`SCAN-DEBUG: Applied Vercel-specific pricing`);
-      }
-    } else if (serviceName === 'Babbel' && !price) {
-      price = 6.95;  // Common Babbel price point
-      billingFrequency = 'monthly';
-      console.log(`SCAN-DEBUG: Applied Babbel-specific pricing`);
-    } else if ((serviceName === 'NBA League Pass' || serviceName.includes('NBA')) && !price) {
-      price = 14.99;  // Common NBA League Pass price point
-      billingFrequency = 'monthly';
-      console.log(`SCAN-DEBUG: Applied NBA League Pass-specific pricing`);
-    }
-  }
-  
-  // Cap confidence at 0.95 for fallback method
-  confidence = Math.min(confidence, 0.95);
-  console.log(`SCAN-DEBUG: Final confidence score: ${confidence.toFixed(2)}`);
-  
-  // Generate a future date based on billing frequency
-  const today = new Date();
+  let isSubscription = false;
+  let serviceName = null;
+  let amount = null;
+  let currency = null;
+  let billingFrequency = null;
   let nextBillingDate = null;
-  
-  if (price) {
-    if (billingFrequency === 'monthly') {
-      nextBillingDate = new Date(today.getFullYear(), today.getMonth() + 1, today.getDate());
-    } else if (billingFrequency === 'yearly') {
-      nextBillingDate = new Date(today.getFullYear() + 1, today.getMonth(), today.getDate());
-    } else if (billingFrequency === 'weekly') {
-      nextBillingDate = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
-    } else if (billingFrequency === 'quarterly') {
-      nextBillingDate = new Date(today.getFullYear(), today.getMonth() + 3, today.getDate());
+
+  // Normalize the text to lowercase for easier pattern matching
+  const normalizedBody = body.toLowerCase();
+  const normalizedSubject = subject ? subject.toLowerCase() : '';
+  const normalizedFrom = from ? from.toLowerCase() : '';
+
+  // Keywords that indicate a subscription email
+  const subscriptionKeywords = [
+    'subscription', 'subscribed', 'your plan', 'monthly plan', 'annual plan',
+    'membership', 'billing', 'payment', 'receipt', 'invoice', 'charge',
+    'renewal', 'renewed', 'will renew', 'has been renewed', 'auto-renewal',
+    'recurring', 'billed', 'paid', 'successfully charged',
+    'thank you for your payment', 'payment confirmation',
+    'premium', 'pro plan', 'plus plan', 'upgraded', 'upgrade'
+  ];
+
+  // Check subject line for subscription-related keywords
+  subscriptionKeywords.forEach(keyword => {
+    if (normalizedSubject.includes(keyword)) {
+      confidence += 20;
+      console.log(`SCAN-DEBUG: Found subscription keyword "${keyword}" in subject (confidence +20)`);
+    }
+  });
+
+  // Check email body for subscription-related keywords
+  subscriptionKeywords.forEach(keyword => {
+    if (normalizedBody.includes(keyword)) {
+      confidence += 10;
+      console.log(`SCAN-DEBUG: Found subscription keyword "${keyword}" in body (confidence +10)`);
+    }
+  });
+
+  // Check for currency symbols and amounts
+  const currencyPatterns = [
+    { pattern: /\$\s*(\d+(?:\.\d{2})?)/, currency: 'USD' },
+    { pattern: /€\s*(\d+(?:,\d{2})?)/, currency: 'EUR' },
+    { pattern: /£\s*(\d+(?:\.\d{2})?)/, currency: 'GBP' },
+    { pattern: /(\d+(?:\.\d{2})?)\s*USD/, currency: 'USD' },
+    { pattern: /(\d+(?:,\d{2})?)\s*EUR/, currency: 'EUR' },
+    { pattern: /(\d+(?:\.\d{2})?)\s*GBP/, currency: 'GBP' }
+  ];
+
+  for (const { pattern, currency: currencyCode } of currencyPatterns) {
+    const matches = body.match(pattern);
+    if (matches && matches[1]) {
+      amount = parseFloat(matches[1].replace(',', '.'));
+      currency = currencyCode;
+      confidence += 15;
+      console.log(`SCAN-DEBUG: Found currency pattern ${currencyCode} ${amount} (confidence +15)`);
+      break;
     }
   }
-  
-  // Final subscription detection result
-  const result = {
+
+  // Try to detect the service name from common patterns
+  const serviceNamePatterns = [
+    /thank you for subscribing to ([\w\s]+)/i,
+    /your ([\w\s]+) subscription/i,
+    /your ([\w\s]+) membership/i,
+    /your ([\w\s]+) plan/i,
+    /billing for ([\w\s]+)/i,
+    /payment to ([\w\s]+)/i,
+    /receipt from ([\w\s]+)/i,
+    /invoice from ([\w\s]+)/i
+  ];
+
+  // First try to extract from the body
+  for (const pattern of serviceNamePatterns) {
+    const matches = body.match(pattern);
+    if (matches && matches[1]) {
+      serviceName = matches[1].trim();
+      confidence += 10;
+      console.log(`SCAN-DEBUG: Found service name "${serviceName}" from body pattern (confidence +10)`);
+      break;
+    }
+  }
+
+  // If no service name found in body, try to extract from the sender
+  if (!serviceName && from) {
+    // Extract domain from email
+    const domainMatch = from.match(/@([\w.-]+)/);
+    if (domainMatch && domainMatch[1]) {
+      // Extract the domain name without the TLD
+      const domain = domainMatch[1].split('.')[0];
+      if (domain && domain.length > 1 && !['gmail', 'yahoo', 'hotmail', 'outlook', 'mail'].includes(domain)) {
+        serviceName = domain.charAt(0).toUpperCase() + domain.slice(1);
+        confidence += 5;
+        console.log(`SCAN-DEBUG: Derived service name "${serviceName}" from sender domain (confidence +5)`);
+      }
+    }
+  }
+
+  // If still no service name, use part of the subject line
+  if (!serviceName && subject) {
+    const words = subject.split(/\s+/).filter(word => 
+      word.length > 3 && 
+      !['your', 'subscription', 'receipt', 'invoice', 'payment', 'confirmation', 'billing'].includes(word.toLowerCase())
+    );
+    
+    if (words.length > 0) {
+      serviceName = words[0].charAt(0).toUpperCase() + words[0].slice(1).toLowerCase();
+      confidence += 3;
+      console.log(`SCAN-DEBUG: Used subject word "${serviceName}" as fallback service name (confidence +3)`);
+    }
+  }
+
+  // Detect billing frequency
+  const billingPatterns = [
+    { pattern: /monthly|per month|\/month|\/ month|month to month/i, frequency: 'monthly' },
+    { pattern: /yearly|per year|annual|\/year|\/ year/i, frequency: 'yearly' },
+    { pattern: /quarterly|per quarter|every 3 months|every three months/i, frequency: 'quarterly' },
+    { pattern: /weekly|per week|every week|\/week|\/ week/i, frequency: 'weekly' },
+    { pattern: /bi-weekly|every 2 weeks|every two weeks/i, frequency: 'bi-weekly' },
+    { pattern: /semi-annual|every 6 months|every six months/i, frequency: 'semi-annual' }
+  ];
+
+  for (const { pattern, frequency } of billingPatterns) {
+    if (pattern.test(normalizedBody) || pattern.test(normalizedSubject)) {
+      billingFrequency = frequency;
+      confidence += 10;
+      console.log(`SCAN-DEBUG: Detected billing frequency "${frequency}" (confidence +10)`);
+      break;
+    }
+  }
+
+  // Generate the next billing date based on the current date and billing frequency
+  if (billingFrequency) {
+    const today = new Date();
+    switch (billingFrequency) {
+      case 'monthly':
+        today.setMonth(today.getMonth() + 1);
+        break;
+      case 'yearly':
+        today.setFullYear(today.getFullYear() + 1);
+        break;
+      case 'quarterly':
+        today.setMonth(today.getMonth() + 3);
+        break;
+      case 'weekly':
+        today.setDate(today.getDate() + 7);
+        break;
+      case 'bi-weekly':
+        today.setDate(today.getDate() + 14);
+        break;
+      case 'semi-annual':
+        today.setMonth(today.getMonth() + 6);
+        break;
+    }
+    nextBillingDate = today.toISOString().split('T')[0]; // YYYY-MM-DD format
+  }
+
+  // Determine if this is likely a subscription based on confidence score
+  isSubscription = confidence >= 40;
+  console.log(`SCAN-DEBUG: Final confidence score: ${confidence}, subscription: ${isSubscription}`);
+
+  return {
     isSubscription,
-    confidence,
-    serviceName,
-    amount: price,
-    currency,
-    billingFrequency,
-    nextBillingDate: nextBillingDate ? nextBillingDate.toISOString() : null,
-    matchCount,
-    detectedTerms: matchedTerms,
-    emailSubject: subject,
-    emailFrom: from,
-    emailDate: date
+    serviceName: serviceName || 'Unknown Service',
+    amount: amount,
+    currency: currency,
+    billingFrequency: billingFrequency || 'unknown',
+    nextBillingDate: nextBillingDate,
+    confidence: confidence
   };
-  
-  console.log(`SCAN-DEBUG: Analysis result: isSubscription=${isSubscription}, confidence=${confidence.toFixed(2)}, service=${serviceName || 'unknown'}`);
-  return result;
+}
+
+/**
+ * Parse email headers to extract subject and from fields
+ * @param {Array} headers - Email headers array
+ * @returns {Object} Object containing subject, from, and date fields
+ */
+function parseEmailHeaders(headers) {
+  if (!headers || !Array.isArray(headers)) {
+    return { subject: '', from: '', date: '' };
+  }
+
+  let subject = '';
+  let from = '';
+  let date = '';
+
+  for (const header of headers) {
+    if (header.name === 'Subject') {
+      subject = header.value;
+    } else if (header.name === 'From') {
+      from = header.value;
+    } else if (header.name === 'Date') {
+      date = header.value;
+    }
+  }
+
+  return { subject, from, date };
+}
+
+module.exports = {
+  extractEmailBody,
+  analyzeEmailForSubscriptions,
+  parseEmailHeaders
 }; 
