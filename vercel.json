@@ -12,6 +12,10 @@
       "maxDuration": 10
     }
   },
+  "env": {
+    "SUPABASE_URL": "https://dstsluflwxzkwouxcjkh.supabase.co",
+    "SUPABASE_SERVICE_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRzdHNsdWZsd3h6a3dvdXhjamtoIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0NDAzMDE2NiwiZXhwIjoyMDU5NjA2MTY2fQ.wTG6R5ch0KvVMfpYqG2rvi3jPrU41pcvd1ZUmsLQ8"
+  },
   "headers": [
     {
       "source": "/api/(.*)",

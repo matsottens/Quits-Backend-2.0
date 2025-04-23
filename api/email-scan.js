@@ -6,9 +6,9 @@ import jwt from 'jsonwebtoken';
 import { extractEmailBody, analyzeEmailForSubscriptions, parseEmailHeaders } from './email-utils.js';
 const { verify } = jsonwebtoken;
 
-// Supabase config
+// Supabase config for API functions
 const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY;
+const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
 
 // Helper function to extract Gmail token from JWT
 const extractGmailToken = (token) => {
@@ -81,8 +81,8 @@ const fetchEmailsFromGmail = async (gmailToken) => {
   
   try {
     // Fetch subscription examples from the database for targeted search
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     
     console.log('SCAN-DEBUG: Fetching subscription examples from database');
