@@ -54,6 +54,7 @@
     { "source": "/(cors-test.html|test-auth|debug-cors)", "destination": "/public/$1" },
     { "source": "/api/debug", "destination": "/api/debug.js" },
     { "source": "/api/debug-env", "destination": "/api/debug-env.js" },
+    { "source": "/api/debug-supabase", "destination": "/api/debug-supabase.js" },
     { "source": "/api/google-proxy", "destination": "/api/google-proxy.js" },
     { "source": "/api/health", "destination": "/api/health.js" },
     { "source": "/api/auth/google/callback", "destination": "/api/auth/google/callback.js" },
