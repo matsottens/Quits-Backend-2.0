@@ -1,4 +1,5 @@
 // Helper utilities for email parsing and analysis
+// This is an ES module
 import fetch from 'node-fetch';
 import * as cheerio from 'cheerio';
 import { createClient } from '@supabase/supabase-js';
@@ -340,7 +341,8 @@ function parseEmailHeaders(headers) {
   return { subject, from, date };
 }
 
-module.exports = {
+// Export using ES module syntax instead of CommonJS
+export {
   extractEmailBody,
   analyzeEmailForSubscriptions,
   parseEmailHeaders

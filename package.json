@@ -6,7 +6,9 @@
   "type": "module",
   "scripts": {
     "build": "cd backend && npm install && npm run build",
-    "start": "node api/index.js"
+    "start": "node api/index.js",
+    "verify-modules": "node verify-modules.js",
+    "predeploy": "npm run verify-modules"
   },
   "engines": {
     "node": ">=18.x"
