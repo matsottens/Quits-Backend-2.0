@@ -1265,17 +1265,26 @@ export default async function handler(req, res) {
             const messages = await fetchEmailsFromGmail(gmailToken);
             
             console.log(`SCAN-DEBUG: Successfully fetched ${messages.length} emails from Gmail`);
+            console.log(`SCAN-DEBUG: ===== Email Scan Statistics =====`);
+            console.log(`SCAN-DEBUG: Total emails found: ${messages.length}`);
+            console.log(`SCAN-DEBUG: Starting batch processing...`);
             
             // Update scan record with emails found
             await updateScanStatus(scanId, dbUserId, {
               status: 'in_progress',
               progress: 20,
               emails_found: messages.length,
-              emails_to_process: messages.length
+              emails_to_process: messages.length,
+              scan_stats: {
+                total_emails: messages.length,
+                start_time: new Date().toISOString()
+              }
             });
             
             let processedCount = 0;
+            let skippedCount = 0;
             const detectedSubscriptions = [];
+            const analysisResults = [];
             
             console.log(`SCAN-DEBUG: Starting to process ${messages.length} emails`);
             
@@ -1292,7 +1301,13 @@ export default async function handler(req, res) {
                 await updateScanStatus(scanId, dbUserId, {
                   progress: progressPercent,
                   emails_processed: processedCount,
-                  subscriptions_found: detectedSubscriptions.length
+                  subscriptions_found: detectedSubscriptions.length,
+                  scan_stats: {
+                    processed_count: processedCount,
+                    skipped_count: skippedCount,
+                    detected_subscriptions: detectedSubscriptions.length,
+                    last_update: new Date().toISOString()
+                  }
                 });
               }
               
@@ -1302,6 +1317,7 @@ export default async function handler(req, res) {
               const emailData = await fetchEmailContent(gmailToken, message.id);
               if (!emailData) {
                 console.log(`SCAN-DEBUG: Failed to fetch email ${message.id}, skipping`);
+                skippedCount++;
                 continue;
               }
               
@@ -1313,6 +1329,14 @@ export default async function handler(req, res) {
               try {
                 // Analyze with Gemini AI
                 const analysis = await analyzeEmailWithGemini(emailData);
+                
+                // Store analysis results
+                analysisResults.push({
+                  from,
+                  subject,
+                  analysis,
+                  timestamp: new Date().toISOString()
+                });
                 
                 // Log analysis results
                 console.log('SCAN-DEBUG: Analysis result:', JSON.stringify(analysis));
@@ -1328,12 +1352,27 @@ export default async function handler(req, res) {
                 }
               } catch (analysisError) {
                 console.error(`SCAN-DEBUG: Error analyzing email: ${analysisError.message}`);
+                skippedCount++;
               }
             }
             
-            console.log(`SCAN-DEBUG: Completed processing all ${processedCount} emails`);
+            // Final statistics
+            const endTime = new Date().toISOString();
+            const scanStats = {
+              total_emails: messages.length,
+              processed_count: processedCount,
+              skipped_count: skippedCount,
+              detected_subscriptions: detectedSubscriptions.length,
+              start_time: analysisResults[0]?.timestamp,
+              end_time: endTime,
+              analysis_results: analysisResults
+            };
+            
+            console.log(`SCAN-DEBUG: ===== Final Scan Statistics =====`);
+            console.log(`SCAN-DEBUG: Total emails processed: ${processedCount}/${messages.length}`);
+            console.log(`SCAN-DEBUG: Skipped emails: ${skippedCount}`);
             console.log(`SCAN-DEBUG: Found ${detectedSubscriptions.length} subscriptions`);
-            console.log(`SCAN-DEBUG: Scan efficiency: ${detectedSubscriptions.length} subscriptions found in ${processedCount} emails (${(detectedSubscriptions.length/processedCount*100).toFixed(2)}% hit rate)`);
+            console.log(`SCAN-DEBUG: Scan efficiency: ${(detectedSubscriptions.length/processedCount*100).toFixed(2)}% hit rate`);
             
             // Clear the ping interval
             clearInterval(pingInterval);
@@ -1350,7 +1389,8 @@ export default async function handler(req, res) {
               emails_scanned: processedCount,
               subscriptions_found: detectedSubscriptions.length,
               is_test_data: isTestData,
-              completed_at: new Date().toISOString()
+              completed_at: endTime,
+              scan_stats: scanStats
             });
             
             console.log(`SCAN-DEBUG: ============== SCANNING PROCESS COMPLETED ==============`);
