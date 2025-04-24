@@ -4,6 +4,7 @@ import fetch from 'node-fetch';
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 import { extractEmailBody, analyzeEmailForSubscriptions, parseEmailHeaders } from './email-utils.js';
+import google from 'googleapis';
 const { verify } = jsonwebtoken;
 
 // Supabase config
@@ -86,8 +87,17 @@ async function fetchSubscriptionExamples() {
  */
 const fetchEmailsFromGmail = async (gmailToken) => {
   console.log('SCAN-DEBUG: Starting to fetch emails from Gmail');
+  console.log('SCAN-DEBUG: Gmail token length:', gmailToken?.length || 0);
   
   try {
+    // First validate the token
+    const isValidToken = await validateGmailToken(gmailToken);
+    if (!isValidToken) {
+      console.error('SCAN-DEBUG: Gmail token validation failed');
+      return [];
+    }
+    console.log('SCAN-DEBUG: Gmail token validated successfully');
+    
     // Fetch subscription examples from the database for targeted search
     const supabaseUrl = process.env.SUPABASE_URL;
     const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
@@ -99,7 +109,9 @@ const fetchEmailsFromGmail = async (gmailToken) => {
       .select('service_name, sender_pattern, subject_pattern');
     
     if (error) {
-      console.error('Error fetching subscription examples:', error.message);
+      console.error('SCAN-DEBUG: Error fetching subscription examples:', error.message);
+    } else {
+      console.log(`SCAN-DEBUG: Found ${examples?.length || 0} subscription examples`);
     }
     
     // Build targeted search queries based on subscription examples
@@ -689,31 +701,28 @@ const saveSubscription = async (userId, subscriptionData) => {
 };
 
 // Function to validate Gmail token
-const validateGmailToken = async (gmailToken) => {
+const validateGmailToken = async (token) => {
+  console.log('SCAN-DEBUG: Validating Gmail token');
+  if (!token) {
+    console.error('SCAN-DEBUG: No Gmail token provided');
+    return false;
+  }
+
   try {
-    // Make a simple call to Gmail API to check if token is valid
-    const response = await fetch(
-      'https://www.googleapis.com/gmail/v1/users/me/profile',
-      {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${gmailToken}`,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-
-    if (!response.ok) {
-      const errorBody = await response.text();
-      console.error(`Gmail token validation failed: ${errorBody}`);
-      return false;
-    }
-
-    const data = await response.json();
-    console.log(`Gmail token validated for email: ${data.emailAddress}`);
+    const gmail = google.gmail({ version: 'v1', auth: token });
+    console.log('SCAN-DEBUG: Making test call to Gmail API');
+    const response = await gmail.users.getProfile({ userId: 'me' });
+    console.log('SCAN-DEBUG: Gmail API response:', response.status);
     return true;
   } catch (error) {
-    console.error('Error validating Gmail token:', error);
+    console.error('SCAN-DEBUG: Gmail token validation failed:', error.message);
+    if (error.response) {
+      console.error('SCAN-DEBUG: Gmail API error response:', {
+        status: error.response.status,
+        statusText: error.response.statusText,
+        data: error.response.data
+      });
+    }
     return false;
   }
 };
@@ -1034,6 +1043,43 @@ const updateScanStatus = async (scanId, dbUserId, updates) => {
   } catch (error) {
     console.error(`SCAN-DEBUG: Error updating scan status: ${error.message}`);
     return false;
+  }
+};
+
+const searchEmails = async (gmail, query) => {
+  console.log('SCAN-DEBUG: Searching emails with query:', query);
+  try {
+    const response = await gmail.users.messages.list({
+      userId: 'me',
+      q: query,
+      maxResults: 250
+    });
+    
+    const messages = response.data.messages || [];
+    console.log('SCAN-DEBUG: Found', messages.length, 'emails matching query');
+    
+    if (messages.length === 0) {
+      console.log('SCAN-DEBUG: No emails found with query, trying broader search');
+      const broadResponse = await gmail.users.messages.list({
+        userId: 'me',
+        maxResults: 250
+      });
+      const broadMessages = broadResponse.data.messages || [];
+      console.log('SCAN-DEBUG: Found', broadMessages.length, 'emails in broad search');
+      return broadMessages;
+    }
+    
+    return messages;
+  } catch (error) {
+    console.error('SCAN-DEBUG: Error searching emails:', error.message);
+    if (error.response) {
+      console.error('SCAN-DEBUG: Gmail API error response:', {
+        status: error.response.status,
+        statusText: error.response.statusText,
+        data: error.response.data
+      });
+    }
+    return [];
   }
 };
 
