@@ -1,6 +1,7 @@
 // Debug endpoint for scan issues
 import jsonwebtoken from 'jsonwebtoken';
 import fetch from 'node-fetch';
+import { createClient } from '@supabase/supabase-js';
 const { verify } = jsonwebtoken;
 
 // Supabase config
@@ -9,150 +10,262 @@ const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
 const supabaseKey = supabaseServiceRoleKey || supabaseServiceKey;
 
+// Initialize Supabase client
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+// Sample subscriptions with realistic data
+const DEMO_SUBSCRIPTIONS = [
+  {
+    name: "Netflix (DEMO)",
+    price: 15.99,
+    currency: "USD",
+    billing_cycle: "monthly",
+    next_billing_date: new Date(new Date().setMonth(new Date().getMonth() + 1)).toISOString().split('T')[0],
+    category: "entertainment",
+    provider: "Netflix",
+    is_manual: false,
+    source: "email_scan",
+    confidence: 0.92
+  },
+  {
+    name: "Spotify Premium (DEMO)",
+    price: 9.99,
+    currency: "USD",
+    billing_cycle: "monthly",
+    next_billing_date: new Date(new Date().setDate(new Date().getDate() + 15)).toISOString().split('T')[0],
+    category: "music",
+    provider: "Spotify",
+    is_manual: false,
+    source: "email_scan",
+    confidence: 0.89
+  },
+  {
+    name: "Amazon Prime (DEMO)",
+    price: 14.99,
+    currency: "USD",
+    billing_cycle: "monthly",
+    next_billing_date: new Date(new Date().setDate(new Date().getDate() + 22)).toISOString().split('T')[0],
+    category: "shopping",
+    provider: "Amazon",
+    is_manual: false,
+    source: "email_scan",
+    confidence: 0.95
+  },
+  {
+    name: "Disney+ (DEMO)",
+    price: 7.99,
+    currency: "USD",
+    billing_cycle: "monthly",
+    next_billing_date: new Date(new Date().setDate(new Date().getDate() + 18)).toISOString().split('T')[0],
+    category: "entertainment",
+    provider: "Disney",
+    is_manual: false,
+    source: "email_scan",
+    confidence: 0.93
+  },
+  {
+    name: "Adobe Creative Cloud (DEMO)",
+    price: 52.99,
+    currency: "USD",
+    billing_cycle: "monthly",
+    next_billing_date: new Date(new Date().setDate(new Date().getDate() + 27)).toISOString().split('T')[0],
+    category: "software",
+    provider: "Adobe",
+    is_manual: false,
+    source: "email_scan",
+    confidence: 0.91
+  },
+  {
+    name: "HBO Max (DEMO)",
+    price: 9.99,
+    currency: "USD",
+    billing_cycle: "monthly",
+    next_billing_date: new Date(new Date().setDate(new Date().getDate() + 12)).toISOString().split('T')[0],
+    category: "entertainment",
+    provider: "HBO",
+    is_manual: false,
+    source: "email_scan",
+    confidence: 0.88
+  },
+  {
+    name: "YouTube Premium (DEMO)",
+    price: 11.99,
+    currency: "USD",
+    billing_cycle: "monthly",
+    next_billing_date: new Date(new Date().setDate(new Date().getDate() + 8)).toISOString().split('T')[0],
+    category: "entertainment",
+    provider: "Google",
+    is_manual: false,
+    source: "email_scan",
+    confidence: 0.90
+  },
+  {
+    name: "Microsoft 365 (DEMO)",
+    price: 6.99,
+    currency: "USD",
+    billing_cycle: "monthly",
+    next_billing_date: new Date(new Date().setDate(new Date().getDate() + 20)).toISOString().split('T')[0],
+    category: "software",
+    provider: "Microsoft",
+    is_manual: false,
+    source: "email_scan",
+    confidence: 0.94
+  },
+  {
+    name: "Apple Music (DEMO)",
+    price: 9.99,
+    currency: "USD",
+    billing_cycle: "monthly",
+    next_billing_date: new Date(new Date().setDate(new Date().getDate() + 5)).toISOString().split('T')[0],
+    category: "music",
+    provider: "Apple",
+    is_manual: false,
+    source: "email_scan",
+    confidence: 0.87
+  },
+  {
+    name: "Medium (DEMO)",
+    price: 5.00,
+    currency: "USD",
+    billing_cycle: "monthly",
+    next_billing_date: new Date(new Date().setDate(new Date().getDate() + 24)).toISOString().split('T')[0],
+    category: "reading",
+    provider: "Medium",
+    is_manual: false,
+    source: "email_scan",
+    confidence: 0.86
+  }
+];
+
 // Function to add a test subscription
-const addTestSubscription = async (dbUserId) => {
+const addTestSubscription = async (dbUserId, scanId) => {
+  const timestamp = new Date().toISOString();
   try {
-    console.log(`DEBUG-SCAN: Adding test subscription for user ${dbUserId}`);
+    console.log(`DEBUG-SCAN: Adding test subscription for scan ${scanId}, user ${dbUserId}`);
     
-    // Get the structure of the subscriptions table first
-    try {
-      console.log(`DEBUG-SCAN: Checking subscriptions table structure`);
-      const structureResponse = await fetch(
-        `${supabaseUrl}/rest/v1/subscriptions?limit=1`, 
-        {
-          method: 'GET',
-          headers: {
-            'apikey': supabaseKey,
-            'Authorization': `Bearer ${supabaseKey}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
+    // Randomly select 5-15 test subscriptions
+    const testSubscriptionsCount = Math.floor(Math.random() * 11) + 5;
+    console.log(`DEBUG-SCAN: Will add ${testSubscriptionsCount} test subscriptions`);
+    
+    // Set up email statistics
+    const emailsFound = Math.floor(Math.random() * 151) + 100; // 100-250 emails
+    const emailsToProcess = emailsFound;
+    const emailsProcessed = emailsToProcess; // All processed in debug mode
+    
+    const subscriptions = [];
+    
+    // Create test subscriptions
+    for (let i = 0; i < testSubscriptionsCount; i++) {
+      const testSub = DEMO_SUBSCRIPTIONS[i % DEMO_SUBSCRIPTIONS.length];
       
-      if (structureResponse.ok) {
-        console.log(`DEBUG-SCAN: Subscription table exists and is accessible`);
-      } else {
-        console.error(`DEBUG-SCAN: Error checking subscriptions table: ${await structureResponse.text()}`);
+      const subscriptionData = {
+        ...testSub,
+        user_id: dbUserId,
+        scan_id: scanId,
+        created_at: timestamp,
+        updated_at: timestamp,
+        is_demo: true
+      };
+      
+      const { data, error } = await supabase
+        .from('subscriptions')
+        .insert(subscriptionData)
+        .select();
+        
+      if (error) {
+        console.error(`DEBUG-SCAN: Error adding test subscription: ${error.message}`);
+      } else if (data && data.length > 0) {
+        subscriptions.push(data[0]);
       }
-    } catch (structureError) {
-      console.error(`DEBUG-SCAN: Error checking table structure: ${structureError.message}`);
     }
     
-    // Create a subscription in the database
-    const subscriptionData = {
-      user_id: dbUserId,
-      name: "Debug Subscription (Manually Created)",
-      price: 9.99,
-      currency: "USD",
-      billing_cycle: "monthly",
-      next_billing_date: new Date(new Date().setMonth(new Date().getMonth() + 1)).toISOString(),
-      provider: "Debug Provider",
-      category: "Debug",
-      is_manual: true,
-      notes: "Created by debug endpoint",
-      source: "debug_endpoint",
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+    console.log(`DEBUG-SCAN: Added ${subscriptions.length} test subscriptions`);
+    
+    // Update scan status with completed status and email stats
+    const scanUpdates = {
+      status: "completed",
+      progress: 100,
+      emails_found: emailsFound,
+      emails_to_process: emailsToProcess,
+      emails_processed: emailsProcessed,
+      subscriptions_found: subscriptions.length,
+      is_demo: true,
+      completed_at: timestamp
     };
     
-    console.log(`DEBUG-SCAN: Attempting to create subscription with fields: ${Object.keys(subscriptionData).join(', ')}`);
+    await updateScanStatus(scanId, dbUserId, scanUpdates);
     
-    const response = await fetch(
-      `${supabaseUrl}/rest/v1/subscriptions`, 
-      {
-        method: 'POST',
-        headers: {
-          'apikey': supabaseKey,
-          'Authorization': `Bearer ${supabaseKey}`,
-          'Content-Type': 'application/json',
-          'Prefer': 'return=representation'
-        },
-        body: JSON.stringify(subscriptionData)
+    return {
+      success: true,
+      subscriptions_added: subscriptions.length,
+      scan_stats: {
+        emails_found: emailsFound,
+        emails_processed: emailsProcessed,
+        emails_to_process: emailsToProcess,
+        subscriptions_found: subscriptions.length
       }
-    );
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`DEBUG-SCAN: Failed to create subscription with error: ${errorText}`);
-      
-      // Try a minimalist approach with only required fields if first attempt fails
-      if (errorText.includes("could not find") || errorText.includes("column") || errorText.includes("does not exist")) {
-        console.log(`DEBUG-SCAN: Trying again with only essential fields`);
-        
-        const minimalData = {
-          user_id: dbUserId,
-          name: "Debug Subscription (Essential Fields)",
-          price: 9.99,
-          billing_cycle: "monthly",
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        };
-        
-        const retryResponse = await fetch(
-          `${supabaseUrl}/rest/v1/subscriptions`, 
-          {
-            method: 'POST',
-            headers: {
-              'apikey': supabaseKey,
-              'Authorization': `Bearer ${supabaseKey}`,
-              'Content-Type': 'application/json',
-              'Prefer': 'return=representation'
-            },
-            body: JSON.stringify(minimalData)
-          }
-        );
-        
-        if (!retryResponse.ok) {
-          throw new Error(`Second attempt also failed: ${await retryResponse.text()}`);
-        }
-        
-        const retrySubscription = await retryResponse.json();
-        console.log(`DEBUG-SCAN: Successfully added minimal subscription with ID: ${retrySubscription[0]?.id}`);
-        return true;
-      }
-      
-      throw new Error(`Failed to create subscription: ${errorText}`);
-    }
-    
-    const subscription = await response.json();
-    console.log(`DEBUG-SCAN: Successfully added test subscription with ID: ${subscription[0]?.id}`);
-    return true;
+    };
   } catch (error) {
-    console.error(`DEBUG-SCAN: Error adding test subscription: ${error.message}`);
-    return false;
+    console.error(`DEBUG-SCAN: Error in addTestSubscription: ${error.message}`);
+    return { success: false, error: error.message };
   }
 };
 
 // Function to update scan status
 const updateScanStatus = async (scanId, dbUserId, updates) => {
   try {
-    console.log(`DEBUG-SCAN: Updating status for scan ${scanId}: ${JSON.stringify(updates)}`);
+    console.log(`DEBUG-SCAN: Updating scan status for ${scanId}, user ${dbUserId} with updates:`, updates);
     
-    // Update the scan record in the database
-    const response = await fetch(
-      `${supabaseUrl}/rest/v1/scan_history?scan_id=eq.${scanId}`, 
-      {
-        method: 'PATCH',
-        headers: {
-          'apikey': supabaseKey,
-          'Authorization': `Bearer ${supabaseKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          ...updates,
-          updated_at: new Date().toISOString()
-        })
+    // Add timestamp to track when updates occur
+    const timestamp = new Date().toISOString();
+    const lastUpdateTime = new Date().getTime();
+    
+    // Create full updates object with all necessary fields
+    const fullUpdates = {
+      ...updates,
+      updated_at: timestamp,
+      last_update_time: lastUpdateTime
+    };
+    
+    // Ensure we have email stats
+    if (!fullUpdates.emails_found || !fullUpdates.emails_to_process || !fullUpdates.emails_processed) {
+      // Fetch current scan status to estimate values
+      const { data: currentScan } = await supabase
+        .from('scans')
+        .select('*')
+        .eq('id', scanId)
+        .single();
+        
+      if (currentScan) {
+        // Use existing values or defaults
+        fullUpdates.emails_found = fullUpdates.emails_found || currentScan.emails_found || 100;
+        fullUpdates.emails_to_process = fullUpdates.emails_to_process || currentScan.emails_to_process || 100;
+        
+        // Calculate processed emails based on progress if not provided
+        if (!fullUpdates.emails_processed) {
+          const progress = fullUpdates.progress || currentScan.progress || 0;
+          fullUpdates.emails_processed = Math.floor((fullUpdates.emails_to_process * progress) / 100);
+        }
       }
-    );
-    
-    if (!response.ok) {
-      throw new Error(`Failed to update scan status: ${await response.text()}`);
     }
     
-    console.log(`DEBUG-SCAN: Successfully updated scan status`);
+    console.log(`DEBUG-SCAN: Final updates for scan ${scanId}:`, fullUpdates);
+    
+    const { data, error } = await supabase
+      .from('scans')
+      .update(fullUpdates)
+      .eq('id', scanId)
+      .eq('user_id', dbUserId);
+      
+    if (error) {
+      console.error(`DEBUG-SCAN: Error updating scan status: ${error.message}`);
+      return false;
+    }
+    
+    console.log(`DEBUG-SCAN: Successfully updated scan status for ${scanId}`);
     return true;
   } catch (error) {
-    console.error(`DEBUG-SCAN: Error updating scan status: ${error.message}`);
+    console.error(`DEBUG-SCAN: Error in updateScanStatus: ${error.message}`);
     return false;
   }
 };
@@ -257,7 +370,7 @@ export default async function handler(req, res) {
       let subscriptionAdded = false;
       try {
         console.log(`DEBUG-SCAN: Adding test subscription directly`);
-        const added = await addTestSubscription(dbUserId);
+        const added = await addTestSubscription(dbUserId, scanId);
         subscriptionAdded = added;
       } catch (subError) {
         console.error(`DEBUG-SCAN: Error adding subscription: ${subError.message}`);
@@ -316,5 +429,168 @@ export default async function handler(req, res) {
       details: error.message,
       scanId: req.query.scanId || 'unknown'
     });
+  }
+}
+
+app.post('/api/debug/force-complete-scan', async (req, res) => {
+  console.log('🔧 DEBUG: Force completing scan');
+
+  try {
+    const { user } = await getAuthenticatedUser(req);
+    
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    
+    const dbUserId = user.id;
+    
+    // Get current scan
+    const { data: scanData, error: scanError } = await supabase
+      .from('scans')
+      .select('id, status')
+      .eq('user_id', dbUserId)
+      .order('created_at', { ascending: false })
+      .limit(1);
+      
+    if (scanError) {
+      console.error('Error fetching scan:', scanError);
+      return res.status(500).json({ error: 'Failed to fetch scan' });
+    }
+    
+    if (!scanData || scanData.length === 0) {
+      return res.status(404).json({ error: 'No scan found' });
+    }
+    
+    const scanId = scanData[0].id;
+    
+    // Update scan status to completed
+    const { error: updateError } = await supabase
+      .from('scans')
+      .update({ 
+        status: 'completed',
+        progress: 100,
+        completed_at: new Date().toISOString(),
+        emails_processed: 100,
+        emails_found: 100,
+        emails_to_process: 100
+      })
+      .eq('id', scanId);
+      
+    if (updateError) {
+      console.error('Error updating scan:', updateError);
+      return res.status(500).json({ error: 'Failed to update scan' });
+    }
+    
+    // Add test subscription with is_test_data flag
+    const testDataParams = {
+      body: {
+        add_test_data: true
+      }
+    };
+    
+    const addResult = await addTestSubscription(dbUserId, scanId);
+    
+    return res.json({ 
+      success: true, 
+      message: 'Scan marked as completed',
+      test_data_added: addResult
+    });
+  } catch (error) {
+    console.error('Error in force complete:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+async function addTestSubscription(req, res) {
+  try {
+    const user_id = req.user_id;
+    
+    const { scan_id, count = 3, emails_stats = true } = req.query;
+    
+    if (!scan_id) {
+      return res.status(400).json({ error: 'Missing scan_id parameter' });
+    }
+    
+    console.log(`Adding ${count} test subscriptions to scan ${scan_id}`);
+    
+    // Get random subscriptions from the demo list
+    const numSubscriptions = Math.min(parseInt(count), DEMO_SUBSCRIPTIONS.length);
+    const selectedIndices = new Set();
+    
+    while (selectedIndices.size < numSubscriptions) {
+      const randomIndex = Math.floor(Math.random() * DEMO_SUBSCRIPTIONS.length);
+      selectedIndices.add(randomIndex);
+    }
+    
+    const selectedSubscriptions = Array.from(selectedIndices).map(index => {
+      const sub = DEMO_SUBSCRIPTIONS[index];
+      return {
+        ...sub,
+        user_id,
+        scan_id,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        is_demo: true
+      };
+    });
+    
+    // Insert the test subscriptions
+    const { data: insertedSubs, error } = await supabase
+      .from('detected_subscriptions')
+      .insert(selectedSubscriptions)
+      .select();
+      
+    if (error) {
+      console.error('Error inserting test subscriptions:', error);
+      return res.status(500).json({ error: 'Failed to insert test subscriptions', details: error });
+    }
+    
+    // Generate realistic email statistics for the scan
+    const emailsFound = Math.floor(Math.random() * 200) + 100; // 100-300 emails
+    const emailsToProcess = emailsFound; // Process all found emails in demo mode
+    const emailsProcessed = emailsToProcess; // All processed (since this is a demo)
+    
+    // Current timestamp for update
+    const timestamp = new Date().toISOString();
+    
+    // Update scan status with completion and email stats
+    const scanUpdates = {
+      status: 'completed',
+      progress: 100,
+      emails_found: emailsFound,
+      emails_to_process: emailsToProcess,
+      emails_processed: emailsProcessed,
+      subscriptions_found: numSubscriptions,
+      is_demo: true,
+      completed_at: timestamp,
+      updated_at: timestamp
+    };
+    
+    // Use the existing updateScanStatus function with proper parameters
+    const updateSuccess = await updateScanStatus(scan_id, user_id, scanUpdates);
+    
+    if (!updateSuccess) {
+      console.error('Error updating scan status for demo subscriptions');
+      return res.status(500).json({ 
+        error: 'Subscriptions added but failed to update scan status', 
+        subscriptions: insertedSubs
+      });
+    }
+    
+    return res.status(200).json({ 
+      success: true, 
+      message: `Added ${numSubscriptions} test subscriptions to scan ${scan_id}`,
+      subscriptions: insertedSubs,
+      scan_stats: {
+        emails_found: emailsFound,
+        emails_to_process: emailsToProcess,
+        emails_processed: emailsProcessed,
+        subscriptions_found: numSubscriptions,
+        is_demo: true
+      }
+    });
+  } catch (err) {
+    console.error('Error in addTestSubscription:', err);
+    return res.status(500).json({ error: 'Internal server error', details: err.message });
   }
 } 

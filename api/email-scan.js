@@ -726,7 +726,7 @@ const addTestSubscription = async (dbUserId) => {
     // Sample subscriptions with realistic data
     const sampleSubscriptions = [
       {
-        name: "Netflix",
+        name: "Netflix (DEMO)",
         price: 15.99,
         billing_cycle: "monthly",
         next_billing_date: new Date(new Date().setMonth(new Date().getMonth() + 1)).toISOString().split('T')[0],
@@ -737,7 +737,7 @@ const addTestSubscription = async (dbUserId) => {
         is_test_data: true
       },
       {
-        name: "Spotify Premium",
+        name: "Spotify Premium (DEMO)",
         price: 9.99,
         billing_cycle: "monthly",
         next_billing_date: new Date(new Date().setDate(new Date().getDate() + 15)).toISOString().split('T')[0],
@@ -748,7 +748,7 @@ const addTestSubscription = async (dbUserId) => {
         is_test_data: true
       },
       {
-        name: "Amazon Prime",
+        name: "Amazon Prime (DEMO)",
         price: 14.99,
         billing_cycle: "monthly",
         next_billing_date: new Date(new Date().setDate(new Date().getDate() + 22)).toISOString().split('T')[0],
@@ -756,6 +756,28 @@ const addTestSubscription = async (dbUserId) => {
         is_manual: false,
         source: "email_scan",
         confidence: 0.95,
+        is_test_data: true
+      },
+      {
+        name: "Disney+ (DEMO)",
+        price: 7.99,
+        billing_cycle: "monthly",
+        next_billing_date: new Date(new Date().setDate(new Date().getDate() + 18)).toISOString().split('T')[0],
+        category: "entertainment",
+        is_manual: false,
+        source: "email_scan",
+        confidence: 0.93,
+        is_test_data: true
+      },
+      {
+        name: "Adobe Creative Cloud (DEMO)",
+        price: 52.99,
+        billing_cycle: "monthly",
+        next_billing_date: new Date(new Date().setDate(new Date().getDate() + 27)).toISOString().split('T')[0],
+        category: "software",
+        is_manual: false,
+        source: "email_scan",
+        confidence: 0.91,
         is_test_data: true
       }
     ];
@@ -912,12 +934,12 @@ const updateScanStatus = async (scanId, dbUserId, updates) => {
     };
 
     // Ensure we have emails_found, emails_to_process, and emails_processed for progress tracking
-    if (!fullUpdates.emails_found && !fullUpdates.emails_to_process && updates.progress) {
-      console.log(`SCAN-DEBUG: Adding email stats based on progress ${updates.progress}%`);
+    if (!fullUpdates.emails_found || !fullUpdates.emails_to_process || fullUpdates.emails_processed === undefined) {
+      console.log(`SCAN-DEBUG: Adding or updating email stats for progress calculation`);
       
       // Get current scan status to ensure we have up-to-date stats
       const currentScanResponse = await fetch(
-        `${supabaseUrl}/rest/v1/scan_history?scan_id=eq.${scanId}`, 
+        `${supabaseUrl}/rest/v1/scan_history?scan_id=eq.${scanId}&select=*`, 
         {
           method: 'GET',
           headers: {
@@ -931,17 +953,60 @@ const updateScanStatus = async (scanId, dbUserId, updates) => {
       if (currentScanResponse.ok) {
         const currentScan = await currentScanResponse.json();
         if (currentScan && currentScan.length > 0) {
-          // Use existing values if available, otherwise estimate based on progress
-          fullUpdates.emails_found = currentScan[0].emails_found || 250;
-          fullUpdates.emails_to_process = currentScan[0].emails_to_process || 250;
-          
-          // Calculate processed emails based on progress percentage
-          if (!fullUpdates.emails_processed) {
-            const processPercent = updates.progress / 100;
-            fullUpdates.emails_processed = Math.floor(fullUpdates.emails_to_process * processPercent);
+          // Keep existing values if we have them
+          if (!fullUpdates.emails_found) {
+            fullUpdates.emails_found = currentScan[0].emails_found || 250;
           }
+          
+          if (!fullUpdates.emails_to_process) {
+            fullUpdates.emails_to_process = currentScan[0].emails_to_process || 250;
+          }
+          
+          if (fullUpdates.emails_processed === undefined) {
+            // If we're updating progress but not emails_processed, calculate it
+            if (updates.progress !== undefined) {
+              const progressPercent = updates.progress / 100;
+              fullUpdates.emails_processed = Math.floor(fullUpdates.emails_to_process * progressPercent);
+            } else {
+              fullUpdates.emails_processed = currentScan[0].emails_processed || 0;
+            }
+          }
+          
+          // Always include subscriptions_found
+          if (fullUpdates.subscriptions_found === undefined) {
+            fullUpdates.subscriptions_found = currentScan[0].subscriptions_found || 0;
+          }
+        } else {
+          // No current scan found, set defaults
+          if (!fullUpdates.emails_found) fullUpdates.emails_found = 250;
+          if (!fullUpdates.emails_to_process) fullUpdates.emails_to_process = 250;
+          if (fullUpdates.emails_processed === undefined) {
+            fullUpdates.emails_processed = updates.progress ? Math.floor((updates.progress / 100) * 250) : 0;
+          }
+          if (fullUpdates.subscriptions_found === undefined) fullUpdates.subscriptions_found = 0;
         }
+      } else {
+        // Fallback defaults if we can't get current scan
+        if (!fullUpdates.emails_found) fullUpdates.emails_found = 250;
+        if (!fullUpdates.emails_to_process) fullUpdates.emails_to_process = 250;
+        if (fullUpdates.emails_processed === undefined) {
+          fullUpdates.emails_processed = updates.progress ? Math.floor((updates.progress / 100) * 250) : 0;
+        }
+        if (fullUpdates.subscriptions_found === undefined) fullUpdates.subscriptions_found = 0;
       }
+    }
+    
+    // If we have emails_processed and emails_to_process but no progress update,
+    // calculate the progress based on the email processing
+    if (fullUpdates.emails_processed !== undefined && 
+        fullUpdates.emails_to_process && 
+        updates.progress === undefined) {
+      
+      // Calculate progress based on email processing (scale to 20-90% range)
+      const processingProgress = fullUpdates.emails_processed / fullUpdates.emails_to_process;
+      fullUpdates.progress = Math.min(90, Math.max(20, Math.floor(20 + (processingProgress * 70))));
+      
+      console.log(`SCAN-DEBUG: Calculated progress ${fullUpdates.progress}% based on email processing (${fullUpdates.emails_processed}/${fullUpdates.emails_to_process})`);
     }
     
     console.log(`SCAN-DEBUG: Updating scan status for scan ${scanId}: ${JSON.stringify(fullUpdates)}`);
@@ -1078,14 +1143,38 @@ export default async function handler(req, res) {
             console.log(`SCAN-DEBUG: [PING #${pingCount}] Scan still in progress after ${elapsedSeconds} seconds`);
             
             try {
-              // Update scan progress to show we're still alive
-              const currentProgress = Math.min(85, 30 + pingCount * 5); // Incrementally increase progress
-              await updateScanStatus(scanId, dbUserId, {
-                progress: currentProgress
-              });
-              console.log(`SCAN-DEBUG: Updated progress to ${currentProgress}% as ping`);
+              // Don't update progress artificially - only update timestamp to show the scan is still alive
+              // Get current scan status to ensure consistent reporting
+              const currentScanResponse = await fetch(
+                `${supabaseUrl}/rest/v1/scan_history?scan_id=eq.${scanId}&select=*`, 
+                {
+                  method: 'GET',
+                  headers: {
+                    'apikey': supabaseKey,
+                    'Authorization': `Bearer ${supabaseKey}`,
+                    'Content-Type': 'application/json'
+                  }
+                }
+              );
+              
+              if (currentScanResponse.ok) {
+                const scanData = await currentScanResponse.json();
+                if (scanData && scanData.length > 0) {
+                  // Only update the timestamp, preserve existing progress and stats
+                  await updateScanStatus(scanId, dbUserId, {
+                    // Keep existing progress
+                    progress: scanData[0].progress,
+                    // Keep existing stats
+                    emails_found: scanData[0].emails_found || 0,
+                    emails_to_process: scanData[0].emails_to_process || 0,
+                    emails_processed: scanData[0].emails_processed || 0,
+                    subscriptions_found: scanData[0].subscriptions_found || 0
+                  });
+                  console.log(`SCAN-DEBUG: Updated scan status ping with current progress ${scanData[0].progress}%`);
+                }
+              }
             } catch (pingError) {
-              console.error(`SCAN-DEBUG: Error updating ping progress: ${pingError.message}`);
+              console.error(`SCAN-DEBUG: Error updating ping: ${pingError.message}`);
             }
           }, 5000); // Ping every 5 seconds
           
@@ -1250,6 +1339,21 @@ export default async function handler(req, res) {
             clearInterval(pingInterval);
             pingInterval = null;
             
+            // Check if we found any subscriptions
+            let isTestData = false;
+            
+            // If no subscriptions were found and we processed at least some emails,
+            // add test subscriptions but mark them as test data
+            if (detectedSubscriptions.length === 0 && processedCount > 0) {
+              console.log(`SCAN-DEBUG: No real subscriptions found, but not adding test data by default`);
+              // Only add test data if it was explicitly requested in the request
+              if (req.body && req.body.add_test_data === true) {
+                console.log(`SCAN-DEBUG: Test data explicitly requested, adding sample subscriptions`);
+                const testDataAdded = await addTestSubscription(dbUserId);
+                isTestData = testDataAdded; // Mark as test data if we added test subscriptions
+              }
+            }
+            
             // Update scan record with final status
             await updateScanStatus(scanId, dbUserId, {
               status: 'completed',
@@ -1257,11 +1361,12 @@ export default async function handler(req, res) {
               emails_processed: processedCount,
               emails_scanned: processedCount,
               subscriptions_found: detectedSubscriptions.length,
-              is_test_data: false, // Never mark as test data
+              is_test_data: isTestData, // Mark as test data if we added test subscriptions
               completed_at: new Date().toISOString()
             });
             
             console.log(`SCAN-DEBUG: ============== SCANNING PROCESS COMPLETED ==============`);
+            console.log(`SCAN-DEBUG: is_test_data: ${isTestData}`);
           } catch (error) {
             console.error(`SCAN-DEBUG: Error processing scan: ${error.message}`);
             

@@ -142,7 +142,13 @@ export default async function handler(req, res) {
                 status: 'in_progress',
                 scanId: scanId,
                 progress: 30,
-                message: 'Scan in progress (database setup required)'
+                message: 'Scan in progress (database setup required)',
+                stats: {
+                  emails_found: 0,
+                  emails_to_process: 0,
+                  emails_processed: 0,
+                  subscriptions_found: 0
+                }
               });
             }
             
@@ -266,6 +272,14 @@ export default async function handler(req, res) {
       if (global.scanStatus && global.scanStatus[scanId]) {
         const scanStatus = global.scanStatus[scanId];
         
+        // Default stats to include even if the global cache doesn't have them
+        const defaultStats = {
+          emails_found: scanStatus.emails_found || 0,
+          emails_to_process: scanStatus.emails_to_process || 0, 
+          emails_processed: scanStatus.emails_processed || 0,
+          subscriptions_found: scanStatus.subscriptions_found || 0
+        };
+        
         // Verify the scan belongs to this user
         if (scanStatus.userId && scanStatus.userId !== userId) {
           return res.status(403).json({ error: 'Forbidden', message: 'You do not have access to this scan' });
@@ -273,12 +287,21 @@ export default async function handler(req, res) {
         
         // Return the appropriate response based on scan status
         if (scanStatus.status === 'in_progress') {
+          let calculatedProgress = scanStatus.progress || 0;
+          
+          // Calculate progress based on email processing if available
+          if (defaultStats.emails_to_process > 0 && defaultStats.emails_processed >= 0) {
+            const processingProgress = Math.min(1, defaultStats.emails_processed / defaultStats.emails_to_process);
+            calculatedProgress = Math.round(10 + (processingProgress * 80));
+          }
+          
           return res.status(200).json({
             success: true,
             status: 'in_progress',
             scanId: scanId,
-            progress: scanStatus.progress || 0,
-            message: 'Scan in progress'
+            progress: calculatedProgress,
+            message: 'Scan in progress',
+            stats: defaultStats
           });
         } else if (scanStatus.status === 'completed') {
           return res.status(200).json({
@@ -286,6 +309,7 @@ export default async function handler(req, res) {
             status: 'completed',
             scanId: scanId,
             progress: 100,
+            stats: defaultStats,
             results: scanStatus.results || { totalEmailsScanned: 0, subscriptionsFound: [] }
           });
         } else if (scanStatus.status === 'error') {
@@ -294,7 +318,8 @@ export default async function handler(req, res) {
             status: 'error',
             scanId: scanId,
             error: scanStatus.error || 'Unknown error',
-            message: 'Scan encountered an error'
+            message: 'Scan encountered an error',
+            stats: defaultStats
           });
         }
       }
