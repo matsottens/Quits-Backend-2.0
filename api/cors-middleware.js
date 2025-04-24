@@ -1,12 +1,13 @@
 /**
  * Shared CORS middleware to use across API functions
  */
-export function setCorsHeaders(req, res) {
+
+// Helper function to set CORS headers
+function setCorsHeaders(req, res) {
   // Set CORS headers based on origin
   const origin = req.headers.origin || '';
   
   console.log('CORS middleware: Processing request with origin:', origin);
-  console.log('Request headers:', req.headers);
   
   // Allow specific origins
   if (origin && (origin.includes('quits.cc') || origin.includes('localhost'))) {
@@ -22,14 +23,14 @@ export function setCorsHeaders(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token');
   res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours - reduces preflight requests
+}
+
+// Main CORS middleware function (default export)
+export default async function corsMiddleware(req, res) {
+  // Set CORS headers
+  setCorsHeaders(req, res);
   
-  console.log('CORS headers set:', {
-    'Access-Control-Allow-Origin': res.getHeader('Access-Control-Allow-Origin'),
-    'Access-Control-Allow-Headers': res.getHeader('Access-Control-Allow-Headers'),
-    'Access-Control-Allow-Methods': res.getHeader('Access-Control-Allow-Methods')
-  });
-  
-  // Handle OPTIONS method
+  // Handle OPTIONS preflight requests
   if (req.method === 'OPTIONS') {
     console.log('CORS: Handling OPTIONS preflight request');
     res.status(204).end();
@@ -37,4 +38,7 @@ export function setCorsHeaders(req, res) {
   }
   
   return false;
-} 
+}
+
+// Also export the helper function for backward compatibility
+export { setCorsHeaders }; 
