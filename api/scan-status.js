@@ -98,13 +98,17 @@ export default async function handler(req, res) {
           // Verify user exists
           if (!users || users.length === 0) {
             console.log(`User not found in database for email: ${decoded.email}`);
-            // Fall back to mock data (consider this scan as pending)
+            // Return empty status instead of mock data
             return res.status(200).json({
               success: true,
               status: 'pending',
               scanId: scanId,
               progress: 0,
-              message: 'Scan is being initialized'
+              message: 'User not found in database, please try again',
+              results: {
+                totalEmailsScanned: 0,
+                subscriptionsFound: []
+              }
             });
           }
           
@@ -151,6 +155,14 @@ export default async function handler(req, res) {
           if (scanData && scanData.length > 0) {
             const scan = scanData[0];
             
+            // Default stats to include in all responses
+            const defaultStats = {
+              emails_found: scan.emails_found || 0,
+              emails_to_process: scan.emails_to_process || 0, 
+              emails_processed: scan.emails_processed || 0,
+              subscriptions_found: scan.subscriptions_found || 0
+            };
+            
             if (scan.status === 'completed') {
               // Fetch detected subscriptions
               try {
@@ -180,12 +192,7 @@ export default async function handler(req, res) {
                   scanId: scanId,
                   progress: 100,
                   completedAt: scan.completed_at,
-                  stats: {
-                    emails_found: scan.emails_found || 0,
-                    emails_to_process: scan.emails_to_process || 0,
-                    emails_processed: scan.emails_scanned || 0,
-                    subscriptions_found: scan.subscriptions_found || 0
-                  },
+                  stats: defaultStats,
                   results: {
                     totalEmailsScanned: scan.emails_scanned || 0,
                     subscriptionsFound: subscriptions.map(sub => ({
@@ -209,12 +216,7 @@ export default async function handler(req, res) {
                   scanId: scanId,
                   progress: 100,
                   completedAt: scan.completed_at,
-                  stats: {
-                    emails_found: scan.emails_found || 0,
-                    emails_to_process: scan.emails_to_process || 0,
-                    emails_processed: scan.emails_scanned || 0,
-                    subscriptions_found: scan.subscriptions_found || 0
-                  },
+                  stats: defaultStats,
                   results: {
                     totalEmailsScanned: scan.emails_scanned || 0,
                     subscriptionsFound: []
@@ -230,22 +232,27 @@ export default async function handler(req, res) {
                 status: 'error',
                 scanId: scanId,
                 error: scan.error_message || 'Unknown error',
-                message: 'Scan encountered an error'
+                message: 'Scan encountered an error',
+                stats: defaultStats
               });
             } else {
               // In progress or pending
+              // Calculate more accurate progress if we have the email stats
+              let calculatedProgress = scan.progress || 30;
+              
+              if (defaultStats.emails_to_process > 0 && defaultStats.emails_processed > 0) {
+                // 10% for setup, 80% for processing, 10% for completion
+                const processingProgress = Math.min(1, defaultStats.emails_processed / defaultStats.emails_to_process);
+                calculatedProgress = Math.round(10 + (processingProgress * 80));
+              }
+              
               return res.status(200).json({
                 success: true,
                 status: scan.status || 'in_progress',
                 scanId: scanId,
-                progress: scan.progress || 30,
+                progress: calculatedProgress,
                 message: 'Scan in progress',
-                stats: {
-                  emails_found: scan.emails_found || 0,
-                  emails_to_process: scan.emails_to_process || 0,
-                  emails_processed: scan.emails_processed || 0,
-                  subscriptions_found: scan.subscriptions_found || 0
-                }
+                stats: defaultStats
               });
             }
           }
