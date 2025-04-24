@@ -1339,20 +1339,8 @@ export default async function handler(req, res) {
             clearInterval(pingInterval);
             pingInterval = null;
             
-            // Check if we found any subscriptions
-            let isTestData = false;
-            
-            // If no subscriptions were found and we processed at least some emails,
-            // add test subscriptions but mark them as test data
-            if (detectedSubscriptions.length === 0 && processedCount > 0) {
-              console.log(`SCAN-DEBUG: No real subscriptions found, but not adding test data by default`);
-              // Only add test data if it was explicitly requested in the request
-              if (req.body && req.body.add_test_data === true) {
-                console.log(`SCAN-DEBUG: Test data explicitly requested, adding sample subscriptions`);
-                const testDataAdded = await addTestSubscription(dbUserId);
-                isTestData = testDataAdded; // Mark as test data if we added test subscriptions
-              }
-            }
+            // Set isTestData to false - we never want to add test data
+            const isTestData = false;
             
             // Update scan record with final status
             await updateScanStatus(scanId, dbUserId, {
@@ -1361,7 +1349,7 @@ export default async function handler(req, res) {
               emails_processed: processedCount,
               emails_scanned: processedCount,
               subscriptions_found: detectedSubscriptions.length,
-              is_test_data: isTestData, // Mark as test data if we added test subscriptions
+              is_test_data: isTestData,
               completed_at: new Date().toISOString()
             });
             

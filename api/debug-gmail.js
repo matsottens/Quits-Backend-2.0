@@ -1,7 +1,17 @@
 // Debug Gmail API endpoint
 import jsonwebtoken from 'jsonwebtoken';
 import fetch from 'node-fetch';
+import { createClient } from '@supabase/supabase-js';
 const { verify } = jsonwebtoken;
+
+// Supabase config
+const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
+const supabaseKey = supabaseServiceRoleKey || supabaseServiceKey;
+
+// Initialize Supabase client if credentials are available
+const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
 // Helper function to extract Gmail token from JWT
 const extractGmailToken = (token) => {
@@ -64,7 +74,10 @@ export default async function handler(req, res) {
     try {
       const jwtSecret = process.env.JWT_SECRET || 'dev_secret_DO_NOT_USE_IN_PRODUCTION';
       const decoded = verify(token, jwtSecret);
-      console.log('JWT verified successfully, decoded user:', decoded.email);
+      const userId = decoded.id || decoded.sub;
+      const email = decoded.email;
+      
+      console.log(`DEBUG-GMAIL: Authenticated user ${email} (ID: ${userId})`);
       
       // Extract Gmail token from JWT
       let gmailToken = extractGmailToken(token);
@@ -83,84 +96,154 @@ export default async function handler(req, res) {
         });
       }
       
+      // Check if scan_id was provided
+      const scanId = req.query.scanId;
+      let scanDetails = {};
+      let dbError = null;
+      
+      // If we have Supabase credentials and a scan ID, check the scan status in the database
+      if (supabase && scanId) {
+        try {
+          console.log(`DEBUG-GMAIL: Looking up scan ${scanId} in database`);
+          
+          // First, find the database user ID
+          let dbUserId = null;
+          
+          if (userId && email) {
+            const { data: users, error: userError } = await supabase
+              .from('users')
+              .select('id')
+              .or(`email.eq.${email},google_id.eq.${userId}`)
+              .limit(1);
+              
+            if (userError) {
+              console.error(`DEBUG-GMAIL: Error finding user: ${userError.message}`);
+              dbError = `User lookup error: ${userError.message}`;
+            } else if (users && users.length > 0) {
+              dbUserId = users[0].id;
+              console.log(`DEBUG-GMAIL: Found user ${dbUserId} in database`);
+            }
+          }
+          
+          // Check scan_history table
+          const { data: scanData, error: scanError } = await supabase
+            .from('scan_history')
+            .select('*')
+            .eq('scan_id', scanId)
+            .limit(1);
+            
+          if (scanError) {
+            console.error(`DEBUG-GMAIL: Error finding scan: ${scanError.message}`);
+            
+            // Check if the error is because the table doesn't exist
+            if (scanError.message.includes('does not exist')) {
+              dbError = 'scan_history table does not exist in database';
+              
+              // Try to check if there's a scans table instead
+              try {
+                const { data: oldScanData, error: oldScanError } = await supabase
+                  .from('scans')
+                  .select('*')
+                  .eq('id', scanId)
+                  .limit(1);
+                  
+                if (!oldScanError && oldScanData && oldScanData.length > 0) {
+                  scanDetails = {
+                    found_in_legacy_table: true,
+                    scan_data: oldScanData[0]
+                  };
+                }
+              } catch (legacyError) {
+                console.error(`DEBUG-GMAIL: Error checking legacy scans table: ${legacyError.message}`);
+              }
+            } else {
+              dbError = `Scan lookup error: ${scanError.message}`;
+            }
+          } else if (scanData && scanData.length > 0) {
+            scanDetails = {
+              found: true,
+              scan_data: scanData[0]
+            };
+          } else {
+            scanDetails = {
+              found: false,
+              message: 'Scan ID not found in database'
+            };
+          }
+        } catch (dbLookupError) {
+          console.error(`DEBUG-GMAIL: Database lookup error: ${dbLookupError.message}`);
+          dbError = `Database error: ${dbLookupError.message}`;
+        }
+      }
+      
       // Test Gmail API connection
-      try {
-        // Test connection by getting user profile
-        const profileResponse = await fetch(
-          'https://www.googleapis.com/gmail/v1/users/me/profile',
-          {
-            method: 'GET',
+      let gmailConnected = false;
+      let gmailMessages = [];
+      let gmailError = null;
+      
+      if (gmailToken) {
+        try {
+          console.log('DEBUG-GMAIL: Testing Gmail API connection');
+          const response = await fetch('https://www.googleapis.com/gmail/v1/users/me/messages?maxResults=5', {
             headers: {
               'Authorization': `Bearer ${gmailToken}`,
               'Content-Type': 'application/json'
             }
-          }
-        );
-        
-        const profileData = profileResponse.ok ? await profileResponse.json() : null;
-        
-        // Try to list messages
-        let messagesData = null;
-        let messagesError = null;
-        let messageCount = 0;
-        
-        try {
-          const messagesResponse = await fetch(
-            'https://www.googleapis.com/gmail/v1/users/me/messages?maxResults=10',
-            {
-              method: 'GET',
-              headers: {
-                'Authorization': `Bearer ${gmailToken}`,
-                'Content-Type': 'application/json'
-              }
-            }
-          );
+          });
           
-          if (messagesResponse.ok) {
-            messagesData = await messagesResponse.json();
-            messageCount = messagesData.messages?.length || 0;
+          if (response.ok) {
+            const data = await response.json();
+            gmailConnected = true;
+            gmailMessages = data.messages || [];
+            console.log(`DEBUG-GMAIL: Successfully connected to Gmail API, found ${gmailMessages.length} messages`);
           } else {
-            const errorText = await messagesResponse.text();
-            messagesError = `${messagesResponse.status}: ${errorText}`;
+            const errorText = await response.text();
+            gmailError = `Gmail API error: ${response.status} ${errorText}`;
+            console.error(`DEBUG-GMAIL: ${gmailError}`);
           }
-        } catch (messageError) {
-          messagesError = messageError.message;
+        } catch (gmailApiError) {
+          gmailError = `Gmail API exception: ${gmailApiError.message}`;
+          console.error(`DEBUG-GMAIL: ${gmailError}`);
         }
-        
-        // Return test results
-        return res.status(200).json({
-          connected: profileResponse.ok,
-          profile: profileResponse.ok ? profileData : null,
-          profileStatus: profileResponse.status,
-          messageCount,
-          error: !profileResponse.ok ? await profileResponse.text() : messagesError,
-          email: profileData?.emailAddress || decoded.email,
-          tokenPrefix: gmailToken ? gmailToken.substring(0, 10) + '...' : null,
-          tokenLength: gmailToken ? gmailToken.length : 0
-        });
-      } catch (gmailError) {
-        console.error('Gmail API test error:', gmailError);
-        return res.status(500).json({
-          connected: false,
-          error: gmailError.message,
-          tokenPrefix: gmailToken ? gmailToken.substring(0, 10) + '...' : null,
-          tokenLength: gmailToken ? gmailToken.length : 0
-        });
+      } else {
+        gmailError = 'No Gmail token available';
+        console.log('DEBUG-GMAIL: No Gmail token available to test connection');
       }
-    } catch (tokenError) {
-      console.error('Token verification error:', tokenError);
-      return res.status(401).json({ 
-        error: 'Invalid or expired token',
-        connected: false
+      
+      // Respond with diagnostic information
+      return res.status(200).json({
+        authenticated: true,
+        user: {
+          id: userId,
+          email: email
+        },
+        tokenInfo: {
+          gmail_token_present: !!gmailToken,
+          gmail_token_length: gmailToken ? gmailToken.length : 0,
+          gmail_token_prefix: gmailToken ? gmailToken.substring(0, 10) + '...' : 'none'
+        },
+        gmail: {
+          connected: gmailConnected,
+          messageCount: gmailMessages.length,
+          error: gmailError
+        },
+        database: {
+          connected: !!supabase,
+          error: dbError,
+          scan: scanDetails
+        },
+        server_time: new Date().toISOString(),
+        environment: {
+          supabase_url: !!supabaseUrl,
+          supabase_key: !!supabaseKey
+        }
       });
+    } catch (tokenError) {
+      console.error('DEBUG-GMAIL: Token verification error:', tokenError);
+      return res.status(401).json({ error: 'Invalid or expired token' });
     }
   } catch (error) {
-    console.error('Debug Gmail API error:', error);
-    return res.status(500).json({ 
-      error: 'server_error',
-      message: 'An error occurred processing your request',
-      details: error.message,
-      connected: false
-    });
+    console.error('DEBUG-GMAIL: General error:', error);
+    return res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 } 

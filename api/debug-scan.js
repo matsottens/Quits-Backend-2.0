@@ -139,76 +139,21 @@ const DEMO_SUBSCRIPTIONS = [
 
 // Function to add a test subscription
 const addTestSubscription = async (dbUserId, scanId) => {
-  const timestamp = new Date().toISOString();
-  try {
-    console.log(`DEBUG-SCAN: Adding test subscription for scan ${scanId}, user ${dbUserId}`);
-    
-    // Randomly select 5-15 test subscriptions
-    const testSubscriptionsCount = Math.floor(Math.random() * 11) + 5;
-    console.log(`DEBUG-SCAN: Will add ${testSubscriptionsCount} test subscriptions`);
-    
-    // Set up email statistics
-    const emailsFound = Math.floor(Math.random() * 151) + 100; // 100-250 emails
-    const emailsToProcess = emailsFound;
-    const emailsProcessed = emailsToProcess; // All processed in debug mode
-    
-    const subscriptions = [];
-    
-    // Create test subscriptions
-    for (let i = 0; i < testSubscriptionsCount; i++) {
-      const testSub = DEMO_SUBSCRIPTIONS[i % DEMO_SUBSCRIPTIONS.length];
-      
-      const subscriptionData = {
-        ...testSub,
-        user_id: dbUserId,
-        scan_id: scanId,
-        created_at: timestamp,
-        updated_at: timestamp,
-        is_demo: true
-      };
-      
-      const { data, error } = await supabase
-        .from('subscriptions')
-        .insert(subscriptionData)
-        .select();
-        
-      if (error) {
-        console.error(`DEBUG-SCAN: Error adding test subscription: ${error.message}`);
-      } else if (data && data.length > 0) {
-        subscriptions.push(data[0]);
-      }
+  console.log(`DEBUG-SCAN: Test subscription feature disabled by request`);
+  
+  // Return false to indicate no subscriptions were added
+  return {
+    success: false,
+    subscriptions_added: 0,
+    disabled: true,
+    message: "Test subscription functionality has been disabled",
+    scan_stats: {
+      emails_found: 0,
+      emails_processed: 0,
+      emails_to_process: 0,
+      subscriptions_found: 0
     }
-    
-    console.log(`DEBUG-SCAN: Added ${subscriptions.length} test subscriptions`);
-    
-    // Update scan status with completed status and email stats
-    const scanUpdates = {
-      status: "completed",
-      progress: 100,
-      emails_found: emailsFound,
-      emails_to_process: emailsToProcess,
-      emails_processed: emailsProcessed,
-      subscriptions_found: subscriptions.length,
-      is_demo: true,
-      completed_at: timestamp
-    };
-    
-    await updateScanStatus(scanId, dbUserId, scanUpdates);
-    
-    return {
-      success: true,
-      subscriptions_added: subscriptions.length,
-      scan_stats: {
-        emails_found: emailsFound,
-        emails_processed: emailsProcessed,
-        emails_to_process: emailsToProcess,
-        subscriptions_found: subscriptions.length
-      }
-    };
-  } catch (error) {
-    console.error(`DEBUG-SCAN: Error in addTestSubscription: ${error.message}`);
-    return { success: false, error: error.message };
-  }
+  };
 };
 
 // Function to update scan status
