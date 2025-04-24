@@ -4,8 +4,10 @@ import fetch from 'node-fetch';
 const { verify } = jsonwebtoken;
 
 // Supabase config
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
+const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
+const supabaseKey = supabaseServiceRoleKey || supabaseServiceKey;
 
 export default async function handler(req, res) {
   // Set CORS headers
