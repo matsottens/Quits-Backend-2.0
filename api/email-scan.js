@@ -928,121 +928,61 @@ const storeSubscriptionExample = async (sender, subject, analysisResult) => {
 
 // Function to update scan status
 const updateScanStatus = async (scanId, dbUserId, updates) => {
+  console.log('SCAN-DEBUG: Updating scan status with:', JSON.stringify(updates, null, 2));
+  
   try {
-    // Make sure we always include the timestamp for when the update occurred
     const timestamp = new Date().toISOString();
-    
-    // Always include progress in statistics
     const fullUpdates = {
       ...updates,
-      updated_at: timestamp,
-      timestamps: {
-        ...(updates.timestamps || {}),
-        last_update: timestamp
-      }
+      timestamp,
+      last_update: timestamp
     };
 
-    // Ensure we have emails_found, emails_to_process, and emails_processed for progress tracking
-    if (!fullUpdates.emails_found || !fullUpdates.emails_to_process || fullUpdates.emails_processed === undefined) {
-      console.log(`SCAN-DEBUG: Adding or updating email stats for progress calculation`);
-      
-      // Get current scan status to ensure we have up-to-date stats
-      const currentScanResponse = await fetch(
-        `${supabaseUrl}/rest/v1/scan_history?scan_id=eq.${scanId}&select=*`, 
-        {
-          method: 'GET',
-          headers: {
-            'apikey': supabaseKey,
-            'Authorization': `Bearer ${supabaseKey}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
-      
-      if (currentScanResponse.ok) {
-        const currentScan = await currentScanResponse.json();
-        if (currentScan && currentScan.length > 0) {
-          // Keep existing values if we have them
-          if (!fullUpdates.emails_found) {
-            fullUpdates.emails_found = currentScan[0].emails_found || 250;
-          }
-          
-          if (!fullUpdates.emails_to_process) {
-            fullUpdates.emails_to_process = currentScan[0].emails_to_process || 250;
-          }
-          
-          if (fullUpdates.emails_processed === undefined) {
-            // If we're updating progress but not emails_processed, calculate it
-            if (updates.progress !== undefined) {
-              const progressPercent = updates.progress / 100;
-              fullUpdates.emails_processed = Math.floor(fullUpdates.emails_to_process * progressPercent);
-            } else {
-              fullUpdates.emails_processed = currentScan[0].emails_processed || 0;
-            }
-          }
-          
-          // Always include subscriptions_found
-          if (fullUpdates.subscriptions_found === undefined) {
-            fullUpdates.subscriptions_found = currentScan[0].subscriptions_found || 0;
-          }
-        } else {
-          // No current scan found, set defaults
-          if (!fullUpdates.emails_found) fullUpdates.emails_found = 250;
-          if (!fullUpdates.emails_to_process) fullUpdates.emails_to_process = 250;
-          if (fullUpdates.emails_processed === undefined) {
-            fullUpdates.emails_processed = updates.progress ? Math.floor((updates.progress / 100) * 250) : 0;
-          }
-          if (fullUpdates.subscriptions_found === undefined) fullUpdates.subscriptions_found = 0;
-        }
-      } else {
-        // Fallback defaults if we can't get current scan
-        if (!fullUpdates.emails_found) fullUpdates.emails_found = 250;
-        if (!fullUpdates.emails_to_process) fullUpdates.emails_to_process = 250;
-        if (fullUpdates.emails_processed === undefined) {
-          fullUpdates.emails_processed = updates.progress ? Math.floor((updates.progress / 100) * 250) : 0;
-        }
-        if (fullUpdates.subscriptions_found === undefined) fullUpdates.subscriptions_found = 0;
-      }
-    }
-    
-    // If we have emails_processed and emails_to_process but no progress update,
-    // calculate the progress based on the email processing
-    if (fullUpdates.emails_processed !== undefined && 
-        fullUpdates.emails_to_process && 
-        updates.progress === undefined) {
-      
-      // Calculate progress based on email processing (scale to 20-90% range)
-      const processingProgress = fullUpdates.emails_processed / fullUpdates.emails_to_process;
-      fullUpdates.progress = Math.min(90, Math.max(20, Math.floor(20 + (processingProgress * 70))));
-      
-      console.log(`SCAN-DEBUG: Calculated progress ${fullUpdates.progress}% based on email processing (${fullUpdates.emails_processed}/${fullUpdates.emails_to_process})`);
-    }
-    
-    console.log(`SCAN-DEBUG: Updating scan status for scan ${scanId}: ${JSON.stringify(fullUpdates)}`);
-    
-    // Update the scan record in the database
-    const response = await fetch(
-      `${supabaseUrl}/rest/v1/scan_history?scan_id=eq.${scanId}`, 
-      {
-        method: 'PATCH',
+    // Ensure we always have email stats
+    if (!fullUpdates.emails_found || !fullUpdates.emails_to_process || !fullUpdates.emails_processed) {
+      console.log('SCAN-DEBUG: No email stats provided, fetching current scan status');
+      const currentScan = await fetch(`${supabaseUrl}/rest/v1/scans?id=eq.${scanId}`, {
         headers: {
           'apikey': supabaseKey,
           'Authorization': `Bearer ${supabaseKey}`,
           'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(fullUpdates)
+        }
+      });
+
+      if (currentScan.ok) {
+        const currentData = await currentScan.json();
+        if (currentData && currentData.length > 0) {
+          const current = currentData[0];
+          fullUpdates.emails_found = current.emails_found || 250;
+          fullUpdates.emails_to_process = current.emails_to_process || 250;
+          fullUpdates.emails_processed = current.emails_processed || 
+            Math.floor((current.progress || 0) * (current.emails_to_process || 250) / 100);
+        }
       }
-    );
-    
-    if (!response.ok) {
-      throw new Error(`Failed to update scan status: ${await response.text()}`);
     }
-    
-    console.log(`SCAN-DEBUG: Successfully updated scan status`);
-    return true;
+
+    console.log('SCAN-DEBUG: Final update data:', JSON.stringify(fullUpdates, null, 2));
+
+    const response = await fetch(`${supabaseUrl}/rest/v1/scans?id=eq.${scanId}`, {
+      method: 'PATCH',
+      headers: {
+        'apikey': supabaseKey,
+        'Authorization': `Bearer ${supabaseKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(fullUpdates)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('SCAN-DEBUG: Failed to update scan status:', errorText);
+      throw new Error(`Failed to update scan status: ${errorText}`);
+    }
+
+    console.log('SCAN-DEBUG: Successfully updated scan status');
   } catch (error) {
-    console.error(`SCAN-DEBUG: Error updating scan status: ${error.message}`);
-    return false;
+    console.error('SCAN-DEBUG: Error updating scan status:', error);
+    throw error;
   }
 };
 
@@ -1083,416 +1023,171 @@ const searchEmails = async (gmail, query) => {
   }
 };
 
+const processEmails = async (gmailToken, scanId, userId) => {
+  console.log('SCAN-DEBUG: Starting email processing for scan:', scanId);
+  
+  try {
+    // Update initial scan status
+    await updateScanStatus(scanId, userId, {
+      status: 'in_progress',
+      progress: 0,
+      emails_found: 0,
+      emails_to_process: 0,
+      emails_processed: 0,
+      subscriptions_found: 0
+    });
+
+    // Fetch emails from Gmail
+    console.log('SCAN-DEBUG: Fetching emails from Gmail');
+    const messages = await fetchEmailsFromGmail(gmailToken);
+    console.log(`SCAN-DEBUG: Found ${messages.length} emails to process`);
+
+    // Update scan status with total emails found
+    await updateScanStatus(scanId, userId, {
+      status: 'in_progress',
+      progress: 10,
+      emails_found: messages.length,
+      emails_to_process: messages.length,
+      emails_processed: 0,
+      subscriptions_found: 0
+    });
+
+    let processedCount = 0;
+    let subscriptionsFound = 0;
+
+    // Process emails in batches
+    for (let i = 0; i < messages.length; i++) {
+      const message = messages[i];
+      processedCount++;
+
+      // Calculate progress (10-90% range for email processing)
+      const progress = Math.min(90, Math.floor(10 + (processedCount / messages.length) * 80));
+
+      // Update progress every 5 emails
+      if (processedCount % 5 === 0 || processedCount === messages.length) {
+        await updateScanStatus(scanId, userId, {
+          progress,
+          emails_processed: processedCount,
+          subscriptions_found: subscriptionsFound
+        });
+        console.log(`SCAN-DEBUG: Processed ${processedCount}/${messages.length} emails (${progress}%)`);
+      }
+
+      // Get email content
+      const emailData = await fetchEmailContent(gmailToken, message.id);
+      if (!emailData) {
+        console.log(`SCAN-DEBUG: Skipping email ${message.id} - failed to fetch content`);
+        continue;
+      }
+
+      // Analyze email with Gemini
+      const analysis = await analyzeEmailWithGemini(emailData);
+      console.log(`SCAN-DEBUG: Analysis result for email ${message.id}:`, JSON.stringify(analysis));
+
+      // If subscription detected with good confidence, save it
+      if (analysis.isSubscription && analysis.confidence > 0.6) {
+        console.log(`SCAN-DEBUG: Detected subscription: ${analysis.serviceName} (${analysis.confidence} confidence)`);
+        await saveSubscription(userId, analysis);
+        subscriptionsFound++;
+      }
+    }
+
+    // Update final status
+    await updateScanStatus(scanId, userId, {
+      status: 'completed',
+      progress: 100,
+      emails_processed: processedCount,
+      subscriptions_found: subscriptionsFound,
+      completed_at: new Date().toISOString()
+    });
+
+    console.log(`SCAN-DEBUG: Email processing completed for scan ${scanId}`);
+    console.log(`SCAN-DEBUG: Total emails processed: ${processedCount}`);
+    console.log(`SCAN-DEBUG: Subscriptions found: ${subscriptionsFound}`);
+
+  } catch (error) {
+    console.error('SCAN-DEBUG: Error in processEmails:', error);
+    await updateScanStatus(scanId, userId, {
+      status: 'error',
+      error: error.message,
+      progress: 0
+    });
+    throw error;
+  }
+};
+
 export default async function handler(req, res) {
-  // Set CORS headers for all response types
+  // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', 'https://www.quits.cc');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token, Pragma, X-API-Key, X-Api-Version, X-Device-ID');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours
+  res.setHeader('Access-Control-Max-Age', '86400');
 
-  // Handle preflight OPTIONS request
   if (req.method === 'OPTIONS') {
-    console.log('Handling OPTIONS preflight request for email/scan');
+    console.log('SCAN-DEBUG: Handling OPTIONS preflight request');
     return res.status(204).end();
   }
-  
-  // Add no-cache headers
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-  res.setHeader('Pragma', 'no-cache');
+
+  if (req.method !== 'POST') {
+    console.log('SCAN-DEBUG: Invalid method:', req.method);
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
 
   try {
-    // Check for POST method
-    if (req.method !== 'POST') {
-      return res.status(405).json({ error: 'Method not allowed' });
+    const { token } = req.body;
+    if (!token) {
+      console.log('SCAN-DEBUG: No token provided');
+      return res.status(400).json({ error: 'Token is required' });
     }
 
-    // Extract token from Authorization header
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ error: 'Missing or invalid authorization header' });
+    // Extract Gmail token from JWT
+    const gmailToken = extractGmailToken(token);
+    if (!gmailToken) {
+      console.log('SCAN-DEBUG: Failed to extract Gmail token');
+      return res.status(400).json({ error: 'Invalid token format' });
     }
 
-    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
-    
-    // Verify the token
-    try {
-      const jwtSecret = process.env.JWT_SECRET || 'dev_secret_DO_NOT_USE_IN_PRODUCTION';
-      const decoded = verify(token, jwtSecret);
-      console.log('JWT verified successfully, decoded user:', decoded.email);
-      
-      // Extract Gmail token from JWT
-      let gmailToken = extractGmailToken(token);
-      
-      // Check if we have a Gmail token directly in the request headers as fallback
-      if (!gmailToken && req.headers['x-gmail-token']) {
-        console.log('Using Gmail token from X-Gmail-Token header');
-        gmailToken = req.headers['x-gmail-token'];
-      }
-      
-      // Check if token is in the request body as another fallback
-      if (!gmailToken && req.body && req.body.gmail_token) {
-        console.log('Using Gmail token from request body');
-        gmailToken = req.body.gmail_token;
-      }
-      
-      if (!gmailToken) {
-        return res.status(400).json({
-          error: 'gmail_token_missing',
-          message: 'No Gmail access token found in your authentication token or request. Please re-authenticate with Gmail permissions.'
-        });
-      }
-      
-      // Validate the Gmail token
-      const isValidToken = await validateGmailToken(gmailToken);
-      if (!isValidToken) {
-        return res.status(401).json({
-          error: 'gmail_token_invalid',
-          message: 'The Gmail access token is invalid or expired. Please re-authenticate with Gmail permissions.'
-        });
-      }
-      
-      // Generate a scan ID
-      const scanId = 'scan_' + Math.random().toString(36).substring(2, 15);
-      
-      // Immediately respond to client that scanning has started
-      res.status(202).json({
-        success: true,
-        message: 'Email scan initiated successfully',
-        scanId,
-        estimatedTime: '30-60 seconds',
-        user: {
-          id: decoded.id || decoded.sub,
-          email: decoded.email
-        }
-      });
-      
-      // Start the scanning process asynchronously
-      (async () => {
-        console.log(`SCAN-DEBUG: ============== SCANNING PROCESS STARTED ==============`);
-        console.log(`SCAN-DEBUG: User ID: ${decoded.id || decoded.sub}, Scan ID: ${scanId}`);
-        console.log(`SCAN-DEBUG: Gmail token (first 10 chars): ${gmailToken.substring(0, 10)}`);
-        
-        let dbUserId = null;
-        let pingInterval = null;
-        
-        try {
-          // Set up a ping interval to keep updating the status
-          const startTime = Date.now();
-          let pingCount = 0;
-          
-          pingInterval = setInterval(async () => {
-            if (!dbUserId) return; // Skip if we don't have a user ID yet
-            
-            pingCount++;
-            const elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
-            console.log(`SCAN-DEBUG: [PING #${pingCount}] Scan still in progress after ${elapsedSeconds} seconds`);
-            
-            try {
-              // Don't update progress artificially - only update timestamp to show the scan is still alive
-              // Get current scan status to ensure consistent reporting
-              const currentScanResponse = await fetch(
-                `${supabaseUrl}/rest/v1/scan_history?scan_id=eq.${scanId}&select=*`, 
-                {
-                  method: 'GET',
-                  headers: {
-                    'apikey': supabaseKey,
-                    'Authorization': `Bearer ${supabaseKey}`,
-                    'Content-Type': 'application/json'
-                  }
-                }
-              );
-              
-              if (currentScanResponse.ok) {
-                const scanData = await currentScanResponse.json();
-                if (scanData && scanData.length > 0) {
-                  // Only update the timestamp, preserve existing progress and stats
-                  await updateScanStatus(scanId, dbUserId, {
-                    // Keep existing progress
-                    progress: scanData[0].progress,
-                    // Keep existing stats
-                    emails_found: scanData[0].emails_found || 0,
-                    emails_to_process: scanData[0].emails_to_process || 0,
-                    emails_processed: scanData[0].emails_processed || 0,
-                    subscriptions_found: scanData[0].subscriptions_found || 0
-                  });
-                  console.log(`SCAN-DEBUG: Updated scan status ping with current progress ${scanData[0].progress}%`);
-                }
-              }
-            } catch (pingError) {
-              console.error(`SCAN-DEBUG: Error updating ping: ${pingError.message}`);
-            }
-          }, 5000); // Ping every 5 seconds
-          
-          // Find or create user in the database
-          const userLookupResponse = await fetch(
-            `${supabaseUrl}/rest/v1/users?select=id,email,google_id&or=(email.eq.${encodeURIComponent(decoded.email)},google_id.eq.${encodeURIComponent(decoded.id || decoded.sub)})`, 
-            {
-              method: 'GET',
-              headers: {
-                'apikey': supabaseKey,
-                'Authorization': `Bearer ${supabaseKey}`,
-                'Content-Type': 'application/json'
-              }
-            }
-          );
-          
-          if (!userLookupResponse.ok) {
-            console.error(`SCAN-DEBUG: User lookup failed: ${await userLookupResponse.text()}`);
-            clearInterval(pingInterval);
-            return;
-          }
-          
-          const users = await userLookupResponse.json();
-          
-          // Create a new user if not found
-          if (!users || users.length === 0) {
-            console.log(`SCAN-DEBUG: User not found in database, creating new user for: ${decoded.email}`);
-            
-            const createUserResponse = await fetch(
-              `${supabaseUrl}/rest/v1/users`, 
-              {
-                method: 'POST',
-                headers: {
-                  'apikey': supabaseKey,
-                  'Authorization': `Bearer ${supabaseKey}`,
-                  'Content-Type': 'application/json',
-                  'Prefer': 'return=representation'
-                },
-                body: JSON.stringify({
-                  email: decoded.email,
-                  google_id: decoded.id || decoded.sub,
-                  name: decoded.name || decoded.email.split('@')[0],
-                  avatar_url: decoded.picture || null,
-                  created_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString()
-                })
-              }
-            );
-            
-            if (!createUserResponse.ok) {
-              console.error(`SCAN-DEBUG: Failed to create user: ${await createUserResponse.text()}`);
-              clearInterval(pingInterval);
-              return;
-            }
-            
-            const newUser = await createUserResponse.json();
-            dbUserId = newUser[0].id;
-            console.log(`SCAN-DEBUG: Created new user with ID: ${dbUserId}`);
-          } else {
-            dbUserId = users[0].id;
-            console.log(`SCAN-DEBUG: Found existing user with ID: ${dbUserId}`);
-          }
-
-          // Create a scan record initially
-          try {
-            await fetch(
-              `${supabaseUrl}/rest/v1/scan_history`, 
-              {
-                method: 'POST',
-                headers: {
-                  'apikey': supabaseKey,
-                  'Authorization': `Bearer ${supabaseKey}`,
-                  'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                  scan_id: scanId,
-                  user_id: dbUserId,
-                  status: 'in_progress',
-                  progress: 10,
-                  created_at: new Date().toISOString()
-                })
-              }
-            );
-            console.log(`SCAN-DEBUG: Created scan record for scan ${scanId}`);
-            
-            // Fetch emails from Gmail
-            console.log('SCAN-DEBUG: Fetching emails from Gmail');
-            const messages = await fetchEmailsFromGmail(gmailToken);
-            
-            console.log(`SCAN-DEBUG: Successfully fetched ${messages.length} emails from Gmail`);
-            console.log(`SCAN-DEBUG: ===== Email Scan Statistics =====`);
-            console.log(`SCAN-DEBUG: Total emails found: ${messages.length}`);
-            console.log(`SCAN-DEBUG: Starting batch processing...`);
-            
-            // Update scan record with emails found
-            await updateScanStatus(scanId, dbUserId, {
-              status: 'in_progress',
-              progress: 20,
-              emails_found: messages.length,
-              emails_to_process: messages.length,
-              scan_stats: {
-                total_emails: messages.length,
-                start_time: new Date().toISOString()
-              }
-            });
-            
-            let processedCount = 0;
-            let skippedCount = 0;
-            const detectedSubscriptions = [];
-            const analysisResults = [];
-            
-            console.log(`SCAN-DEBUG: Starting to process ${messages.length} emails`);
-            
-            // Process emails in smaller batches to avoid taking too long
-            for (let i = 0; i < messages.length; i++) {
-              const message = messages[i];
-              processedCount++;
-              
-              // Calculate progress percentage (20% to 90% range for email processing)
-              const progressPercent = Math.floor(20 + (processedCount / messages.length) * 70);
-              
-              // Update progress every 5 emails or on the last email
-              if (processedCount % 5 === 0 || processedCount === messages.length) {
-                await updateScanStatus(scanId, dbUserId, {
-                  progress: progressPercent,
-                  emails_processed: processedCount,
-                  subscriptions_found: detectedSubscriptions.length,
-                  scan_stats: {
-                    processed_count: processedCount,
-                    skipped_count: skippedCount,
-                    detected_subscriptions: detectedSubscriptions.length,
-                    last_update: new Date().toISOString()
-                  }
-                });
-              }
-              
-              console.log(`SCAN-DEBUG: Processing email ${processedCount}/${messages.length} (ID: ${message.id})`);
-              
-              // Get full message content
-              const emailData = await fetchEmailContent(gmailToken, message.id);
-              if (!emailData) {
-                console.log(`SCAN-DEBUG: Failed to fetch email ${message.id}, skipping`);
-                skippedCount++;
-                continue;
-              }
-              
-              // Extract headers for logging
-              const headers = emailData.payload?.headers || [];
-              const { subject, from } = parseEmailHeaders(headers);
-              console.log(`SCAN-DEBUG: Analyzing email - From: "${from}", Subject: "${subject}"`);
-              
-              try {
-                // Analyze with Gemini AI
-                const analysis = await analyzeEmailWithGemini(emailData);
-                
-                // Store analysis results
-                analysisResults.push({
-                  from,
-                  subject,
-                  analysis,
-                  timestamp: new Date().toISOString()
-                });
-                
-                // Log analysis results
-                console.log('SCAN-DEBUG: Analysis result:', JSON.stringify(analysis));
-                
-                // If this is a subscription with good confidence, save it
-                if (analysis.isSubscription && analysis.confidence > 0.6) {
-                  console.log(`SCAN-DEBUG: Detected subscription: ${analysis.serviceName || 'Unknown'} (${analysis.confidence.toFixed(2)} confidence)`);
-                  detectedSubscriptions.push(analysis);
-                  
-                  await saveSubscription(dbUserId, analysis);
-                } else if (analysis.isSubscription && analysis.confidence > 0.3) {
-                  console.log(`SCAN-DEBUG: Possible subscription detected with moderate confidence: ${analysis.serviceName}`);
-                }
-              } catch (analysisError) {
-                console.error(`SCAN-DEBUG: Error analyzing email: ${analysisError.message}`);
-                skippedCount++;
-              }
-            }
-            
-            // Final statistics
-            const endTime = new Date().toISOString();
-            const scanStats = {
-              total_emails: messages.length,
-              processed_count: processedCount,
-              skipped_count: skippedCount,
-              detected_subscriptions: detectedSubscriptions.length,
-              start_time: analysisResults[0]?.timestamp,
-              end_time: endTime,
-              analysis_results: analysisResults
-            };
-            
-            console.log(`SCAN-DEBUG: ===== Final Scan Statistics =====`);
-            console.log(`SCAN-DEBUG: Total emails processed: ${processedCount}/${messages.length}`);
-            console.log(`SCAN-DEBUG: Skipped emails: ${skippedCount}`);
-            console.log(`SCAN-DEBUG: Found ${detectedSubscriptions.length} subscriptions`);
-            console.log(`SCAN-DEBUG: Scan efficiency: ${(detectedSubscriptions.length/processedCount*100).toFixed(2)}% hit rate`);
-            
-            // Clear the ping interval
-            clearInterval(pingInterval);
-            pingInterval = null;
-            
-            // Set isTestData to false - we never want to add test data
-            const isTestData = false;
-            
-            // Update scan record with final status
-            await updateScanStatus(scanId, dbUserId, {
-              status: 'completed',
-              progress: 100,
-              emails_processed: processedCount,
-              emails_scanned: processedCount,
-              subscriptions_found: detectedSubscriptions.length,
-              is_test_data: isTestData,
-              completed_at: endTime,
-              scan_stats: scanStats
-            });
-            
-            console.log(`SCAN-DEBUG: ============== SCANNING PROCESS COMPLETED ==============`);
-            console.log(`SCAN-DEBUG: is_test_data: ${isTestData}`);
-          } catch (error) {
-            console.error(`SCAN-DEBUG: Error processing scan: ${error.message}`);
-            
-            // Clear ping interval if it's running
-            if (pingInterval) {
-              clearInterval(pingInterval);
-              pingInterval = null;
-            }
-            
-            // Update scan status to error
-            if (dbUserId) {
-              await updateScanStatus(scanId, dbUserId, {
-                status: 'error',
-                error_message: error.message,
-                completed_at: new Date().toISOString()
-              });
-            }
-          }
-        } catch (outerError) {
-          console.error(`SCAN-DEBUG: Outer error in scan process: ${outerError.message}`);
-          
-          // Clear ping interval if it's running
-          if (pingInterval) {
-            clearInterval(pingInterval);
-          }
-          
-          // Try to update scan status
-          if (dbUserId) {
-            try {
-              await updateScanStatus(scanId, dbUserId, {
-                status: 'error',
-                error_message: outerError.message,
-                completed_at: new Date().toISOString()
-              });
-            } catch (updateError) {
-              console.error(`SCAN-DEBUG: Failed to update error status: ${updateError.message}`);
-            }
-          }
-        }
-      })().catch(error => {
-        console.error(`SCAN-DEBUG: Unhandled error in scan ${scanId}:`, error);
-      });
-    } catch (tokenError) {
-      console.error('SCAN-DEBUG: Token verification error:', tokenError);
-      return res.status(401).json({ error: 'Invalid or expired token' });
+    // Validate Gmail token
+    const isValidToken = await validateGmailToken(gmailToken);
+    if (!isValidToken) {
+      console.log('SCAN-DEBUG: Gmail token validation failed');
+      return res.status(401).json({ error: 'Invalid Gmail token' });
     }
+
+    // Get user ID from token
+    const decoded = jwt.decode(token);
+    const userId = decoded.id;
+    if (!userId) {
+      console.log('SCAN-DEBUG: No user ID in token');
+      return res.status(400).json({ error: 'Invalid user ID' });
+    }
+
+    // Create scan record
+    const scanId = await createScanRecord(userId);
+    console.log('SCAN-DEBUG: Created scan record with ID:', scanId);
+
+    // Start email processing in background
+    processEmails(gmailToken, scanId, userId).catch(error => {
+      console.error('SCAN-DEBUG: Error processing emails:', error);
+      updateScanStatus(scanId, userId, {
+        status: 'error',
+        error: error.message,
+        progress: 0
+      }).catch(console.error);
+    });
+
+    return res.status(200).json({
+      success: true,
+      scanId,
+      message: 'Scan started successfully'
+    });
+
   } catch (error) {
-    console.error('SCAN-DEBUG: Email scan error:', error);
-    return res.status(500).json({ 
-      error: 'server_error',
-      message: 'An error occurred processing your request',
-      details: error.message
+    console.error('SCAN-DEBUG: Error in email scan handler:', error);
+    return res.status(500).json({
+      error: 'Internal server error',
+      message: error.message
     });
   }
 }
