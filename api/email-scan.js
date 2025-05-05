@@ -1054,6 +1054,7 @@ const processEmails = async (gmailToken, scanId, userId) => {
 
     let processedCount = 0;
     let subscriptionsFound = 0;
+    let potentialSubscriptions = [];
 
     // Process emails in batches
     for (let i = 0; i < messages.length; i++) {
@@ -1084,6 +1085,32 @@ const processEmails = async (gmailToken, scanId, userId) => {
       const analysis = await analyzeEmailWithGemini(emailData);
       console.log(`SCAN-DEBUG: Analysis result for email ${message.id}:`, JSON.stringify(analysis));
 
+      // Save potential subscription email
+      if (analysis.isSubscription || analysis.confidence > 0.3) {
+        const potentialSubscription = {
+          user_id: userId,
+          scan_id: scanId,
+          email_id: message.id,
+          sender: emailData.from,
+          subject: emailData.subject,
+          received_date: emailData.date,
+          analysis_result: analysis,
+          confidence: analysis.confidence,
+          is_confirmed: analysis.isSubscription && analysis.confidence > 0.6
+        };
+        
+        // Save to potential_subscriptions table
+        const { error: saveError } = await supabase
+          .from('potential_subscriptions')
+          .insert(potentialSubscription);
+          
+        if (saveError) {
+          console.error('SCAN-DEBUG: Error saving potential subscription:', saveError);
+        } else {
+          potentialSubscriptions.push(potentialSubscription);
+        }
+      }
+
       // If subscription detected with good confidence, save it
       if (analysis.isSubscription && analysis.confidence > 0.6) {
         console.log(`SCAN-DEBUG: Detected subscription: ${analysis.serviceName} (${analysis.confidence} confidence)`);
@@ -1098,12 +1125,14 @@ const processEmails = async (gmailToken, scanId, userId) => {
       progress: 100,
       emails_processed: processedCount,
       subscriptions_found: subscriptionsFound,
+      potential_subscriptions: potentialSubscriptions.length,
       completed_at: new Date().toISOString()
     });
 
     console.log(`SCAN-DEBUG: Email processing completed for scan ${scanId}`);
     console.log(`SCAN-DEBUG: Total emails processed: ${processedCount}`);
     console.log(`SCAN-DEBUG: Subscriptions found: ${subscriptionsFound}`);
+    console.log(`SCAN-DEBUG: Potential subscriptions found: ${potentialSubscriptions.length}`);
 
   } catch (error) {
     console.error('SCAN-DEBUG: Error in processEmails:', error);

@@ -161,12 +161,19 @@ export default async function handler(req, res) {
           if (scanData && scanData.length > 0) {
             const scan = scanData[0];
             
+            // Get potential subscriptions count
+            const { count: potentialSubscriptionsCount } = await supabase
+              .from('potential_subscriptions')
+              .select('*', { count: 'exact', head: true })
+              .eq('scan_id', scanId);
+            
             // Default stats to include in all responses
             const defaultStats = {
               emails_found: scan.emails_found || 0,
               emails_to_process: scan.emails_to_process || 0, 
               emails_processed: scan.emails_processed || 0,
-              subscriptions_found: scan.subscriptions_found || 0
+              subscriptions_found: scan.subscriptions_found || 0,
+              potential_subscriptions: potentialSubscriptionsCount || 0
             };
             
             if (scan.status === 'completed') {
@@ -198,7 +205,18 @@ export default async function handler(req, res) {
                   scanId: scanId,
                   progress: 100,
                   completedAt: scan.completed_at,
-                  stats: defaultStats,
+                  stats: {
+                    ...defaultStats,
+                    subscriptions_found: subscriptions.map(sub => ({
+                      id: sub.id,
+                      service_name: sub.name,
+                      price: parseFloat(sub.price || 0),
+                      currency: 'USD',
+                      billing_cycle: sub.billing_cycle,
+                      next_billing_date: sub.next_billing_date,
+                      confidence: sub.confidence || 0.8
+                    })).length
+                  },
                   results: {
                     totalEmailsScanned: scan.emails_scanned || 0,
                     subscriptionsFound: subscriptions.map(sub => ({
