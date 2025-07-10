@@ -1,9 +1,10 @@
 // Subscription API endpoint
 import jsonwebtoken from 'jsonwebtoken';
 import fetch from 'node-fetch';
-const { verify } = jsonwebtoken;
-import { createClient } from '@supabase/supabase-js'
+import { analyzeEmailsForUser } from './gemini-analysis-utils.js';
 import { google } from 'googleapis';
+
+const { verify } = jsonwebtoken;
 
 // Supabase config
 const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -338,33 +339,13 @@ export default async function handler(req, res) {
                   if (processedCount > 0) {
                     console.log('Triggering Gemini analysis of emails...');
                     try {
-                      // Construct the correct API URL
-                      let apiBaseUrl;
-                      if (process.env.VERCEL_URL) {
-                        // Vercel provides URL without protocol, add https://
-                        apiBaseUrl = `https://${process.env.VERCEL_URL}`;
-                      } else {
-                        // Fallback to production API
-                        apiBaseUrl = 'https://api.quits.cc';
-                      }
+                      const analysisResult = await analyzeEmailsForUser(
+                        dbUserId,
+                        scanRecord[0].scan_id
+                      );
                       
-                      const analysisResponse = await fetch(`${apiBaseUrl}/api/analyze-emails`, {
-                        method: 'POST',
-                        headers: {
-                          'Content-Type': 'application/json',
-                          'Authorization': `Bearer ${token}`
-                        },
-                        body: JSON.stringify({
-                          scan_id: scanRecord[0].scan_id
-                        })
-                      });
+                      console.log('Gemini analysis triggered successfully:', analysisResult);
                       
-                      if (analysisResponse.ok) {
-                        const analysisResult = await analysisResponse.json();
-                        console.log('Gemini analysis triggered successfully:', analysisResult);
-                      } else {
-                        console.error('Failed to trigger Gemini analysis:', await analysisResponse.text());
-                      }
                     } catch (analysisError) {
                       console.error('Error triggering Gemini analysis:', analysisError);
                     }

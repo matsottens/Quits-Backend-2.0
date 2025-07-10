@@ -38,7 +38,7 @@ export default async function corsMiddleware(req, res) {
   }
   
   return false;
-}
+} 
 
 // Also export the helper function for backward compatibility
 export { setCorsHeaders }; 
