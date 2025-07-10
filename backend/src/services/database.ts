@@ -1,131 +1,89 @@
 import { supabase } from '../config/supabase.js';
 
-interface GoogleUserInfo {
-  id: string;
-  email: string;
-  name?: string;
-  picture?: string;
-  verified_email?: boolean;
-}
+// Create or update a user in the database
+export const upsertUser = async (userInfo) => {
+  try {
+    console.log('Upserting user:', userInfo.email);
 
-interface Subscription {
-  id?: string;
-  user_id: string;
-  name: string;
-  price: number;
-  billing_period: string;
-  next_payment_date?: string;
-  created_at?: string;
-  updated_at?: string;
-}
-
-export async function upsertUser(userInfo: GoogleUserInfo) {
-  const { data: user, error } = await supabase
-    .from('users')
-    .upsert({
+    // Ensure that optional fields are properly handled
+    const sanitizedUserInfo = {
       id: userInfo.id,
       email: userInfo.email,
-      name: userInfo.name,
-      avatar_url: userInfo.picture,
-      updated_at: new Date().toISOString()
-    }, {
-      onConflict: 'id'
-    })
-    .select()
-    .single();
+      name: userInfo.name || null,
+      picture: userInfo.picture || null,
+      verified_email: typeof userInfo.verified_email === 'boolean' ? userInfo.verified_email : null
+    };
 
-    try {
-      const { error: subError } = await supabase
-        .from('subscriptions')
-        .insert({
-          user_id: userInfo.id,
-          name: 'Welcome Subscription',
-          price: 0,
-          billing_cycle: 'monthly',
-          next_billing_date: null,
-          category: 'welcome',
-          is_manual: true,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        });
-      if (subError) {
-        console.error('Failed to create mock subscription for new user:', subError);
-      } else {
-        console.log('Mock subscription created for new user:', userInfo.email);
-      }
-    } catch (subErr) {
-      console.error('Exception creating mock subscription for new user:', subErr);
+    // Use actual Supabase implementation
+    const { data, error } = await supabase
+      .from('users')
+      .upsert({
+        id: sanitizedUserInfo.id,
+        email: sanitizedUserInfo.email,
+        name: sanitizedUserInfo.name,
+        profile_picture: sanitizedUserInfo.picture,
+        verified_email: sanitizedUserInfo.verified_email,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'id' })
+      .select()
+      .single();
+    
+    if (error) {
+      console.error('Supabase upsert error:', error);
+      // Fallback to mock implementation if database operation fails
+      return {
+        id: sanitizedUserInfo.id,
+        email: sanitizedUserInfo.email,
+        name: sanitizedUserInfo.name || 'User',
+        picture: sanitizedUserInfo.picture || null
+      };
     }
 
-  if (error) {
+    // Check if this is a new user (created_at == updated_at or created_at is very recent)
+    if (data && data.created_at && data.updated_at && data.created_at === data.updated_at) {
+      console.log('New user detected, creating mock subscription for:', data.email);
+      
+      // Insert a mock subscription for the new user
+      try {
+        const { error: subError } = await supabase
+          .from('subscriptions')
+          .insert({
+            user_id: data.id,
+            name: 'Welcome Subscription',
+            price: 0,
+            billing_cycle: 'monthly',
+            next_billing_date: null,
+            category: 'welcome',
+            is_manual: true,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          });
+        if (subError) {
+          console.error('Failed to create mock subscription for new user:', subError);
+        } else {
+          console.log('Mock subscription created for new user:', data.email);
+        }
+      } catch (subErr) {
+        console.error('Exception creating mock subscription for new user:', subErr);
+      }
+    } else {
+      console.log('Existing user, skipping mock subscription creation for:', data.email);
+    }
+    
+    return {
+      id: data.id,
+      email: data.email,
+      name: data.name,
+      picture: data.profile_picture
+    };
+  } catch (error) {
     console.error('Error upserting user:', error);
-    throw error;
+    // Fallback to mock implementation
+    return {
+      id: userInfo.id,
+      email: userInfo.email,
+      name: userInfo.name || 'User', 
+      picture: userInfo.picture || null
+    };
   }
-
-  return user;
-}
-
-export async function createSubscription(subscription: Subscription) {
-  const { data, error } = await supabase
-    .from('subscriptions')
-    .insert({
-      ...subscription,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    })
-    .select()
-    .single();
-
-  if (error) {
-    console.error('Error creating subscription:', error);
-    throw error;
-  }
-
-  return data;
-}
-
-export async function getUserSubscriptions(userId: string) {
-  const { data, error } = await supabase
-    .from('subscriptions')
-    .select('*')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false });
-
-  if (error) {
-    console.error('Error fetching user subscriptions:', error);
-    throw error;
-  }
-
-  return data;
-}
-
-export async function updateSubscription(id: string, updates: Partial<Subscription>) {
-  const { data, error } = await supabase
-    .from('subscriptions')
-    .update({
-      ...updates,
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', id)
-    .select()
-    .single();
-
-  if (error) {
-    console.error('Error updating subscription:', error);
-    throw error;
-  }
-
-  return data;
-}
-
-export async function deleteSubscription(id: string) {
-  const { error } = await supabase
-    .from('subscriptions')
-    .delete()
-    .eq('id', id);
-
-  if (error) {
-    console.error('Error deleting subscription:', error);
-    throw error;
-  }
-} 
+}; 

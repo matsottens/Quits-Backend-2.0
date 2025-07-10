@@ -727,8 +727,8 @@ const validateGmailToken = async (token) => {
   console.log('SCAN-DEBUG: Validating Gmail token');
   if (!token) {
     console.error('SCAN-DEBUG: No Gmail token provided');
-    return false;
-  }
+      return false;
+    }
 
   try {
     const gmail = google.gmail({ version: 'v1', auth: token });
@@ -911,77 +911,77 @@ const processEmails = async (gmailToken, scanId, userId) => {
   console.log('SCAN-DEBUG: Starting processEmails');
   if (!gmailToken) {
     console.error('SCAN-DEBUG: No Gmail token provided to processEmails');
-    return;
-  }
+            return;
+          }
   if (!scanId) {
     console.error('SCAN-DEBUG: No scanId provided to processEmails');
     return;
   }
   if (!userId) {
     console.error('SCAN-DEBUG: No userId provided to processEmails');
-    return;
-  }
-  
+              return;
+            }
+            
   try {
     // Update initial scan status
     await updateScanStatus(scanId, userId, {
-      status: 'in_progress',
+                  status: 'in_progress',
       progress: 0,
       emails_found: 0,
       emails_to_process: 0,
       emails_processed: 0,
       subscriptions_found: 0
     });
-
-    // Fetch emails from Gmail
-    console.log('SCAN-DEBUG: Fetching emails from Gmail');
-    const messages = await fetchEmailsFromGmail(gmailToken);
+            
+            // Fetch emails from Gmail
+            console.log('SCAN-DEBUG: Fetching emails from Gmail');
+            const messages = await fetchEmailsFromGmail(gmailToken);
     console.log(`SCAN-DEBUG: Found ${messages.length} emails to process`);
 
     // Update scan status with total emails found
     await updateScanStatus(scanId, userId, {
-      status: 'in_progress',
+              status: 'in_progress',
       progress: 10,
-      emails_found: messages.length,
+              emails_found: messages.length,
       emails_to_process: messages.length,
       emails_processed: 0,
       subscriptions_found: 0
-    });
-
-    let processedCount = 0;
+            });
+            
+            let processedCount = 0;
     let subscriptionsFound = 0;
     let potentialSubscriptions = [];
-
+            
     // Process emails in batches
-    for (let i = 0; i < messages.length; i++) {
-      const message = messages[i];
-      processedCount++;
-
+            for (let i = 0; i < messages.length; i++) {
+              const message = messages[i];
+              processedCount++;
+              
       // Calculate progress (10-90% range for email processing)
       const progress = Math.min(90, Math.floor(10 + (processedCount / messages.length) * 80));
-
+              
       // Update progress every 5 emails
-      if (processedCount % 5 === 0 || processedCount === messages.length) {
+              if (processedCount % 5 === 0 || processedCount === messages.length) {
         await updateScanStatus(scanId, userId, {
           progress,
-          emails_processed: processedCount,
+                  emails_processed: processedCount,
           subscriptions_found: subscriptionsFound
-        });
+                });
         console.log(`SCAN-DEBUG: Processed ${processedCount}/${messages.length} emails (${progress}%)`);
-      }
-
+              }
+              
       // Get email content
-      const emailData = await fetchEmailContent(gmailToken, message.id);
-      if (!emailData) {
+              const emailData = await fetchEmailContent(gmailToken, message.id);
+              if (!emailData) {
         console.log(`SCAN-DEBUG: Skipping email ${message.id} - failed to fetch content`);
-        continue;
-      }
+                continue;
+              }
       // Log the email subject and sender
-      const headers = emailData.payload?.headers || [];
-      const { subject, from } = parseEmailHeaders(headers);
+              const headers = emailData.payload?.headers || [];
+              const { subject, from } = parseEmailHeaders(headers);
       console.log(`SCAN-DEBUG: Analyzing email ${i + 1}/${messages.length} - Subject: ${subject}, From: ${from}`);
       // Analyze email with Gemini
-      const analysis = await analyzeEmailWithGemini(emailData);
+                const analysis = await analyzeEmailWithGemini(emailData);
       console.log(`SCAN-DEBUG: Gemini analysis result for email ${message.id}:`, JSON.stringify(analysis));
 
       // Save potential subscription email
@@ -1020,14 +1020,14 @@ const processEmails = async (gmailToken, scanId, userId) => {
 
     // Update final status
     await updateScanStatus(scanId, userId, {
-      status: 'completed',
-      progress: 100,
-      emails_processed: processedCount,
+              status: 'completed',
+              progress: 100,
+              emails_processed: processedCount,
       subscriptions_found: subscriptionsFound,
       potential_subscriptions: potentialSubscriptions.length,
-      completed_at: new Date().toISOString()
-    });
-
+              completed_at: new Date().toISOString()
+            });
+            
     console.log(`SCAN-DEBUG: Email processing completed for scan ${scanId}`);
     console.log(`SCAN-DEBUG: Total emails processed: ${processedCount}`);
     console.log(`SCAN-DEBUG: Subscriptions found: ${subscriptionsFound}`);
@@ -1036,7 +1036,7 @@ const processEmails = async (gmailToken, scanId, userId) => {
   } catch (error) {
     console.error('SCAN-DEBUG: Error in processEmails:', error);
     await updateScanStatus(scanId, userId, {
-      status: 'error',
+                status: 'error',
       error: error.message,
       progress: 0
     });
@@ -1114,7 +1114,7 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error('SCAN-DEBUG: Error in email scan handler:', error);
-    return res.status(500).json({
+    return res.status(500).json({ 
       error: 'Internal server error',
       message: error.message
     });
