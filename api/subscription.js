@@ -326,7 +326,8 @@ export default async function handler(req, res) {
           dbUserId = newUser[0].id;
           console.log(`Created new user with ID: ${dbUserId}`);
 
-          const { error: subError } = await supabase
+          try {
+            const { error: subError } = await supabase
           .from('subscriptions')
           .insert({
             user_id: dbUserId,
@@ -340,6 +341,10 @@ export default async function handler(req, res) {
             updated_at: new Date().toISOString()
           });
           console.log('Mock subscription created for new user:', decoded.email);
+          } catch (e){
+            console.error('Failed to create mock subscription for new user:', e);
+          }
+          
         } else {
           dbUserId = users[0].id;
           console.log(`Found existing user with ID: ${dbUserId}`);
