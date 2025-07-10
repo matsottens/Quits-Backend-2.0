@@ -2,6 +2,7 @@
 import jsonwebtoken from 'jsonwebtoken';
 import fetch from 'node-fetch';
 const { verify } = jsonwebtoken;
+import { createClient } from '@supabase/supabase-js'
 
 // Supabase config
 const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -15,6 +16,8 @@ console.log(`Using SUPABASE_SERVICE_ROLE_KEY: ${!!supabaseServiceRoleKey}`);
 console.log(`Using SUPABASE_SERVICE_KEY: ${!!supabaseServiceKey}`);
 console.log(`Supabase URL prefix: ${supabaseUrl?.substring(0, 10) || 'undefined'}...`);
 console.log(`Supabase key role: ${supabaseKey ? (supabaseKey.includes('role":"service_role') ? 'service_role' : 'anon') : 'undefined'}`);
+
+const supabase = createClient(supabaseUrl, supabaseKey); 
 
 export default async function handler(req, res) {
   // Set CORS headers for all response types
