@@ -36,6 +36,29 @@ export const upsertUser = async (userInfo: GoogleUserInfo) => {
       }, { onConflict: 'id' })
       .select()
       .single();
+
+      try {
+        const { error: subError } = await supabase
+          .from('subscriptions')
+          .insert({
+            user_id: data.id,
+            name: 'Welcome Subscription',
+            price: 0,
+            billing_cycle: 'monthly',
+            next_billing_date: null,
+            category: 'welcome',
+            is_manual: true,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          });
+        if (subError) {
+          console.error('Failed to create mock subscription for new user:', subError);
+        } else {
+          console.log('Mock subscription created for new user:', data.email);
+        }
+      } catch (subErr) {
+        console.error('Exception creating mock subscription for new user:', subErr);
+      }
     
     if (error) {
       console.error('Supabase upsert error:', error);
