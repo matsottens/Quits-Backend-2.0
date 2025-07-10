@@ -1,4 +1,4 @@
-// Email analysis API endpoint using Gemini
+// Email analysis API endpoint using Gemini - Vercel deployment fix
 import jsonwebtoken from 'jsonwebtoken';
 import fetch from 'node-fetch';
 import { createClient } from '@supabase/supabase-js';

@@ -59,6 +59,8 @@
     { "source": "/api/health", "destination": "/api/health.js" },
     { "source": "/api/auth/google/callback", "destination": "/api/auth/google/callback.js" },
     { "source": "/api/auth/google", "destination": "/api/auth/google/index.js" },
+    { "source": "/api/analyze-emails", "destination": "/api/analyze-emails.js" },
+    { "source": "/api/analyzed-subscriptions", "destination": "/api/analyzed-subscriptions.js" },
     { "source": "/api/(.*)", "destination": "/api/combined-handlers.js" },
     { "source": "/(.*)", "destination": "/frontend/$1" }
   ]
