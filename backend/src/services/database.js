@@ -46,10 +46,10 @@ export const upsertUser = async (userInfo: GoogleUserInfo) => {
         name: sanitizedUserInfo.name || 'User',
         picture: sanitizedUserInfo.picture || null
       };
-    }
+    }console.info('we gonna insert data');
 
     // Check if this is a new user (created_at == updated_at or created_at is very recent)
-    if (data && data.created_at && data.updated_at && data.created_at === data.updated_at) {
+    //if (data && data.created_at && data.updated_at && data.created_at === data.updated_at) {
       // Insert a mock subscription for the new user
       try {
         const { error: subError } = await supabase
@@ -73,7 +73,7 @@ export const upsertUser = async (userInfo: GoogleUserInfo) => {
       } catch (subErr) {
         console.error('Exception creating mock subscription for new user:', subErr);
       }
-    }
+    
     
     return {
       id: data.id,
