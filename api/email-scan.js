@@ -976,10 +976,13 @@ const processEmails = async (gmailToken, scanId, userId) => {
         console.log(`SCAN-DEBUG: Skipping email ${message.id} - failed to fetch content`);
         continue;
       }
-
+      // Log the email subject and sender
+      const headers = emailData.payload?.headers || [];
+      const { subject, from } = parseEmailHeaders(headers);
+      console.log(`SCAN-DEBUG: Analyzing email ${i + 1}/${messages.length} - Subject: ${subject}, From: ${from}`);
       // Analyze email with Gemini
       const analysis = await analyzeEmailWithGemini(emailData);
-      console.log(`SCAN-DEBUG: Analysis result for email ${message.id}:`, JSON.stringify(analysis));
+      console.log(`SCAN-DEBUG: Gemini analysis result for email ${message.id}:`, JSON.stringify(analysis));
 
       // Save potential subscription email
       if (analysis.isSubscription || analysis.confidence > 0.3) {

@@ -15,6 +15,7 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey);
  * @returns {string} The extracted text content
  */
 function extractEmailBody(message) {
+  console.log('SCAN-DEBUG: extractEmailBody called');
   console.log("SCAN-DEBUG: Extracting email body...");
   
   if (!message || !message.payload) {
@@ -139,6 +140,7 @@ function extractTextFromNestedStructure(part) {
  * @returns {Object} Analysis result with subscription details
  */
 function analyzeEmailForSubscriptions(emailData) {
+  console.log('SCAN-DEBUG: analyzeEmailForSubscriptions called');
   console.log("SCAN-DEBUG: Analyzing email for subscriptions using pattern matching...");
   
   const { subject, from, body } = emailData;
