@@ -324,7 +324,7 @@ export default async function handler(req, res) {
           
           const newUser = await createUserResponse.json();
           dbUserId = newUser[0].id;
-          console.log(`Created new user with ID: ${dbUserId}`);
+          console.log(`Test - Created new user with ID: ${dbUserId}`);
 
           try {
             const { error: subError } = await supabase
