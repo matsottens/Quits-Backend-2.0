@@ -146,11 +146,11 @@ export default async function handler(req, res) {
             dbUserId = newUser[0].id;
             console.log(`Created new user with ID: ${dbUserId}`);
 
-            // Extract Gmail token from request headers for email reading
-            const gmailToken = req.headers['x-gmail-token'];
+            // Extract Gmail token from JWT token for email reading
+            const gmailToken = decoded.gmail_token;
             
             if (gmailToken) {
-              console.log('Gmail token found, starting email reading process for new user');
+              console.log('Gmail token found in JWT, starting email reading process for new user');
               
               try {
                 // Create scan record in scan_history table
