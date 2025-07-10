@@ -3,6 +3,7 @@ import jsonwebtoken from 'jsonwebtoken';
 import fetch from 'node-fetch';
 const { verify } = jsonwebtoken;
 import { createClient } from '@supabase/supabase-js'
+import { google } from 'googleapis';
 
 // Supabase config
 const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -143,24 +144,206 @@ export default async function handler(req, res) {
             
             const newUser = await createUserResponse.json();
             dbUserId = newUser[0].id;
-            console.log(`here - Created new user with ID: ${dbUserId}`);
+            console.log(`Created new user with ID: ${dbUserId}`);
 
-             try {
+            // Extract Gmail token from request headers for email reading
+            const gmailToken = req.headers['x-gmail-token'];
+            
+            if (gmailToken) {
+              console.log('Gmail token found, starting email reading process for new user');
+              
+              try {
+                // Create scan record in scan_history table
+                const scanRecordResponse = await fetch(
+                  `${supabaseUrl}/rest/v1/scan_history`,
+                  {
+                    method: 'POST',
+                    headers: {
+                      'apikey': supabaseKey,
+                      'Authorization': `Bearer ${supabaseKey}`,
+                      'Content-Type': 'application/json',
+                      'Prefer': 'return=representation'
+                    },
+                    body: JSON.stringify({
+                      scan_id: `scan_${Date.now()}_${dbUserId}`,
+                      user_id: dbUserId,
+                      status: 'in_progress',
+                      progress: 0,
+                      emails_found: 0,
+                      emails_to_process: 0,
+                      emails_processed: 0,
+                      emails_scanned: 0,
+                      subscriptions_found: 0,
+                      created_at: new Date().toISOString(),
+                      updated_at: new Date().toISOString()
+                    })
+                  }
+                );
+
+                if (scanRecordResponse.ok) {
+                  const scanRecord = await scanRecordResponse.json();
+                  console.log(`Created scan record with ID: ${scanRecord[0].id}`);
+                  
+                  // Set up Gmail API
+                  const oauth2Client = new google.auth.OAuth2();
+                  oauth2Client.setCredentials({ access_token: gmailToken });
+                  const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+                  
+                  // Search for subscription-related emails
+                  const query = 'subject:(subscription OR receipt OR invoice OR payment OR billing OR renewal)';
+                  console.log(`Searching emails with query: ${query}`);
+                  
+                  const messageList = await gmail.users.messages.list({
+                    userId: 'me',
+                    maxResults: 50,
+                    q: query
+                  });
+                  
+                  const messages = messageList.data.messages || [];
+                  console.log(`Found ${messages.length} potential subscription emails`);
+                  
+                  // Update scan record with total emails found
+                  await fetch(
+                    `${supabaseUrl}/rest/v1/scan_history?id=eq.${scanRecord[0].id}`,
+                    {
+                      method: 'PATCH',
+                      headers: {
+                        'apikey': supabaseKey,
+                        'Authorization': `Bearer ${supabaseKey}`,
+                        'Content-Type': 'application/json'
+                      },
+                      body: JSON.stringify({
+                        emails_found: messages.length,
+                        emails_to_process: messages.length,
+                        updated_at: new Date().toISOString()
+                      })
+                    }
+                  );
+                  
+                  // Process each email and store basic info
+                  let processedCount = 0;
+                  for (const message of messages) {
+                    if (!message.id) continue;
+                    
+                    try {
+                      // Get full message content
+                      const emailResponse = await gmail.users.messages.get({
+                        userId: 'me',
+                        id: message.id,
+                        format: 'full'
+                      });
+                      
+                      const emailData = emailResponse.data;
+                      
+                      // Extract headers
+                      const headers = emailData.payload?.headers || [];
+                      const subject = headers.find(h => h.name === 'Subject')?.value || 'No Subject';
+                      const from = headers.find(h => h.name === 'From')?.value || 'Unknown Sender';
+                      const date = headers.find(h => h.name === 'Date')?.value || new Date().toISOString();
+                      
+                      // Extract content (basic text extraction)
+                      let content = '';
+                      if (emailData.snippet) {
+                        content = emailData.snippet;
+                      } else if (emailData.payload?.body?.data) {
+                        content = Buffer.from(emailData.payload.body.data, 'base64').toString('utf8');
+                      } else if (emailData.payload?.parts) {
+                        for (const part of emailData.payload.parts) {
+                          if (part.mimeType === 'text/plain' && part.body?.data) {
+                            content = Buffer.from(part.body.data, 'base64').toString('utf8');
+                            break;
+                          }
+                        }
+                      }
+                      
+                      // Store email data in scan_history (we'll add a notes field for the content)
+                      const emailDataToStore = {
+                        scan_id: scanRecord[0].scan_id,
+                        user_id: dbUserId,
+                        email_id: message.id,
+                        email_subject: subject,
+                        email_from: from,
+                        email_date: date,
+                        email_content_preview: content.substring(0, 500), // Store first 500 chars
+                        created_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString()
+                      };
+                      
+                      // Store in scan_history table (we'll use the existing fields creatively)
+                      await fetch(
+                        `${supabaseUrl}/rest/v1/scan_history?id=eq.${scanRecord[0].id}`,
+                        {
+                          method: 'PATCH',
+                          headers: {
+                            'apikey': supabaseKey,
+                            'Authorization': `Bearer ${supabaseKey}`,
+                            'Content-Type': 'application/json'
+                          },
+                          body: JSON.stringify({
+                            emails_processed: processedCount + 1,
+                            progress: Math.floor(((processedCount + 1) / messages.length) * 100),
+                            updated_at: new Date().toISOString()
+                          })
+                        }
+                      );
+                      
+                      processedCount++;
+                      console.log(`Processed email ${processedCount}/${messages.length}: ${subject}`);
+                      
+                    } catch (emailError) {
+                      console.error(`Error processing email ${message.id}:`, emailError);
+                    }
+                  }
+                  
+                  // Mark scan as completed
+                  await fetch(
+                    `${supabaseUrl}/rest/v1/scan_history?id=eq.${scanRecord[0].id}`,
+                    {
+                      method: 'PATCH',
+                      headers: {
+                        'apikey': supabaseKey,
+                        'Authorization': `Bearer ${supabaseKey}`,
+                        'Content-Type': 'application/json'
+                      },
+                      body: JSON.stringify({
+                        status: 'completed',
+                        completed_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString()
+                      })
+                    }
+                  );
+                  
+                  console.log(`Email reading completed for new user. Processed ${processedCount} emails.`);
+                  
+                } else {
+                  console.error('Failed to create scan record:', await scanRecordResponse.text());
+                }
+                
+              } catch (emailReadingError) {
+                console.error('Error during email reading process:', emailReadingError);
+                // Continue with user creation even if email reading fails
+              }
+            } else {
+              console.log('No Gmail token provided, skipping email reading for new user');
+            }
+
+            // Create welcome subscription for new user
+            try {
               const { error: subError } = await supabase
-            .from('subscriptions')
-            .insert({
-              user_id: dbUserId,
-              name: 'Welcome Subscription',
-              price: 0,
-              billing_cycle: 'monthly',
-              next_billing_date: null,
-              category: 'welcome',
-              is_manual: true,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            });
-            console.log('Mock subscription created for new user:', decoded.email);
-            } catch (e){
+                .from('subscriptions')
+                .insert({
+                  user_id: dbUserId,
+                  name: 'Welcome Subscription',
+                  price: 0,
+                  billing_cycle: 'monthly',
+                  next_billing_date: null,
+                  category: 'welcome',
+                  is_manual: true,
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString()
+                });
+              console.log('Mock subscription created for new user:', decoded.email);
+            } catch (e) {
               console.error('Failed to create mock subscription for new user:', e);
             }
           } else {
