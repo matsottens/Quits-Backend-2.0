@@ -338,7 +338,17 @@ export default async function handler(req, res) {
                   if (processedCount > 0) {
                     console.log('Triggering Gemini analysis of emails...');
                     try {
-                      const analysisResponse = await fetch(`${process.env.VERCEL_URL || 'https://api.quits.cc'}/api/analyze-emails`, {
+                      // Construct the correct API URL
+                      let apiBaseUrl;
+                      if (process.env.VERCEL_URL) {
+                        // Vercel provides URL without protocol, add https://
+                        apiBaseUrl = `https://${process.env.VERCEL_URL}`;
+                      } else {
+                        // Fallback to production API
+                        apiBaseUrl = 'https://api.quits.cc';
+                      }
+                      
+                      const analysisResponse = await fetch(`${apiBaseUrl}/api/analyze-emails`, {
                         method: 'POST',
                         headers: {
                           'Content-Type': 'application/json',
