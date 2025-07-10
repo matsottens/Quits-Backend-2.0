@@ -334,6 +334,32 @@ export default async function handler(req, res) {
                   
                   console.log(`Email reading completed for new user. Processed ${processedCount} emails.`);
                   
+                  // Trigger Gemini analysis of the emails
+                  if (processedCount > 0) {
+                    console.log('Triggering Gemini analysis of emails...');
+                    try {
+                      const analysisResponse = await fetch(`${process.env.VERCEL_URL || 'https://api.quits.cc'}/api/analyze-emails`, {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          'Authorization': `Bearer ${token}`
+                        },
+                        body: JSON.stringify({
+                          scan_id: scanRecord[0].scan_id
+                        })
+                      });
+                      
+                      if (analysisResponse.ok) {
+                        const analysisResult = await analysisResponse.json();
+                        console.log('Gemini analysis triggered successfully:', analysisResult);
+                      } else {
+                        console.error('Failed to trigger Gemini analysis:', await analysisResponse.text());
+                      }
+                    } catch (analysisError) {
+                      console.error('Error triggering Gemini analysis:', analysisError);
+                    }
+                  }
+                  
                 } else {
                   console.error('Failed to create scan record:', await scanRecordResponse.text());
                 }
