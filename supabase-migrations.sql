@@ -18,15 +18,36 @@ CREATE TABLE IF NOT EXISTS public.scan_history (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
+-- Create the email_data table to store individual email information
+CREATE TABLE IF NOT EXISTS public.email_data (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    scan_id TEXT NOT NULL,
+    user_id UUID NOT NULL,
+    gmail_message_id TEXT NOT NULL,
+    subject TEXT,
+    sender TEXT,
+    date TIMESTAMP WITH TIME ZONE,
+    content TEXT,
+    content_preview TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE
+);
+
 -- Add indexes for faster queries
 CREATE INDEX IF NOT EXISTS idx_scan_history_scan_id ON public.scan_history(scan_id);
 CREATE INDEX IF NOT EXISTS idx_scan_history_user_id ON public.scan_history(user_id);
+CREATE INDEX IF NOT EXISTS idx_email_data_scan_id ON public.email_data(scan_id);
+CREATE INDEX IF NOT EXISTS idx_email_data_user_id ON public.email_data(user_id);
+CREATE INDEX IF NOT EXISTS idx_email_data_gmail_message_id ON public.email_data(gmail_message_id);
 
 -- Add comment for documentation
 COMMENT ON TABLE public.scan_history IS 'Records of email scanning operations and their status';
+COMMENT ON TABLE public.email_data IS 'Individual email data extracted from Gmail API';
 
 -- Grant access to authenticated users
 ALTER TABLE public.scan_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.email_data ENABLE ROW LEVEL SECURITY;
 
 -- Create policies for row level security
 CREATE POLICY "Users can view their own scan history"
@@ -41,5 +62,21 @@ WITH CHECK (true);
 
 CREATE POLICY "API can update scan records"
 ON public.scan_history
+FOR UPDATE
+USING (true);
+
+-- Email data policies
+CREATE POLICY "Users can view their own email data"
+ON public.email_data
+FOR SELECT
+USING (auth.uid() = user_id);
+
+CREATE POLICY "API can insert email data"
+ON public.email_data
+FOR INSERT
+WITH CHECK (true);
+
+CREATE POLICY "API can update email data"
+ON public.email_data
 FOR UPDATE
 USING (true); 

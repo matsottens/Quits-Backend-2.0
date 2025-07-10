@@ -256,20 +256,39 @@ export default async function handler(req, res) {
                         }
                       }
                       
-                      // Store email data in scan_history (we'll add a notes field for the content)
-                      const emailDataToStore = {
-                        scan_id: scanRecord[0].scan_id,
-                        user_id: dbUserId,
-                        email_id: message.id,
-                        email_subject: subject,
-                        email_from: from,
-                        email_date: date,
-                        email_content_preview: content.substring(0, 500), // Store first 500 chars
-                        created_at: new Date().toISOString(),
-                        updated_at: new Date().toISOString()
-                      };
+                      // Store email data in a new table called 'email_data'
+                      const emailDataResponse = await fetch(
+                        `${supabaseUrl}/rest/v1/email_data`,
+                        {
+                          method: 'POST',
+                          headers: {
+                            'apikey': supabaseKey,
+                            'Authorization': `Bearer ${supabaseKey}`,
+                            'Content-Type': 'application/json',
+                            'Prefer': 'return=representation'
+                          },
+                          body: JSON.stringify({
+                            scan_id: scanRecord[0].scan_id,
+                            user_id: dbUserId,
+                            gmail_message_id: message.id,
+                            subject: subject,
+                            sender: from,
+                            date: date,
+                            content: content.substring(0, 2000), // Store first 2000 chars
+                            content_preview: content.substring(0, 500), // Store first 500 chars
+                            created_at: new Date().toISOString(),
+                            updated_at: new Date().toISOString()
+                          })
+                        }
+                      );
                       
-                      // Store in scan_history table (we'll use the existing fields creatively)
+                      if (!emailDataResponse.ok) {
+                        console.error(`Failed to store email data for message ${message.id}:`, await emailDataResponse.text());
+                      } else {
+                        console.log(`Stored email data for message ${message.id}`);
+                      }
+                      
+                      // Update scan progress
                       await fetch(
                         `${supabaseUrl}/rest/v1/scan_history?id=eq.${scanRecord[0].id}`,
                         {
