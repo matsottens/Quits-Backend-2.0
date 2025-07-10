@@ -15,7 +15,7 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 // Gemini API configuration
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent';
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent';
 
 export default async function handler(req, res) {
   // Set CORS headers
