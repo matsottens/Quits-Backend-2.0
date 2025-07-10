@@ -255,6 +255,14 @@ const fetchEmailsFromGmail = async (gmailToken) => {
 // Function to fetch detailed email content
 const fetchEmailContent = async (gmailToken, messageId) => {
   console.log(`SCAN-DEBUG: Fetching content for email ID: ${messageId}`);
+  if (!gmailToken) {
+    console.error(`SCAN-DEBUG: No Gmail token provided to fetchEmailContent for messageId: ${messageId}`);
+    return null;
+  }
+  if (!messageId) {
+    console.error('SCAN-DEBUG: No messageId provided to fetchEmailContent');
+    return null;
+  }
   try {
     const apiUrl = `https://www.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=full`;
     console.log(`SCAN-DEBUG: Gmail content API URL: ${apiUrl}`);
@@ -293,6 +301,11 @@ const fetchEmailContent = async (gmailToken, messageId) => {
 
 // Function to analyze email with Gemini AI
 const analyzeEmailWithGemini = async (emailContent) => {
+  console.log('SCAN-DEBUG: Analyzing email with Gemini AI');
+  if (!emailContent) {
+    console.error('SCAN-DEBUG: No emailContent provided to analyzeEmailWithGemini');
+    return { isSubscription: false, confidence: 0 };
+  }
   try {
     // Check if Gemini API key exists
     console.log(`SCAN-DEBUG: Checking for Gemini API key: ${!!process.env.GEMINI_API_KEY}`);
@@ -592,6 +605,15 @@ JSON Output:
 
 // Function to save detected subscription to database
 const saveSubscription = async (userId, subscriptionData) => {
+  console.log('SCAN-DEBUG: Attempting to save subscription:', JSON.stringify(subscriptionData));
+  if (!userId) {
+    console.error('SCAN-DEBUG: No userId provided to saveSubscription');
+    return null;
+  }
+  if (!subscriptionData || !subscriptionData.serviceName) {
+    console.error('SCAN-DEBUG: Invalid subscriptionData provided to saveSubscription:', subscriptionData);
+    return null;
+  }
   try {
     // First check if a similar subscription already exists
     const checkResponse = await fetch(
@@ -886,7 +908,19 @@ const searchEmails = async (gmail, query) => {
 };
 
 const processEmails = async (gmailToken, scanId, userId) => {
-  console.log('SCAN-DEBUG: Starting email processing for scan:', scanId);
+  console.log('SCAN-DEBUG: Starting processEmails');
+  if (!gmailToken) {
+    console.error('SCAN-DEBUG: No Gmail token provided to processEmails');
+    return;
+  }
+  if (!scanId) {
+    console.error('SCAN-DEBUG: No scanId provided to processEmails');
+    return;
+  }
+  if (!userId) {
+    console.error('SCAN-DEBUG: No userId provided to processEmails');
+    return;
+  }
   
   try {
     // Update initial scan status
