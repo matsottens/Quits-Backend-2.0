@@ -3,6 +3,7 @@ import jsonwebtoken from 'jsonwebtoken';
 import fetch from 'node-fetch';
 import { analyzeEmailsForUser } from './gemini-analysis-utils.js';
 import { google } from 'googleapis';
+import { createClient } from '@supabase/supabase-js';
 
 const { verify } = jsonwebtoken;
 
