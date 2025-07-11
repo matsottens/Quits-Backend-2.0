@@ -62,6 +62,7 @@
     { "source": "/api/analyze-emails", "destination": "/api/analyze-emails.js" },
     { "source": "/api/analyzed-subscriptions", "destination": "/api/analyzed-subscriptions.js" },
     { "source": "/api/test-gemini-direct", "destination": "/api/test-gemini-direct.js" },
+    { "source": "/api/trigger-analysis", "destination": "/api/trigger-analysis.js" },
     { "source": "/api/(.*)", "destination": "/api/combined-handlers.js" },
     { "source": "/(.*)", "destination": "/frontend/$1" }
   ]

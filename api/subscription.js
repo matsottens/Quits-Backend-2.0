@@ -340,12 +340,17 @@ export default async function handler(req, res) {
                   if (processedCount > 0) {
                     console.log('Triggering Gemini analysis of emails...');
                     try {
-                      const analysisResult = await analyzeEmailsForUser(
+                      // Trigger analysis in background without waiting for completion
+                      analyzeEmailsForUser(
                         dbUserId,
                         scanRecord[0].scan_id
-                      );
+                      ).then(result => {
+                        console.log('Gemini analysis completed:', result);
+                      }).catch(error => {
+                        console.error('Gemini analysis failed:', error);
+                      });
                       
-                      console.log('Gemini analysis triggered successfully:', analysisResult);
+                      console.log('Gemini analysis triggered in background');
                       
                     } catch (analysisError) {
                       console.error('Error triggering Gemini analysis:', analysisError);
