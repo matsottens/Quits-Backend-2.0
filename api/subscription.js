@@ -417,8 +417,53 @@ export default async function handler(req, res) {
           const subscriptions = await response.json();
           console.log(`Found ${subscriptions.length} subscriptions for user ${dbUserId}`);
           
+          // Also fetch auto-detected subscriptions from analysis results
+          const analysisResponse = await fetch(
+            `${supabaseUrl}/rest/v1/subscription_analysis?user_id=eq.${dbUserId}&analysis_status=eq.completed&subscription_name=not.is.null&select=*`,
+            {
+              method: 'GET',
+              headers: {
+                'apikey': supabaseKey,
+                'Authorization': `Bearer ${supabaseKey}`,
+                'Content-Type': 'application/json'
+              }
+            }
+          );
+          
+          let analysisSubscriptions = [];
+          if (analysisResponse.ok) {
+            analysisSubscriptions = await analysisResponse.json();
+            console.log(`Found ${analysisSubscriptions.length} auto-detected subscriptions from analysis`);
+          }
+          
+          // Combine manual subscriptions and auto-detected ones
+          const allSubscriptions = [...subscriptions];
+          
+          // Add auto-detected subscriptions that aren't already in the subscriptions table
+          for (const analysis of analysisSubscriptions) {
+            const alreadyExists = subscriptions.some(sub => sub.name === analysis.subscription_name);
+            if (!alreadyExists) {
+              allSubscriptions.push({
+                id: `analysis_${analysis.id}`,
+                name: analysis.subscription_name,
+                price: analysis.price || 0,
+                billing_cycle: analysis.billing_cycle || 'monthly',
+                next_billing_date: analysis.next_billing_date,
+                category: 'auto-detected',
+                is_manual: false,
+                source_analysis_id: analysis.id,
+                service_provider: analysis.service_provider,
+                confidence_score: analysis.confidence_score,
+                created_at: analysis.created_at,
+                updated_at: analysis.updated_at
+              });
+            }
+          }
+          
+          console.log(`Total subscriptions (manual + auto-detected): ${allSubscriptions.length}`);
+          
           // For now, if no subscriptions are found, return mock data to prevent empty state
-          if (!subscriptions || subscriptions.length === 0) {
+          if (!allSubscriptions || allSubscriptions.length === 0) {
             console.log('No subscriptions found, returning empty array');
             return res.status(200).json({
               success: true,
@@ -434,18 +479,18 @@ export default async function handler(req, res) {
           }
           
           // Calculate subscription metrics
-          const monthlyTotal = subscriptions
+          const monthlyTotal = allSubscriptions
             .filter(sub => sub.billing_cycle === 'monthly')
             .reduce((sum, sub) => sum + parseFloat(sub.price || 0), 0);
             
-          const yearlyTotal = subscriptions
+          const yearlyTotal = allSubscriptions
             .filter(sub => sub.billing_cycle === 'yearly')
             .reduce((sum, sub) => sum + parseFloat(sub.price || 0), 0);
             
           const annualizedCost = monthlyTotal * 12 + yearlyTotal;
           
           // Map database field names to frontend expected format
-          const formattedSubscriptions = subscriptions.map(sub => ({
+          const formattedSubscriptions = allSubscriptions.map(sub => ({
             id: sub.id,
             name: sub.name,
             price: parseFloat(sub.price || 0),
@@ -453,6 +498,9 @@ export default async function handler(req, res) {
             nextBillingDate: sub.next_billing_date,
             category: sub.category || 'other',
             is_manual: sub.is_manual || false,
+            source_analysis_id: sub.source_analysis_id,
+            service_provider: sub.service_provider,
+            confidence_score: sub.confidence_score,
             createdAt: sub.created_at,
             updatedAt: sub.updated_at
           }));
@@ -461,7 +509,7 @@ export default async function handler(req, res) {
             success: true,
             subscriptions: formattedSubscriptions,
             meta: {
-              total: subscriptions.length,
+              total: allSubscriptions.length,
               totalMonthly: monthlyTotal,
               totalYearly: yearlyTotal,
               totalAnnualized: annualizedCost,

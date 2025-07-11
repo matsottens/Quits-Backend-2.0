@@ -14,6 +14,85 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent';
 
+// Function to convert analysis results to subscriptions
+async function convertAnalysisToSubscriptions(userId, scanId) {
+  console.log(`Converting analysis results to subscriptions for user ${userId}, scan ${scanId}`);
+  
+  try {
+    // Get all successful analysis results for this scan
+    const { data: analysisResults, error: fetchError } = await supabase
+      .from('subscription_analysis')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('scan_id', scanId)
+      .eq('analysis_status', 'completed')
+      .not('subscription_name', 'is', null);
+
+    if (fetchError) {
+      console.error('Error fetching analysis results:', fetchError);
+      return;
+    }
+
+    if (!analysisResults || analysisResults.length === 0) {
+      console.log('No successful analysis results to convert');
+      return;
+    }
+
+    console.log(`Found ${analysisResults.length} successful analysis results to convert`);
+
+    let convertedCount = 0;
+    for (const analysis of analysisResults) {
+      try {
+        // Check if subscription already exists for this analysis
+        const { data: existingSubscription } = await supabase
+          .from('subscriptions')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('name', analysis.subscription_name)
+          .single();
+
+        if (existingSubscription) {
+          console.log(`Subscription "${analysis.subscription_name}" already exists, skipping`);
+          continue;
+        }
+
+        // Create new subscription from analysis result
+        const { error: insertError } = await supabase
+          .from('subscriptions')
+          .insert({
+            user_id: userId,
+            name: analysis.subscription_name,
+            price: analysis.price || 0,
+            billing_cycle: analysis.billing_cycle || 'monthly',
+            next_billing_date: analysis.next_billing_date,
+            category: 'auto-detected',
+            is_manual: false,
+            source_analysis_id: analysis.id,
+            service_provider: analysis.service_provider,
+            confidence_score: analysis.confidence_score,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          });
+
+        if (insertError) {
+          console.error(`Error creating subscription from analysis ${analysis.id}:`, insertError);
+        } else {
+          convertedCount++;
+          console.log(`Created subscription: ${analysis.subscription_name}`);
+        }
+
+      } catch (error) {
+        console.error(`Error processing analysis ${analysis.id}:`, error);
+      }
+    }
+
+    console.log(`Successfully converted ${convertedCount} analysis results to subscriptions`);
+
+  } catch (error) {
+    console.error('Error converting analysis to subscriptions:', error);
+  }
+}
+
 // Function to analyze emails with Gemini
 export async function analyzeEmailsForUser(userId, scanId) {
   console.log(`Starting email analysis for user ${userId}, scan ${scanId}`);
@@ -199,6 +278,11 @@ Email: ${emailContent}`;
   }
 
   console.log(`Analysis completed. Analyzed: ${analyzedCount}, Errors: ${errorCount}`);
+
+  // Convert successful analysis results to subscriptions
+  if (analyzedCount > 0) {
+    await convertAnalysisToSubscriptions(userId, scanId);
+  }
 
   return {
     success: true,
