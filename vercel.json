@@ -4,8 +4,8 @@
   "outputDirectory": "dist",
   "functions": {
     "api/*.js": {
-      "memory": 1024,
-      "maxDuration": 10
+      "memory": 2048,
+      "maxDuration": 30
     },
     "api/auth/**/*.js": {
       "memory": 1024,
