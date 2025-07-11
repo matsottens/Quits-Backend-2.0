@@ -336,22 +336,24 @@ export default async function handler(req, res) {
                   
                   console.log(`Email reading completed for new user. Processed ${processedCount} emails.`);
                   
-                  // Trigger Gemini analysis of the emails
-                  if (processedCount > 0) {
-                    console.log('Triggering Gemini analysis of emails...');
-                    try {
-                      // Wait for analysis to complete before continuing
-                      const analysisResult = await analyzeEmailsForUser(
-                        dbUserId,
-                        scanRecord[0].scan_id
-                      );
-                      
-                      console.log('Gemini analysis completed:', analysisResult);
-                      
-                    } catch (analysisError) {
-                      console.error('Error during Gemini analysis:', analysisError);
+                  // After email reading, set scan status to 'ready_for_analysis'
+                  await fetch(
+                    `${supabaseUrl}/rest/v1/scan_history?id=eq.${scanRecord[0].id}`,
+                    {
+                      method: 'PATCH',
+                      headers: {
+                        'apikey': supabaseKey,
+                        'Authorization': `Bearer ${supabaseKey}`,
+                        'Content-Type': 'application/json'
+                      },
+                      body: JSON.stringify({
+                        status: 'ready_for_analysis',
+                        updated_at: new Date().toISOString()
+                      })
                     }
-                  }
+                  );
+                  console.log('Scan status set to ready_for_analysis');
+                  // Return immediately, do not call Gemini analysis here
                   
                 } else {
                   console.error('Failed to create scan record:', await scanRecordResponse.text());
