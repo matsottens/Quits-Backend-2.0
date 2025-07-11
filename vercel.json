@@ -65,5 +65,11 @@
     { "source": "/api/trigger-analysis", "destination": "/api/trigger-analysis.js" },
     { "source": "/api/(.*)", "destination": "/api/combined-handlers.js" },
     { "source": "/(.*)", "destination": "/frontend/$1" }
+  ],
+  "crons": [
+    {
+      "path": "/api/trigger-gemini-scan",
+      "schedule": "*/1 * * * *"
+    }
   ]
 } 
