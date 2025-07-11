@@ -341,12 +341,12 @@ export default async function handler(req, res) {
                     `${supabaseUrl}/rest/v1/scan_history?id=eq.${scanRecord[0].id}`,
                     {
                       method: 'PATCH',
-                      headers: {
+                        headers: {
                         'apikey': supabaseKey,
                         'Authorization': `Bearer ${supabaseKey}`,
                         'Content-Type': 'application/json'
-                      },
-                      body: JSON.stringify({
+                        },
+                        body: JSON.stringify({
                         status: 'ready_for_analysis',
                         updated_at: new Date().toISOString()
                       })
