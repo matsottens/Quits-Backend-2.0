@@ -19,14 +19,13 @@ async function convertAnalysisToSubscriptions(userId, scanId) {
   console.log(`Converting analysis results to subscriptions for user ${userId}, scan ${scanId}`);
   
   try {
-    // Get all successful analysis results for this scan
+    // Get all successful analysis results for this scan (including those with null subscription names)
     const { data: analysisResults, error: fetchError } = await supabase
       .from('subscription_analysis')
       .select('*')
       .eq('user_id', userId)
       .eq('scan_id', scanId)
-      .eq('analysis_status', 'completed')
-      .not('subscription_name', 'is', null);
+      .eq('analysis_status', 'completed');
 
     if (fetchError) {
       console.error('Error fetching analysis results:', fetchError);
@@ -43,6 +42,12 @@ async function convertAnalysisToSubscriptions(userId, scanId) {
     let convertedCount = 0;
     for (const analysis of analysisResults) {
       try {
+        // Skip if no subscription name was found
+        if (!analysis.subscription_name) {
+          console.log(`Skipping analysis ${analysis.id} - no subscription name found`);
+          continue;
+        }
+
         // Check if subscription already exists for this analysis
         const { data: existingSubscription } = await supabase
           .from('subscriptions')
@@ -78,7 +83,7 @@ async function convertAnalysisToSubscriptions(userId, scanId) {
           console.error(`Error creating subscription from analysis ${analysis.id}:`, insertError);
         } else {
           convertedCount++;
-          console.log(`Created subscription: ${analysis.subscription_name}`);
+          console.log(`Created subscription: ${analysis.subscription_name} (confidence: ${analysis.confidence_score})`);
         }
 
       } catch (error) {
@@ -151,17 +156,20 @@ Content: ${email.content.substring(0, 1000)}
 
       // Create Gemini prompt
       const geminiPrompt = `
-Analyze this email for subscription information. Return only valid JSON:
+This email has been pre-filtered as potentially subscription-related. Extract ALL subscription information you can find. Return only valid JSON:
+
 {
-  "is_subscription": boolean,
-  "subscription_name": string or null,
-  "price": number or null,
-  "currency": string or null,
-  "billing_cycle": string or null,
-  "next_billing_date": string or null,
-  "service_provider": string or null,
-  "confidence_score": number
+  "is_subscription": boolean (true if any subscription info found),
+  "subscription_name": string (extract the service/product name),
+  "price": number (extract the amount, convert to number),
+  "currency": string (USD, EUR, etc.),
+  "billing_cycle": string (monthly, yearly, weekly, etc.),
+  "next_billing_date": string (YYYY-MM-DD format if found),
+  "service_provider": string (company name),
+  "confidence_score": number (0.0 to 1.0 based on how clear the info is)
 }
+
+Be aggressive in finding subscription details. If you see any payment, service, or subscription information, extract it. If no clear subscription info, set is_subscription to false.
 
 Email: ${emailContent}`;
 

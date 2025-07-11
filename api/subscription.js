@@ -369,25 +369,7 @@ export default async function handler(req, res) {
               console.log('No Gmail token provided, skipping email reading for new user');
             }
 
-            // Create welcome subscription for new user
-            try {
-              const { error: subError } = await supabase
-                .from('subscriptions')
-                .insert({
-                  user_id: dbUserId,
-                  name: 'Welcome Subscription',
-                  price: 0,
-                  billing_cycle: 'monthly',
-                  next_billing_date: null,
-                  category: 'welcome',
-                  is_manual: true,
-                  created_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString()
-                });
-              console.log('Mock subscription created for new user:', decoded.email);
-            } catch (e) {
-              console.error('Failed to create mock subscription for new user:', e);
-            }
+            // No longer create mock subscription - real analysis will provide actual subscriptions
           } else {
             dbUserId = users[0].id;
             console.log(`Found existing user with ID: ${dbUserId}`);
@@ -419,7 +401,7 @@ export default async function handler(req, res) {
           
           // Also fetch auto-detected subscriptions from analysis results
           const analysisResponse = await fetch(
-            `${supabaseUrl}/rest/v1/subscription_analysis?user_id=eq.${dbUserId}&analysis_status=eq.completed&subscription_name=not.is.null&select=*`,
+            `${supabaseUrl}/rest/v1/subscription_analysis?user_id=eq.${dbUserId}&analysis_status=eq.completed&select=*`,
             {
               method: 'GET',
               headers: {
@@ -462,7 +444,7 @@ export default async function handler(req, res) {
           
           console.log(`Total subscriptions (manual + auto-detected): ${allSubscriptions.length}`);
           
-          // For now, if no subscriptions are found, return mock data to prevent empty state
+          // Return empty array if no subscriptions found (no more mock data)
           if (!allSubscriptions || allSubscriptions.length === 0) {
             console.log('No subscriptions found, returning empty array');
             return res.status(200).json({
@@ -473,7 +455,8 @@ export default async function handler(req, res) {
                 totalMonthly: 0,
                 totalYearly: 0,
                 totalAnnualized: 0,
-                db_user_id: dbUserId
+                db_user_id: dbUserId,
+                message: 'No subscriptions found. Email analysis may still be in progress.'
               }
             });
           }
