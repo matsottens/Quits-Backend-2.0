@@ -215,6 +215,7 @@ Email: ${emailContent}`;
           const jsonMatch = responseText.match(/\{[\s\S]*\}/);
           if (jsonMatch) {
             analysisResult = JSON.parse(jsonMatch[0]);
+            console.log(`Parsed analysis result for email ${email.id}:`, analysisResult);
           } else {
             throw new Error('No JSON found in Gemini response');
           }
@@ -249,7 +250,7 @@ Email: ${emailContent}`;
         }
 
         analyzedCount++;
-        console.log(`Successfully analyzed email ${email.id}`);
+        console.log(`Successfully analyzed email ${email.id} - Subscription: ${analysisResult.subscription_name}, Price: ${analysisResult.price}`);
 
       } catch (fetchError) {
         clearTimeout(timeoutId);
