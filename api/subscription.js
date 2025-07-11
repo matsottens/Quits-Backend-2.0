@@ -414,6 +414,32 @@ export default async function handler(req, res) {
             console.log(`Found ${analysisSubscriptions.length} auto-detected subscriptions from analysis`);
           }
           
+          // If no analysis results yet, wait a bit and retry (for new users)
+          if (analysisSubscriptions.length === 0 && subscriptions.length === 0) {
+            console.log('No subscriptions found, waiting for analysis to complete...');
+            
+            // Wait 5 seconds for analysis to complete
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            
+            // Retry fetching analysis results
+            const retryAnalysisResponse = await fetch(
+              `${supabaseUrl}/rest/v1/subscription_analysis?user_id=eq.${dbUserId}&analysis_status=eq.completed&select=*`,
+              {
+                method: 'GET',
+                headers: {
+                  'apikey': supabaseKey,
+                  'Authorization': `Bearer ${supabaseKey}`,
+                  'Content-Type': 'application/json'
+                }
+              }
+            );
+            
+            if (retryAnalysisResponse.ok) {
+              analysisSubscriptions = await retryAnalysisResponse.json();
+              console.log(`After retry: Found ${analysisSubscriptions.length} auto-detected subscriptions from analysis`);
+            }
+          }
+          
           // Combine manual subscriptions and auto-detected ones
           const allSubscriptions = [...subscriptions];
           
