@@ -262,261 +262,107 @@ router.post('/suggestions/:id/confirm',
 async function processEmails(userId: string, scanId: string, accessToken: string, useRealData: boolean) {
   console.log(`Processing emails for user ${userId} with scan ID ${scanId}`);
   let processedCount = 0;
-  let suggestionCount = 0;
-  let failedCount = 0;
   let totalEmails = 0;
-
-  // Set up interval to update scan status
-  const scanUpdateInterval = setInterval(async () => {
-    await supabase
-      .from('email_scans')
-      .update({ 
-        processed_emails: processedCount,
-        failed_emails: failedCount,
-        detected_subscriptions: suggestionCount,
-        total_emails: totalEmails,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', scanId);
-  }, 5000); // Update DB every 5 seconds
+  let filteredEmails = [];
 
   try {
-    // Set up Gmail API with the access token
     if (useRealData && accessToken) {
       console.log('Using real Gmail API with provided token');
       const oauth2Client = new google.auth.OAuth2();
       oauth2Client.setCredentials({ access_token: accessToken });
-      
-      // Create Gmail API instance
       const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-      
-      // Search for subscription-related emails
       const query = 'subject:(subscription OR receipt OR invoice OR payment OR billing OR renewal)';
       console.log(`Searching emails with query: ${query}`);
-      
       const messageList = await gmail.users.messages.list({
         userId: 'me',
-        maxResults: 50, // Limit for processing
+        maxResults: 50,
         q: query
       });
-      
       const messages = messageList.data.messages || [];
       totalEmails = messages.length;
-      
-      // Update total emails count
-      await supabase
-        .from('email_scans')
-        .update({ total_emails: totalEmails })
-        .eq('id', scanId);
-      
+      await supabase.from('email_scans').update({ total_emails: totalEmails }).eq('id', scanId);
       if (messages.length === 0) {
         console.log('No matching emails found');
-        
-        // Mark scan as completed
-        await supabase
-          .from('email_scans')
-          .update({
-            status: 'completed',
-            completed_at: new Date().toISOString(),
-            message: 'No subscription emails found'
-          })
-          .eq('id', scanId);
-          
-        clearInterval(scanUpdateInterval);
+        // Set scan to ready_for_analysis anyway (Edge Function will see no emails)
+        await supabase.from('email_scans').update({ status: 'ready_for_analysis', updated_at: new Date().toISOString() }).eq('id', scanId);
         return;
       }
-      
-      console.log(`Found ${messages.length} potential subscription emails`);
-      
-      // Process each email
       for (const message of messages) {
         if (!message.id) continue;
-        
         try {
-          // Get full message content
-        const emailResponse = await gmail.users.messages.get({
-          userId: 'me',
-            id: message.id,
-            format: 'full'
-        });
-
-        const emailData = emailResponse.data;
-          
-          // Extract headers
+          const emailResponse = await gmail.users.messages.get({ userId: 'me', id: message.id, format: 'full' });
+          const emailData = emailResponse.data;
           const headers = emailData.payload?.headers || [];
           const subject = headers.find(h => h.name === 'Subject')?.value || 'No Subject';
           const from = headers.find(h => h.name === 'From')?.value || 'Unknown Sender';
           const date = headers.find(h => h.name === 'Date')?.value || new Date().toISOString();
-          
-          // Extract content
           let content = '';
-          
-          if (emailData.snippet) {
-            content = emailData.snippet;
-          }
-          
+          if (emailData.snippet) content = emailData.snippet;
           if (emailData.payload?.body?.data) {
-            // Decode base64 body
             content = Buffer.from(emailData.payload.body.data, 'base64').toString('utf8');
           } else if (emailData.payload?.parts) {
-            // Try to find text part
             for (const part of emailData.payload.parts) {
               if (part.mimeType === 'text/plain' && part.body?.data) {
                 content = Buffer.from(part.body.data, 'base64').toString('utf8');
                 break;
               } else if (part.mimeType === 'text/html' && part.body?.data) {
-                // Simple HTML to text conversion
                 const html = Buffer.from(part.body.data, 'base64').toString('utf8');
                 content = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
                 break;
               }
             }
           }
-          
-          // Format email for analysis
-          const emailWithMetadata = `
-From: ${from}
-Subject: ${subject}
-Date: ${date}
-
-${content}
-          `;
-          
-          // Analyze with Gemini
-          console.log(`Analyzing email: ${subject}`);
-          const analysis = await summarizeEmail(emailWithMetadata);
-          
-          // Save if it's a subscription
-          if (analysis.isSubscription) {
-            console.log(`Subscription detected: ${analysis.serviceName}`);
-            
-            // Save to database
-            const { error } = await supabase
-              .from('subscription_suggestions')
-              .insert({
-                user_id: userId,
-                scan_id: scanId,
-                email_id: message.id,
-                name: analysis.serviceName || 'Unknown Subscription',
-                price: analysis.amount || analysis.price || 0,
-                currency: analysis.currency || 'USD',
-                billing_frequency: analysis.billingFrequency || analysis.billingCycle || 'monthly',
-                confidence: analysis.confidence || 0.5,
-                next_billing_date: analysis.nextBillingDate || null,
-                email_subject: subject,
-                email_from: from,
-                email_date: date
-              });
-              
-            if (error) {
-              console.error(`Error saving suggestion for email ${message.id}:`, error);
-            } else {
-              suggestionCount++;
-            }
+          // Filter logic: Only add if content/subject looks like a subscription (simple keyword check)
+          const lower = (subject + ' ' + content).toLowerCase();
+          if (/subscription|renew|billing|payment|invoice|receipt/.test(lower)) {
+            filteredEmails.push({
+              user_id: userId,
+              scan_id: scanId,
+              subject,
+              sender: from,
+              date,
+              content,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            });
           }
-          
-            processedCount++;
+          processedCount++;
         } catch (err) {
-          failedCount++;
           console.error(`Error processing email ${message.id}:`, err instanceof Error ? err.message : err);
         }
       }
     } else {
-      // Use mock implementation if no real data access
+      // Mock implementation
       console.log('Using mock implementation - no real Gmail API access');
-      
-      // Simulate processing delay
       await new Promise(resolve => setTimeout(resolve, 3000));
-      
-      // Generate mock data 
       const mockEmails = 20;
       totalEmails = mockEmails;
-      
-      // Update total emails count
-      await supabase
-        .from('email_scans')
-        .update({ total_emails: totalEmails })
-        .eq('id', scanId);
-      
-      // Mock subscription data
-      const mockSubscriptions = [
-        { service: 'Netflix', price: 15.99, currency: 'USD', frequency: 'monthly' },
-        { service: 'Spotify', price: 9.99, currency: 'USD', frequency: 'monthly' },
-        { service: 'Amazon Prime', price: 139, currency: 'USD', frequency: 'yearly' },
-        { service: 'New York Times', price: 4.99, currency: 'USD', frequency: 'monthly' }
-      ];
-      
-      // Simulate processing emails
+      await supabase.from('email_scans').update({ total_emails: totalEmails }).eq('id', scanId);
       for (let i = 0; i < mockEmails; i++) {
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        // Every 3rd email is a "subscription"
-        if (i % 3 === 0 && mockSubscriptions.length > 0) {
-          const sub = mockSubscriptions.shift();
-          if (sub) {
-            // Insert mock suggestion
-          const { error } = await supabase
-            .from('subscription_suggestions')
-            .insert({
-              user_id: userId,
-                scan_id: scanId,
-                email_id: `mock-${i}`,
-                name: sub.service,
-                price: sub.price,
-                currency: sub.currency,
-                billing_frequency: sub.frequency,
-                confidence: 0.8,
-                next_billing_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-                email_subject: `Your ${sub.service} ${sub.frequency} subscription`,
-                email_from: `billing@${sub.service.toLowerCase().replace(' ', '')}.com`,
-                email_date: new Date().toISOString()
-              });
-              
-          if (error) {
-              console.error(`Error saving mock suggestion:`, error);
-          } else {
-            suggestionCount++;
-            }
-          }
-        }
-        
+        filteredEmails.push({
+          user_id: userId,
+          scan_id: scanId,
+          subject: `Mock Subscription Email #${i+1}`,
+          sender: 'mock@service.com',
+          date: new Date().toISOString(),
+          content: 'This is a mock subscription email.',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        });
         processedCount++;
       }
     }
-    
-    // Mark scan as completed
-    await supabase
-      .from('email_scans')
-      .update({
-        status: 'completed',
-        processed_emails: processedCount,
-        failed_emails: failedCount,
-        detected_subscriptions: suggestionCount,
-        total_emails: totalEmails,
-        completed_at: new Date().toISOString(),
-        message: suggestionCount > 0 ? `Found ${suggestionCount} subscriptions` : 'No subscriptions found'
-      })
-      .eq('id', scanId);
-      
-    console.log(`Scan completed: ${processedCount} emails processed, ${suggestionCount} subscriptions found`);
+    // Insert all filtered emails
+    if (filteredEmails.length > 0) {
+      await supabase.from('email_data').insert(filteredEmails);
+    }
+    // Set scan to ready_for_analysis (Edge Function will do analysis and set completed)
+    await supabase.from('email_scans').update({ status: 'ready_for_analysis', updated_at: new Date().toISOString() }).eq('id', scanId);
+    console.log(`Scan ${scanId} set to ready_for_analysis with ${filteredEmails.length} emails.`);
   } catch (error) {
     console.error('Error processing emails:', error);
-    
-    // Mark scan as failed
-    await supabase
-      .from('email_scans')
-      .update({
-        status: 'failed',
-        processed_emails: processedCount,
-        failed_emails: failedCount,
-        detected_subscriptions: suggestionCount,
-        total_emails: totalEmails,
-        completed_at: new Date().toISOString(),
-        error_message: error instanceof Error ? error.message : 'Unknown error'
-      })
-      .eq('id', scanId);
-  } finally {
-    clearInterval(scanUpdateInterval);
+    // Set scan to failed
+    await supabase.from('email_scans').update({ status: 'failed', updated_at: new Date().toISOString(), error_message: error instanceof Error ? error.message : String(error) }).eq('id', scanId);
   }
 }
 
@@ -701,5 +547,7 @@ router.get('/test-connection', (req: Request, res: Response) => {
     timestamp: new Date().toISOString()
   });
 });
+
+export default router; 
 
 export default router; 
