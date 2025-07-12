@@ -257,14 +257,32 @@ export default async function handler(req, res) {
 // Helper function to calculate progress
 const calculateProgress = (scan) => {
   let progress = 0;
-  if (scan.status === 'in_progress') {
-    progress = Math.min(50, scan.progress || 0); // Reading phase: 0-50%
-  } else if (scan.status === 'ready_for_analysis' || scan.status === 'analyzing') {
-    progress = 50 + (scan.progress || 0) / 2; // Analysis phase: 50-100%
-  } else if (scan.status === 'completed') {
-    progress = 100;
-  } else if (scan.status === 'failed') {
-    progress = scan.progress || 0; // Keep the progress where it failed
+  
+  // Handle different scan statuses with more granular progress
+  switch (scan.status) {
+    case 'pending':
+      progress = 0;
+      break;
+    case 'in_progress':
+      // Use the actual progress value from the database
+      progress = Math.min(80, scan.progress || 0);
+      break;
+    case 'ready_for_analysis':
+      progress = 85;
+      break;
+    case 'analyzing':
+      progress = 90;
+      break;
+    case 'completed':
+      progress = 100;
+      break;
+    case 'failed':
+      // Keep the progress where it failed, but cap at 95%
+      progress = Math.min(95, scan.progress || 0);
+      break;
+    default:
+      progress = scan.progress || 0;
   }
+  
   return progress;
 }; 
