@@ -810,6 +810,56 @@ const storeSubscriptionExample = async (sender, subject, analysisResult) => {
   }
 };
 
+// Function to create a scan record
+const createScanRecord = async (userId) => {
+  console.log('SCAN-DEBUG: Creating scan record for user:', userId);
+  
+  try {
+    const scanId = 'scan_' + Math.random().toString(36).substring(2, 15);
+    const timestamp = new Date().toISOString();
+    
+    const scanRecord = {
+      scan_id: scanId,
+      user_id: userId,
+      status: 'pending',
+      progress: 0,
+      emails_found: 0,
+      emails_to_process: 0,
+      emails_processed: 0,
+      subscriptions_found: 0,
+      created_at: timestamp,
+      updated_at: timestamp
+    };
+    
+    console.log('SCAN-DEBUG: Creating scan record with data:', JSON.stringify(scanRecord, null, 2));
+    
+    const response = await fetch(`${supabaseUrl}/rest/v1/scan_history`, {
+      method: 'POST',
+      headers: {
+        'apikey': supabaseKey,
+        'Authorization': `Bearer ${supabaseKey}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation'
+      },
+      body: JSON.stringify(scanRecord)
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('SCAN-DEBUG: Failed to create scan record:', errorText);
+      throw new Error(`Failed to create scan record: ${errorText}`);
+    }
+    
+    const result = await response.json();
+    console.log('SCAN-DEBUG: Successfully created scan record:', result);
+    
+    return scanId;
+  } catch (error) {
+    console.error('SCAN-DEBUG: Error creating scan record:', error);
+    throw error;
+  }
+};
+
 // Function to update scan status
 const updateScanStatus = async (scanId, dbUserId, updates) => {
   console.log('SCAN-DEBUG: Updating scan status with:', JSON.stringify(updates, null, 2));
@@ -825,7 +875,7 @@ const updateScanStatus = async (scanId, dbUserId, updates) => {
     // Ensure we always have email stats
     if (!fullUpdates.emails_found || !fullUpdates.emails_to_process || !fullUpdates.emails_processed) {
       console.log('SCAN-DEBUG: No email stats provided, fetching current scan status');
-      const currentScan = await fetch(`${supabaseUrl}/rest/v1/scans?id=eq.${scanId}`, {
+      const currentScan = await fetch(`${supabaseUrl}/rest/v1/scan_history?scan_id=eq.${scanId}`, {
         headers: {
           'apikey': supabaseKey,
           'Authorization': `Bearer ${supabaseKey}`,
@@ -847,7 +897,7 @@ const updateScanStatus = async (scanId, dbUserId, updates) => {
 
     console.log('SCAN-DEBUG: Final update data:', JSON.stringify(fullUpdates, null, 2));
 
-    const response = await fetch(`${supabaseUrl}/rest/v1/scans?id=eq.${scanId}`, {
+    const response = await fetch(`${supabaseUrl}/rest/v1/scan_history?scan_id=eq.${scanId}`, {
       method: 'PATCH',
       headers: {
         'apikey': supabaseKey,
