@@ -316,7 +316,7 @@ export default async function handler(req, res) {
                     }
                   }
                   
-                  // Mark scan as completed
+                  // Set scan status to 'ready_for_analysis' so Edge Function can process with Gemini
                   await fetch(
                     `${supabaseUrl}/rest/v1/scan_history?id=eq.${scanRecord[0].id}`,
                     {
@@ -327,32 +327,14 @@ export default async function handler(req, res) {
                         'Content-Type': 'application/json'
                       },
                       body: JSON.stringify({
-                        status: 'completed',
-                        completed_at: new Date().toISOString(),
-                        updated_at: new Date().toISOString()
-                      })
-                    }
-                  );
-                  
-                  console.log(`Email reading completed for new user. Processed ${processedCount} emails.`);
-                  
-                  // After email reading, set scan status to 'ready_for_analysis'
-                  await fetch(
-                    `${supabaseUrl}/rest/v1/scan_history?id=eq.${scanRecord[0].id}`,
-                    {
-                      method: 'PATCH',
-                        headers: {
-                        'apikey': supabaseKey,
-                        'Authorization': `Bearer ${supabaseKey}`,
-                        'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
                         status: 'ready_for_analysis',
+                        progress: 90,
+                        emails_processed: processedCount,
                         updated_at: new Date().toISOString()
                       })
                     }
                   );
-                  console.log('Scan status set to ready_for_analysis');
+                  console.log('Scan status set to ready_for_analysis - Edge Function will process analysis');
                   // Return immediately, do not call Gemini analysis here
                   
                 } else {
