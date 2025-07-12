@@ -4,7 +4,7 @@ import fetch from 'node-fetch';
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 import { extractEmailBody, analyzeEmailForSubscriptions, parseEmailHeaders } from './email-utils.js';
-import google from 'googleapis';
+import { google } from 'googleapis';
 const { verify } = jsonwebtoken;
 
 // Supabase config
