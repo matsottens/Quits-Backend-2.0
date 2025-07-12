@@ -396,35 +396,102 @@ const analyzeEmailWithGemini = async (emailContent) => {
           const body = extractEmailBody(emailContent);
           const bodyLower = body ? body.toLowerCase() : '';
           
-          // Try to extract price using regex
-          const priceMatch = bodyLower.match(/\$(\d+\.\d+)|\$(\d+)/);
-          const amount = priceMatch ? parseFloat(priceMatch[1] || priceMatch[2]) : service.amount;
+          // Enhanced price extraction with multiple patterns
+          let amount = service.amount; // Default amount
+          let currency = 'USD'; // Default currency
           
-          // Try to extract frequency
-          const frequencyMatch = bodyLower.match(/month|annual|yearly|weekly|quarterly/i);
-          let frequency = 'monthly';
-          if (frequencyMatch) {
-            const match = frequencyMatch[0].toLowerCase();
-            if (match.includes('year')) frequency = 'yearly';
-            else if (match.includes('week')) frequency = 'weekly';
-            else if (match.includes('quarter')) frequency = 'quarterly';
+          // Look for currency symbols followed by numbers
+          const currencyPatterns = [
+            /\$(\d+\.?\d*)/g,  // $19.99 or $20
+            /€(\d+\.?\d*)/g,  // €19.99 or €20
+            /£(\d+\.?\d*)/g,  // £19.99 or £20
+            /¥(\d+\.?\d*)/g,  // ¥1999 or ¥2000
+          ];
+          
+          let foundPrice = false;
+          for (const pattern of currencyPatterns) {
+            const matches = bodyLower.match(pattern);
+            if (matches && matches.length > 0) {
+              // Take the first match that looks like a reasonable subscription price
+              for (const match of matches) {
+                const price = parseFloat(match.replace(/[^\d.]/g, ''));
+                if (price > 0 && price < 1000) { // Reasonable subscription price range
+                  amount = price;
+                  foundPrice = true;
+                  // Determine currency from the symbol
+                  if (match.includes('€')) currency = 'EUR';
+                  else if (match.includes('£')) currency = 'GBP';
+                  else if (match.includes('¥')) currency = 'JPY';
+                  else currency = 'USD';
+                  break;
+                }
+              }
+              if (foundPrice) break;
+            }
           }
           
-          // Generate next billing date based on current date
+          // If no currency symbol found, look for currency codes
+          if (!foundPrice) {
+            const currencyCodePatterns = [
+              /(\d+\.?\d*)\s*(usd|dollars?)/gi,
+              /(\d+\.?\d*)\s*(eur|euros?)/gi,
+              /(\d+\.?\d*)\s*(gbp|pounds?)/gi,
+            ];
+            
+            for (const pattern of currencyCodePatterns) {
+              const matches = bodyLower.match(pattern);
+              if (matches && matches.length > 0) {
+                const price = parseFloat(matches[0].replace(/[^\d.]/g, ''));
+                if (price > 0 && price < 1000) {
+                  amount = price;
+                  foundPrice = true;
+                  // Determine currency from the code
+                  if (matches[0].toLowerCase().includes('eur')) currency = 'EUR';
+                  else if (matches[0].toLowerCase().includes('gbp')) currency = 'GBP';
+                  else currency = 'USD';
+                  break;
+                }
+              }
+            }
+          }
+          
+          // Enhanced frequency detection
+          let frequency = 'monthly'; // Default frequency
+          const frequencyPatterns = [
+            { pattern: /month(ly)?|per\s*month/i, value: 'monthly' },
+            { pattern: /year(ly)?|annual|per\s*year/i, value: 'yearly' },
+            { pattern: /week(ly)?|per\s*week/i, value: 'weekly' },
+            { pattern: /quarter(ly)?|per\s*quarter/i, value: 'quarterly' },
+            { pattern: /bi.?month(ly)?|every\s*2\s*months/i, value: 'bimonthly' },
+            { pattern: /semi.?annual|every\s*6\s*months/i, value: 'semiannual' },
+          ];
+          
+          for (const freqPattern of frequencyPatterns) {
+            if (freqPattern.pattern.test(bodyLower) || freqPattern.pattern.test(subjectLower)) {
+              frequency = freqPattern.value;
+              break;
+            }
+          }
+          
+          // Generate next billing date based on frequency
           const nextBillingDate = new Date();
           if (frequency === 'monthly') nextBillingDate.setMonth(nextBillingDate.getMonth() + 1);
           else if (frequency === 'yearly') nextBillingDate.setFullYear(nextBillingDate.getFullYear() + 1);
           else if (frequency === 'weekly') nextBillingDate.setDate(nextBillingDate.getDate() + 7);
           else if (frequency === 'quarterly') nextBillingDate.setMonth(nextBillingDate.getMonth() + 3);
+          else if (frequency === 'bimonthly') nextBillingDate.setMonth(nextBillingDate.getMonth() + 2);
+          else if (frequency === 'semiannual') nextBillingDate.setMonth(nextBillingDate.getMonth() + 6);
+          
+          console.log(`SCAN-DEBUG: Extracted price: ${amount} ${currency} ${frequency}`);
           
           return {
             isSubscription: true,
             serviceName: service.name,
             amount: amount,
-            currency: 'USD',
+            currency: currency,
             billingFrequency: frequency,
             nextBillingDate: nextBillingDate.toISOString().split('T')[0],
-            confidence: 0.85
+            confidence: foundPrice ? 0.85 : 0.7 // Lower confidence if no specific price found
           };
         }
       }
@@ -466,14 +533,105 @@ const analyzeEmailWithGemini = async (emailContent) => {
           }
         }
         
+        // Enhanced price and frequency extraction for keyword-based detection
+        const body = extractEmailBody(emailContent);
+        const bodyLower = body ? body.toLowerCase() : '';
+        
+        let amount = 9.99; // Default amount
+        let currency = 'USD'; // Default currency
+        let frequency = 'monthly'; // Default frequency
+        
+        // Look for currency symbols followed by numbers
+        const currencyPatterns = [
+          /\$(\d+\.?\d*)/g,  // $19.99 or $20
+          /€(\d+\.?\d*)/g,  // €19.99 or €20
+          /£(\d+\.?\d*)/g,  // £19.99 or £20
+          /¥(\d+\.?\d*)/g,  // ¥1999 or ¥2000
+        ];
+        
+        let foundPrice = false;
+        for (const pattern of currencyPatterns) {
+          const matches = bodyLower.match(pattern);
+          if (matches && matches.length > 0) {
+            // Take the first match that looks like a reasonable subscription price
+            for (const match of matches) {
+              const price = parseFloat(match.replace(/[^\d.]/g, ''));
+              if (price > 0 && price < 1000) { // Reasonable subscription price range
+                amount = price;
+                foundPrice = true;
+                // Determine currency from the symbol
+                if (match.includes('€')) currency = 'EUR';
+                else if (match.includes('£')) currency = 'GBP';
+                else if (match.includes('¥')) currency = 'JPY';
+                else currency = 'USD';
+                break;
+              }
+            }
+            if (foundPrice) break;
+          }
+        }
+        
+        // If no currency symbol found, look for currency codes
+        if (!foundPrice) {
+          const currencyCodePatterns = [
+            /(\d+\.?\d*)\s*(usd|dollars?)/gi,
+            /(\d+\.?\d*)\s*(eur|euros?)/gi,
+            /(\d+\.?\d*)\s*(gbp|pounds?)/gi,
+          ];
+          
+          for (const pattern of currencyCodePatterns) {
+            const matches = bodyLower.match(pattern);
+            if (matches && matches.length > 0) {
+              const price = parseFloat(matches[0].replace(/[^\d.]/g, ''));
+              if (price > 0 && price < 1000) {
+                amount = price;
+                foundPrice = true;
+                // Determine currency from the code
+                if (matches[0].toLowerCase().includes('eur')) currency = 'EUR';
+                else if (matches[0].toLowerCase().includes('gbp')) currency = 'GBP';
+                else currency = 'USD';
+                break;
+              }
+            }
+          }
+        }
+        
+        // Enhanced frequency detection
+        const frequencyPatterns = [
+          { pattern: /month(ly)?|per\s*month/i, value: 'monthly' },
+          { pattern: /year(ly)?|annual|per\s*year/i, value: 'yearly' },
+          { pattern: /week(ly)?|per\s*week/i, value: 'weekly' },
+          { pattern: /quarter(ly)?|per\s*quarter/i, value: 'quarterly' },
+          { pattern: /bi.?month(ly)?|every\s*2\s*months/i, value: 'bimonthly' },
+          { pattern: /semi.?annual|every\s*6\s*months/i, value: 'semiannual' },
+        ];
+        
+        for (const freqPattern of frequencyPatterns) {
+          if (freqPattern.pattern.test(bodyLower) || freqPattern.pattern.test(subjectLower)) {
+            frequency = freqPattern.value;
+            break;
+          }
+        }
+        
+        // Generate next billing date based on frequency
+        const nextBillingDate = new Date();
+        if (frequency === 'monthly') nextBillingDate.setMonth(nextBillingDate.getMonth() + 1);
+        else if (frequency === 'yearly') nextBillingDate.setFullYear(nextBillingDate.getFullYear() + 1);
+        else if (frequency === 'weekly') nextBillingDate.setDate(nextBillingDate.getDate() + 7);
+        else if (frequency === 'quarterly') nextBillingDate.setMonth(nextBillingDate.getMonth() + 3);
+        else if (frequency === 'bimonthly') nextBillingDate.setMonth(nextBillingDate.getMonth() + 2);
+        else if (frequency === 'semiannual') nextBillingDate.setMonth(nextBillingDate.getMonth() + 6);
+        
+        console.log(`SCAN-DEBUG: Keyword-based detection - Extracted price: ${amount} ${currency} ${frequency}`);
+        
         return {
           isSubscription: true,
           serviceName: serviceName,
-          amount: 9.99, // Default amount
-          currency: 'USD',
-          billingFrequency: 'monthly',
-          nextBillingDate: new Date(new Date().setMonth(new Date().getMonth() + 1)).toISOString().split('T')[0],
-          confidence: 0.6
+          amount: amount,
+          currency: currency,
+          billingFrequency: frequency,
+          nextBillingDate: nextBillingDate.toISOString().split('T')[0],
+          confidence: foundPrice ? 0.6 : 0.5 // Lower confidence for keyword-based detection
         };
       }
       
@@ -512,41 +670,60 @@ Your task is to determine if the email contains information about a subscription
 3. Payment receipts for recurring services
 4. Subscription-based products or services
 
-Here are examples of known subscriptions:
+IMPORTANT: When extracting prices, look for:
+- The actual amount charged (not one-time fees)
+- Currency symbols ($, €, £, etc.) or currency codes (USD, EUR, etc.)
+- Whether the price is per month, per year, per week, etc.
+- Look for phrases like "monthly", "yearly", "annual", "weekly", "quarterly"
+- Check for billing cycles in the text
+
+Here are examples of known subscriptions with proper price extraction:
 
 EXAMPLE 1: NBA League Pass
 From: NBA <NBA@nbaemail.nba.com>
 Subject: NBA League Pass Subscription Confirmation
-Key indicators: "Thank you for your subscription", "NBA League Pass Season-Long", "Automatically Renewed", specific date ranges, recurring billing
+Key indicators: "Thank you for your subscription", "NBA League Pass Season-Long", "Automatically Renewed"
 Details: EUR 16.99 monthly, renewal dates indicated
+Price extraction: Look for "EUR 16.99" or "€16.99" and "monthly" or "per month"
 
 EXAMPLE 2: Babbel Language Learning
 From: Apple <no_reply@email.apple.com>
 Subject: Your subscription confirmation
-Key indicators: "Subscription Confirmation", "automatically renews", "3-month plan", Language Learning
+Key indicators: "Subscription Confirmation", "automatically renews", "3-month plan"
 Details: € 53,99 per 3 months, renewal date specified
+Price extraction: Look for "€ 53,99" and "3-month plan" or "per 3 months"
 
 EXAMPLE 3: Vercel Premium
 From: Vercel Inc. <invoice+statements@vercel.com>
 Subject: Your receipt from Vercel Inc.
 Key indicators: Monthly date range (Mar 22 – Apr 21, 2025), Premium plan, recurring payment
 Details: $20.00 monthly for Premium plan
+Price extraction: Look for "$20.00" and "monthly" or "per month"
 
 EXAMPLE 4: Ahrefs
 From: Ahrefs <billing@ahrefs.com>
 Subject: Thank you for your payment
 Key indicators: "Your Subscription", "Ahrefs Starter - Monthly"
 Details: €27.00 monthly, Starter plan
+Price extraction: Look for "€27.00" and "Monthly" or "per month"
 
 Now analyze the following email content to determine if it relates to a subscription service.
 Look for similar patterns as in the examples above.
 
 If this email is about a subscription, extract the following details:
 - Service name: The name of the subscription service (be specific)
-- Price: The amount charged (ignore one-time fees, focus on recurring charges)
-- Currency: USD, EUR, etc.
-- Billing frequency: monthly, yearly, quarterly, weekly, etc.
+- Price: The amount charged (look for currency symbols and amounts, ignore one-time fees, focus on recurring charges)
+- Currency: USD, EUR, etc. (extract from the price or look for currency indicators)
+- Billing frequency: monthly, yearly, quarterly, weekly, etc. (look for words like "monthly", "annual", "yearly", "weekly", "quarterly", "per month", "per year", etc.)
 - Next billing date: When the next payment will occur (in YYYY-MM-DD format if possible)
+
+IMPORTANT PRICE EXTRACTION RULES:
+1. Look for currency symbols ($, €, £, ¥, etc.) followed by numbers
+2. Look for currency codes (USD, EUR, GBP, etc.) followed by numbers
+3. Look for numbers followed by currency words (dollars, euros, pounds, etc.)
+4. Check if the price is per month, per year, per week, etc.
+5. If multiple prices are mentioned, choose the recurring subscription price, not one-time fees
+6. If no specific price is found, use 0.00 but note this in confidence
 
 FORMAT YOUR RESPONSE AS A JSON OBJECT with the following structure:
 
