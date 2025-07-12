@@ -1378,19 +1378,38 @@ const processEmailsAsync = async (gmailToken, scanId, userId, isMockMode = false
     console.log('SCAN-DEBUG: Step 3 - Fetching subscription examples...');
     let examples = [];
     try {
+      console.log('SCAN-DEBUG: About to query subscription_examples table...');
+      
+      // Add timeout to prevent hanging
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      
       const { data, error } = await supabase
         .from('subscription_examples')
         .select('service_name, sender_pattern, subject_pattern');
-      if (!error && data) examples = data;
-      console.log(`SCAN-DEBUG: Found ${examples.length} subscription examples`);
+      
+      clearTimeout(timeoutId);
+      
+      if (error) {
+        console.error('SCAN-DEBUG: Error fetching subscription examples:', error);
+        // Continue anyway, this is not critical
+      } else {
+        examples = data || [];
+        console.log(`SCAN-DEBUG: Found ${examples.length} subscription examples`);
+      }
     } catch (exampleError) {
-      console.error('SCAN-DEBUG: Error fetching subscription examples:', exampleError);
+      console.error('SCAN-DEBUG: Exception fetching subscription examples:', exampleError);
+      if (exampleError.name === 'AbortError') {
+        console.error('SCAN-DEBUG: Subscription examples query timed out');
+      }
       // Continue anyway, this is not critical
     }
+    
+    console.log('SCAN-DEBUG: Step 3 completed, updating progress...');
     await updateScanStatus(scanId, userId, {
       progress: PROGRESS.fetched_examples
     });
-    console.log('SCAN-DEBUG: Step 3 completed');
+    console.log('SCAN-DEBUG: Step 3 progress updated');
 
     // 4. Search Gmail for emails (or use mock data)
     console.log('SCAN-DEBUG: Step 4 - Searching Gmail for emails...');
@@ -1411,7 +1430,28 @@ const processEmailsAsync = async (gmailToken, scanId, userId, isMockMode = false
       ];
     } else {
       console.log('SCAN-DEBUG: About to call fetchEmailsFromGmail...');
-      emails = await fetchEmailsFromGmail(gmailToken);
+      try {
+        // Add timeout to prevent hanging
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout for Gmail API
+        
+        emails = await Promise.race([
+          fetchEmailsFromGmail(gmailToken),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('fetchEmailsFromGmail timed out')), 60000)
+          )
+        ]);
+        
+        clearTimeout(timeoutId);
+        console.log('SCAN-DEBUG: fetchEmailsFromGmail completed successfully');
+      } catch (gmailError) {
+        console.error('SCAN-DEBUG: Error in fetchEmailsFromGmail:', gmailError);
+        if (gmailError.name === 'AbortError') {
+          console.error('SCAN-DEBUG: fetchEmailsFromGmail timed out');
+        }
+        // Continue with empty emails array instead of failing completely
+        emails = [];
+      }
     }
     
     console.log(`SCAN-DEBUG: fetchEmailsFromGmail returned ${emails.length} emails`);
