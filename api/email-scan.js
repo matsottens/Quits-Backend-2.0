@@ -889,6 +889,17 @@ JSON Output:
   }
 };
 
+// Function to normalize service names for better duplicate detection
+const normalizeServiceName = (name) => {
+  if (!name) return '';
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ') // Remove non-alphanumeric characters
+    .replace(/\b(inc|llc|ltd|corp|co|company|limited|incorporated)\b/g, '') // Remove company suffixes
+    .replace(/\s+/g, ' ') // Collapse multiple spaces
+    .trim();
+};
+
 // Function to save detected subscription to database
 const saveSubscription = async (userId, subscriptionData) => {
   console.log('SCAN-DEBUG: Attempting to save subscription:', JSON.stringify(subscriptionData));
@@ -901,9 +912,13 @@ const saveSubscription = async (userId, subscriptionData) => {
     return null;
   }
   try {
-    // First check if a similar subscription already exists
+    // Normalize the service name for better duplicate detection
+    const normalizedName = normalizeServiceName(subscriptionData.serviceName);
+    console.log(`SCAN-DEBUG: Normalized service name: "${subscriptionData.serviceName}" -> "${normalizedName}"`);
+    
+    // First check if a similar subscription already exists using normalized name
     const checkResponse = await fetch(
-      `${supabaseUrl}/rest/v1/subscriptions?user_id=eq.${userId}&name=ilike.${encodeURIComponent('%' + subscriptionData.serviceName + '%')}`, 
+      `${supabaseUrl}/rest/v1/subscriptions?user_id=eq.${userId}&name=ilike.${encodeURIComponent('%' + normalizedName + '%')}`, 
       {
         method: 'GET',
         headers: {
@@ -920,7 +935,8 @@ const saveSubscription = async (userId, subscriptionData) => {
     } else {
       const existingSubscriptions = await checkResponse.json();
       if (existingSubscriptions && existingSubscriptions.length > 0) {
-        console.log(`Subscription for ${subscriptionData.serviceName} already exists, skipping`);
+        console.log(`SCAN-DEBUG: Subscription for "${subscriptionData.serviceName}" (normalized: "${normalizedName}") already exists, skipping`);
+        console.log(`SCAN-DEBUG: Existing subscriptions found:`, existingSubscriptions.map(s => s.name));
         return null;
       }
     }
@@ -1357,86 +1373,62 @@ const processEmails = async (gmailToken, scanId, userId) => {
   }
             
   try {
-    console.log('SCAN-DEBUG: About to update initial scan status');
-    // Update scan status to in_progress
+    // Step-based progress values
+    const PROGRESS = {
+      start: 5,
+      token_validated: 10,
+      fetched_examples: 15,
+      searched_gmail: 20,
+      emails_fetched: 25,
+      processing_emails_start: 30,
+      processing_emails_end: 80, // Will interpolate between start and end
+      ready_for_analysis: 90,
+      completed: 100
+    };
+
+    // 1. Start
     await updateScanStatus(scanId, userId, {
       status: 'in_progress',
-      progress: 10
+      progress: PROGRESS.start
     });
-    console.log('SCAN-DEBUG: Initial scan status updated successfully');
 
-    // Check for existing subscriptions to avoid duplicates
-    console.log('SCAN-DEBUG: Checking for existing subscriptions to avoid duplicates');
-    console.log('SCAN-DEBUG: About to query subscriptions table for user ID:', userId);
-    let existingSubscriptions = null;
-    let existingSubsError = null;
-    
+    // 2. Token validated
+    // (Assume token is already validated before calling processEmails)
+    await updateScanStatus(scanId, userId, {
+      progress: PROGRESS.token_validated
+    });
+
+    // 3. Fetch subscription examples
+    let examples = [];
     try {
-      console.log('SCAN-DEBUG: Executing Supabase query for existing subscriptions...');
-      const result = await supabase
-        .from('subscriptions')
-        .select('name, provider, email_id')
-        .eq('user_id', userId);
-      
-      console.log('SCAN-DEBUG: Supabase query completed');
-      console.log('SCAN-DEBUG: Query result:', result);
-      
-      existingSubscriptions = result.data;
-      existingSubsError = result.error;
-    } catch (supabaseError) {
-      console.error('SCAN-DEBUG: Exception during existing subscriptions query:', supabaseError);
-      console.error('SCAN-DEBUG: Exception stack:', supabaseError.stack);
-      existingSubsError = supabaseError;
-    }
-    
-    console.log('SCAN-DEBUG: Existing subscriptions query completed');
-    console.log('SCAN-DEBUG: existingSubscriptions:', existingSubscriptions);
-    console.log('SCAN-DEBUG: existingSubsError:', existingSubsError);
-    
-    if (existingSubsError) {
-      console.error('SCAN-DEBUG: Error fetching existing subscriptions:', existingSubsError);
-      // Continue anyway, we'll just not have duplicate checking
-    } else {
-      console.log(`SCAN-DEBUG: Found ${existingSubscriptions?.length || 0} existing subscriptions`);
-    }
-    
-    // Create a set of existing subscription identifiers for quick lookup
-    console.log('SCAN-DEBUG: Creating existing subscription identifiers set...');
-    const existingSubscriptionIds = new Set();
-    if (existingSubscriptions) {
-      existingSubscriptions.forEach(sub => {
-        // Create unique identifiers based on name, provider, and email_id
-        const id1 = `${sub.name?.toLowerCase()}-${sub.provider?.toLowerCase()}`;
-        const id2 = sub.email_id ? `email-${sub.email_id}` : null;
-        if (id1) existingSubscriptionIds.add(id1);
-        if (id2) existingSubscriptionIds.add(id2);
-      });
-    }
-    console.log('SCAN-DEBUG: Existing subscription identifiers set created');
-    
-    console.log('SCAN-DEBUG: About to fetch emails from Gmail');
-    console.log('SCAN-DEBUG: Gmail token available for fetchEmailsFromGmail:', !!gmailToken);
-    console.log('SCAN-DEBUG: Gmail token length:', gmailToken?.length || 0);
-    
-    // Fetch emails from Gmail
-    let emails = [];
-    try {
-      console.log('SCAN-DEBUG: Calling fetchEmailsFromGmail function...');
-      emails = await fetchEmailsFromGmail(gmailToken);
-      console.log(`SCAN-DEBUG: Fetched ${emails.length} emails from Gmail`);
-      console.log('SCAN-DEBUG: Email fetching completed successfully');
-    } catch (fetchError) {
-      console.error('SCAN-DEBUG: Error in fetchEmailsFromGmail:', fetchError);
-      console.error('SCAN-DEBUG: Fetch error stack:', fetchError.stack);
-      console.log('SCAN-DEBUG: Continuing with empty emails array due to fetch error');
-      emails = [];
-    }
-    
-    if (emails.length === 0) {
-      console.log('SCAN-DEBUG: No emails found, setting scan to ready_for_analysis');
+      const { data, error } = await supabase
+        .from('subscription_examples')
+        .select('service_name, sender_pattern, subject_pattern');
+      if (!error && data) examples = data;
+    } catch {}
+    await updateScanStatus(scanId, userId, {
+      progress: PROGRESS.fetched_examples
+    });
+
+    // 4. Search Gmail for emails
+    // (fetchEmailsFromGmail will do the searching)
+    await updateScanStatus(scanId, userId, {
+      progress: PROGRESS.searched_gmail
+    });
+    const emails = await fetchEmailsFromGmail(gmailToken);
+    await updateScanStatus(scanId, userId, {
+      progress: PROGRESS.emails_fetched,
+      emails_found: emails.length,
+      emails_to_process: emails.length,
+      emails_processed: 0
+    });
+
+    // 5. Processing emails (granular progress)
+    const totalEmails = emails.length;
+    if (totalEmails === 0) {
       await updateScanStatus(scanId, userId, {
         status: 'ready_for_analysis',
-        progress: 100,
+        progress: PROGRESS.ready_for_analysis,
         emails_found: 0,
         emails_processed: 0,
         subscriptions_found: 0,
@@ -1444,23 +1436,36 @@ const processEmails = async (gmailToken, scanId, userId) => {
       });
       return;
     }
-    
-    // Update scan status with email count
     await updateScanStatus(scanId, userId, {
-      emails_found: emails.length,
-      emails_to_process: emails.length,
-      progress: 20
+      progress: PROGRESS.processing_emails_start
     });
-    console.log('SCAN-DEBUG: Updated scan status with email count');
-
     let processedCount = 0;
     let subscriptionsFound = 0;
+    const processedMessageIds = new Set();
     
-    console.log('SCAN-DEBUG: Starting email processing loop');
-    // Process each email
-    const processedMessageIds = new Set(); // Track processed message IDs to avoid duplicates
-    
-    for (let i = 0; i < emails.length; i++) {
+    // Initialize existingSubscriptionIds with current user subscriptions to prevent duplicates
+    const existingSubscriptionIds = new Set();
+    try {
+      const { data: existingSubscriptions, error: fetchError } = await supabase
+        .from('subscriptions')
+        .select('name')
+        .eq('user_id', userId);
+      
+      if (!fetchError && existingSubscriptions) {
+        existingSubscriptions.forEach(sub => {
+          const normalizedName = normalizeServiceName(sub.name);
+          existingSubscriptionIds.add(normalizedName);
+          console.log(`SCAN-DEBUG: Added existing subscription to duplicate check: "${sub.name}" (normalized: "${normalizedName}")`);
+        });
+        console.log(`SCAN-DEBUG: Loaded ${existingSubscriptions.length} existing subscriptions for duplicate prevention`);
+      } else if (fetchError) {
+        console.error('SCAN-DEBUG: Error fetching existing subscriptions:', fetchError);
+      }
+    } catch (error) {
+      console.error('SCAN-DEBUG: Error initializing existing subscriptions:', error);
+    }
+
+    for (let i = 0; i < totalEmails; i++) {
       try {
         console.log(`SCAN-DEBUG: Processing email ${i + 1}/${emails.length}`);
         const message = emails[i];
@@ -1475,11 +1480,11 @@ const processEmails = async (gmailToken, scanId, userId) => {
         // Mark this message as processed
         processedMessageIds.add(messageId);
         
-        // Update progress
-        const progress = 20 + (i / emails.length) * 30; // 20-50% for email processing
+        // Interpolate progress between processing_emails_start and processing_emails_end
+        const emailProgress = PROGRESS.processing_emails_start + ((processedCount / totalEmails) * (PROGRESS.processing_emails_end - PROGRESS.processing_emails_start));
         await updateScanStatus(scanId, userId, {
-          progress: Math.round(progress),
-          emails_processed: i
+          progress: Math.round(emailProgress),
+          emails_processed: processedCount
         });
         
         // Fetch email content
@@ -1540,28 +1545,30 @@ const processEmails = async (gmailToken, scanId, userId) => {
         if (analysis.isSubscription && analysis.confidence > 0.6) {
           console.log(`SCAN-DEBUG: Detected subscription: ${analysis.serviceName} (${analysis.confidence} confidence)`);
           
-          // Check if this subscription already exists
-          const subscriptionId1 = `${analysis.serviceName?.toLowerCase()}-${analysis.serviceProvider?.toLowerCase()}`;
-          const subscriptionId2 = `email-${messageId}`;
+          // Normalize the service name for duplicate checking
+          const normalizedServiceName = normalizeServiceName(analysis.serviceName);
+          console.log(`SCAN-DEBUG: Normalized service name for duplicate check: "${normalizedServiceName}"`);
           
-          const isDuplicate = existingSubscriptionIds.has(subscriptionId1) || existingSubscriptionIds.has(subscriptionId2);
+          // Check if this subscription already exists (both in memory and database)
+          const isDuplicate = existingSubscriptionIds.has(normalizedServiceName);
           
           if (isDuplicate) {
-            console.log(`SCAN-DEBUG: Subscription ${analysis.serviceName} already exists, skipping`);
+            console.log(`SCAN-DEBUG: Subscription "${analysis.serviceName}" (normalized: "${normalizedServiceName}") already exists, skipping`);
           } else {
             console.log(`SCAN-DEBUG: New subscription detected, saving: ${analysis.serviceName}`);
             try {
-              await saveSubscription(userId, analysis);
-              subscriptionsFound++;
+              const savedSubscription = await saveSubscription(userId, analysis);
+              if (savedSubscription) {
+                subscriptionsFound++;
+                // Add to existing subscription IDs to prevent duplicates in this scan
+                existingSubscriptionIds.add(normalizedServiceName);
+                console.log(`SCAN-DEBUG: Added "${normalizedServiceName}" to duplicate prevention set`);
+              }
             } catch (saveError) {
               console.error(`SCAN-DEBUG: Error saving subscription ${analysis.serviceName}:`, saveError);
               console.error(`SCAN-DEBUG: Save error stack:`, saveError.stack);
               // Continue processing other emails even if this subscription fails to save
             }
-            
-            // Add to existing subscription IDs to prevent duplicates in this scan
-            if (subscriptionId1) existingSubscriptionIds.add(subscriptionId1);
-            if (subscriptionId2) existingSubscriptionIds.add(subscriptionId2);
           }
         }
         
@@ -1591,7 +1598,7 @@ const processEmails = async (gmailToken, scanId, userId) => {
     console.log('SCAN-DEBUG: Setting scan status to ready_for_analysis');
     await updateScanStatus(scanId, userId, {
       status: 'ready_for_analysis',
-      progress: 100,
+      progress: PROGRESS.ready_for_analysis,
       emails_processed: processedCount,
       subscriptions_found: totalSubscriptionCount,
       completed_at: new Date().toISOString()
