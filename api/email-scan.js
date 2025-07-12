@@ -1146,187 +1146,6 @@ const searchEmails = async (gmail, query) => {
   }
 };
 
-export default async function handler(req, res) {
-  console.log('SCAN-DEBUG: ===== EMAIL SCAN ENDPOINT CALLED =====');
-  console.log('SCAN-DEBUG: Method:', req.method);
-  console.log('SCAN-DEBUG: URL:', req.url);
-  console.log('SCAN-DEBUG: Headers:', {
-    'content-type': req.headers['content-type'],
-    'authorization': req.headers.authorization ? 'Present' : 'Missing',
-    'x-gmail-token': req.headers['x-gmail-token'] ? 'Present' : 'Missing',
-    'x-mock-mode': req.headers['x-mock-mode'] ? 'Present' : 'Missing'
-  });
-  console.log('SCAN-DEBUG: Body keys:', Object.keys(req.body || {}));
-  
-  // Set CORS headers
-  res.setHeader('Access-Control-Allow-Origin', 'https://www.quits.cc');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token, Pragma, X-API-Key, X-Api-Version, X-Device-ID, X-Mock-Mode');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Max-Age', '86400');
-
-  if (req.method === 'OPTIONS') {
-    console.log('SCAN-DEBUG: Handling OPTIONS preflight request');
-    return res.status(204).end();
-  }
-
-  if (req.method !== 'POST') {
-    console.log('SCAN-DEBUG: Invalid method:', req.method);
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
-
-  // Check for mock mode
-  const isMockMode = req.headers['x-mock-mode'] === 'true';
-  console.log('SCAN-DEBUG: Mock mode:', isMockMode);
-
-  try {
-    console.log('SCAN-DEBUG: Starting email scan processing...');
-    
-    // First, try to get token from Authorization header (preferred method)
-    let token = null;
-    const authHeader = req.headers.authorization;
-    
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      token = authHeader.substring(7);
-      console.log('SCAN-DEBUG: Found token in Authorization header, length:', token.length);
-    } else if (req.body.token) {
-      token = req.body.token;
-      console.log('SCAN-DEBUG: Found token in request body, length:', token.length);
-    }
-    
-    if (!token && !isMockMode) {
-      console.log('SCAN-DEBUG: No token provided in header or body');
-      return res.status(400).json({ error: 'Token is required' });
-    }
-
-    console.log('SCAN-DEBUG: About to verify JWT token...');
-    // Verify the JWT token first (skip in mock mode)
-    let decoded;
-    if (isMockMode) {
-      // Mock user data for testing
-      decoded = {
-        id: 'mock_user_id',
-        email: 'test@example.com',
-        name: 'Test User',
-        picture: null
-      };
-      console.log('SCAN-DEBUG: Using mock user data:', decoded);
-    } else {
-      try {
-        const jwtSecret = process.env.JWT_SECRET || 'dev_secret_DO_NOT_USE_IN_PRODUCTION';
-        console.log('SCAN-DEBUG: Using JWT secret:', jwtSecret.substring(0, 3) + '...');
-        decoded = jwt.verify(token, jwtSecret);
-        console.log('SCAN-DEBUG: JWT token verified successfully');
-        console.log('SCAN-DEBUG: Decoded JWT payload keys:', Object.keys(decoded));
-      } catch (jwtError) {
-        console.log('SCAN-DEBUG: JWT verification failed:', jwtError.message);
-        return res.status(401).json({ error: 'Invalid or expired token' });
-      }
-    }
-
-    // Get user ID from decoded token
-    const userId = decoded.id || decoded.sub;
-    if (!userId) {
-      console.log('SCAN-DEBUG: No user ID in token');
-      console.log('SCAN-DEBUG: Available fields:', Object.keys(decoded));
-      return res.status(400).json({ error: 'Invalid user ID' });
-    }
-
-    console.log('SCAN-DEBUG: User ID from token:', userId);
-
-    console.log('SCAN-DEBUG: About to extract Gmail token...');
-    // Extract Gmail token from JWT (skip in mock mode)
-    let gmailToken = null;
-    if (!isMockMode) {
-      gmailToken = extractGmailToken(token);
-      if (!gmailToken) {
-        console.log('SCAN-DEBUG: Failed to extract Gmail token from JWT');
-        console.log('SCAN-DEBUG: JWT payload keys:', Object.keys(decoded));
-        
-        // Check if we have a Gmail token in the request headers as fallback
-        const headerGmailToken = req.headers['x-gmail-token'];
-        if (headerGmailToken) {
-          console.log('SCAN-DEBUG: Using Gmail token from X-Gmail-Token header');
-          gmailToken = headerGmailToken;
-        } else {
-          console.log('SCAN-DEBUG: No Gmail token found in JWT or headers');
-          return res.status(400).json({ 
-            error: 'Gmail access token not found',
-            message: 'Please re-authenticate with Gmail to scan your emails'
-          });
-        }
-      }
-    } else {
-      gmailToken = 'mock_gmail_token';
-      console.log('SCAN-DEBUG: Using mock Gmail token');
-    }
-
-    console.log('SCAN-DEBUG: About to validate Gmail token...');
-    // Validate Gmail token (skip in mock mode)
-    if (!isMockMode) {
-      const isValidToken = await validateGmailToken(gmailToken);
-      if (!isValidToken) {
-        console.log('SCAN-DEBUG: Gmail token validation failed');
-        return res.status(401).json({ 
-          error: 'Invalid Gmail token',
-          message: 'Your Gmail access has expired. Please re-authenticate.'
-        });
-      }
-    } else {
-      console.log('SCAN-DEBUG: Skipping Gmail token validation in mock mode');
-    }
-
-    console.log('SCAN-DEBUG: Gmail token validated successfully');
-
-    console.log('SCAN-DEBUG: About to create scan record...');
-    // Create scan record
-    const { scanId, dbUserId } = await createScanRecord(userId, decoded);
-    console.log('SCAN-DEBUG: Created scan record with ID:', scanId);
-    console.log('SCAN-DEBUG: Using database user ID:', dbUserId);
-
-    // Return scan ID immediately to prevent timeout
-    console.log('SCAN-DEBUG: Returning scanId immediately to prevent timeout:', scanId);
-    res.status(200).json({ 
-      success: true, 
-      scanId: scanId,
-      message: 'Scan started successfully. Use the scan ID to check progress.'
-    });
-
-    // Process emails asynchronously (don't await this)
-    console.log('SCAN-DEBUG: Starting async email processing...');
-    
-    // Add timeout wrapper to prevent hanging
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => {
-        reject(new Error('Email processing timed out after 5 minutes'));
-      }, 5 * 60 * 1000); // 5 minutes timeout
-    });
-    
-    const processingPromise = processEmailsAsync(gmailToken, scanId, dbUserId, isMockMode);
-    
-    Promise.race([processingPromise, timeoutPromise]).catch(error => {
-      console.error('SCAN-DEBUG: Async email processing failed:', error);
-      console.error('SCAN-DEBUG: Error stack:', error.stack);
-      // Update scan status to error
-      updateScanStatus(scanId, dbUserId, {
-        status: 'error',
-        error_message: `Async processing failed: ${error.message}`,
-        updated_at: new Date().toISOString()
-      }).catch(updateError => {
-        console.error('SCAN-DEBUG: Failed to update scan status to error:', updateError);
-      });
-    });
-
-  } catch (error) {
-    console.error('SCAN-DEBUG: Error in email scan handler:', error);
-    console.error('SCAN-DEBUG: Error stack:', error.stack);
-    return res.status(500).json({ 
-      error: 'Internal server error',
-      message: error.message
-    });
-  }
-}
-
 // New async function to process emails without blocking the response
 const processEmailsAsync = async (gmailToken, scanId, userId, isMockMode = false) => {
   console.log('SCAN-DEBUG: ===== ASYNC EMAIL PROCESSING STARTED =====');
@@ -1335,12 +1154,14 @@ const processEmailsAsync = async (gmailToken, scanId, userId, isMockMode = false
   console.log('SCAN-DEBUG: User ID provided:', userId);
   console.log('SCAN-DEBUG: Mock mode:', isMockMode);
   
+  console.log('SCAN-DEBUG: About to validate parameters...');
   if (!gmailToken || !scanId || !userId) {
     const error = new Error('Missing required parameters for email processing');
     console.error('SCAN-DEBUG: Parameter validation failed:', error.message);
     throw error;
   }
   
+  console.log('SCAN-DEBUG: Parameters validated successfully');
   let processedCount = 0;
   
   try {
@@ -1922,3 +1743,188 @@ const processEmailsAsync = async (gmailToken, scanId, userId, isMockMode = false
     }
   }
 };
+
+export default async function handler(req, res) {
+  console.log('SCAN-DEBUG: ===== EMAIL SCAN ENDPOINT CALLED =====');
+  console.log('SCAN-DEBUG: Method:', req.method);
+  console.log('SCAN-DEBUG: URL:', req.url);
+  console.log('SCAN-DEBUG: Headers:', {
+    'content-type': req.headers['content-type'],
+    'authorization': req.headers.authorization ? 'Present' : 'Missing',
+    'x-gmail-token': req.headers['x-gmail-token'] ? 'Present' : 'Missing',
+    'x-mock-mode': req.headers['x-mock-mode'] ? 'Present' : 'Missing'
+  });
+  console.log('SCAN-DEBUG: Body keys:', Object.keys(req.body || {}));
+  
+  // Set CORS headers
+  res.setHeader('Access-Control-Allow-Origin', 'https://www.quits.cc');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token, Pragma, X-API-Key, X-Api-Version, X-Device-ID, X-Mock-Mode');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Max-Age', '86400');
+
+  if (req.method === 'OPTIONS') {
+    console.log('SCAN-DEBUG: Handling OPTIONS preflight request');
+    return res.status(204).end();
+  }
+
+  if (req.method !== 'POST') {
+    console.log('SCAN-DEBUG: Invalid method:', req.method);
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  // Check for mock mode
+  const isMockMode = req.headers['x-mock-mode'] === 'true';
+  console.log('SCAN-DEBUG: Mock mode:', isMockMode);
+
+  try {
+    console.log('SCAN-DEBUG: Starting email scan processing...');
+    
+    // First, try to get token from Authorization header (preferred method)
+    let token = null;
+    const authHeader = req.headers.authorization;
+    
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.substring(7);
+      console.log('SCAN-DEBUG: Found token in Authorization header, length:', token.length);
+    } else if (req.body.token) {
+      token = req.body.token;
+      console.log('SCAN-DEBUG: Found token in request body, length:', token.length);
+    }
+    
+    if (!token && !isMockMode) {
+      console.log('SCAN-DEBUG: No token provided in header or body');
+      return res.status(400).json({ error: 'Token is required' });
+    }
+
+    console.log('SCAN-DEBUG: About to verify JWT token...');
+    // Verify the JWT token first (skip in mock mode)
+    let decoded;
+    if (isMockMode) {
+      // Mock user data for testing
+      decoded = {
+        id: 'mock_user_id',
+        email: 'test@example.com',
+        name: 'Test User',
+        picture: null
+      };
+      console.log('SCAN-DEBUG: Using mock user data:', decoded);
+    } else {
+      try {
+        const jwtSecret = process.env.JWT_SECRET || 'dev_secret_DO_NOT_USE_IN_PRODUCTION';
+        console.log('SCAN-DEBUG: Using JWT secret:', jwtSecret.substring(0, 3) + '...');
+        decoded = jwt.verify(token, jwtSecret);
+        console.log('SCAN-DEBUG: JWT token verified successfully');
+        console.log('SCAN-DEBUG: Decoded JWT payload keys:', Object.keys(decoded));
+      } catch (jwtError) {
+        console.log('SCAN-DEBUG: JWT verification failed:', jwtError.message);
+        return res.status(401).json({ error: 'Invalid or expired token' });
+      }
+    }
+
+    // Get user ID from decoded token
+    const userId = decoded.id || decoded.sub;
+    if (!userId) {
+      console.log('SCAN-DEBUG: No user ID in token');
+      console.log('SCAN-DEBUG: Available fields:', Object.keys(decoded));
+      return res.status(400).json({ error: 'Invalid user ID' });
+    }
+
+    console.log('SCAN-DEBUG: User ID from token:', userId);
+
+    console.log('SCAN-DEBUG: About to extract Gmail token...');
+    // Extract Gmail token from JWT (skip in mock mode)
+    let gmailToken = null;
+    if (!isMockMode) {
+      gmailToken = extractGmailToken(token);
+      if (!gmailToken) {
+        console.log('SCAN-DEBUG: Failed to extract Gmail token from JWT');
+        console.log('SCAN-DEBUG: JWT payload keys:', Object.keys(decoded));
+        
+        // Check if we have a Gmail token in the request headers as fallback
+        const headerGmailToken = req.headers['x-gmail-token'];
+        if (headerGmailToken) {
+          console.log('SCAN-DEBUG: Using Gmail token from X-Gmail-Token header');
+          gmailToken = headerGmailToken;
+        } else {
+          console.log('SCAN-DEBUG: No Gmail token found in JWT or headers');
+          return res.status(400).json({ 
+            error: 'Gmail access token not found',
+            message: 'Please re-authenticate with Gmail to scan your emails'
+          });
+        }
+      }
+    } else {
+      gmailToken = 'mock_gmail_token';
+      console.log('SCAN-DEBUG: Using mock Gmail token');
+    }
+
+    console.log('SCAN-DEBUG: About to validate Gmail token...');
+    // Validate Gmail token (skip in mock mode)
+    if (!isMockMode) {
+      const isValidToken = await validateGmailToken(gmailToken);
+      if (!isValidToken) {
+        console.log('SCAN-DEBUG: Gmail token validation failed');
+        return res.status(401).json({ 
+          error: 'Invalid Gmail token',
+          message: 'Your Gmail access has expired. Please re-authenticate.'
+        });
+      }
+    } else {
+      console.log('SCAN-DEBUG: Skipping Gmail token validation in mock mode');
+    }
+
+    console.log('SCAN-DEBUG: Gmail token validated successfully');
+
+    console.log('SCAN-DEBUG: About to create scan record...');
+    // Create scan record
+    const { scanId, dbUserId } = await createScanRecord(userId, decoded);
+    console.log('SCAN-DEBUG: Created scan record with ID:', scanId);
+    console.log('SCAN-DEBUG: Using database user ID:', dbUserId);
+
+    // Return scan ID immediately to prevent timeout
+    console.log('SCAN-DEBUG: Returning scanId immediately to prevent timeout:', scanId);
+    res.status(200).json({ 
+      success: true, 
+      scanId: scanId,
+      message: 'Scan started successfully. Use the scan ID to check progress.'
+    });
+
+    // Process emails asynchronously (don't await this)
+    console.log('SCAN-DEBUG: Starting async email processing...');
+    
+    // Add timeout wrapper to prevent hanging
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => {
+        console.log('SCAN-DEBUG: Async email processing timed out after 5 minutes');
+        reject(new Error('Email processing timed out after 5 minutes'));
+      }, 5 * 60 * 1000); // 5 minutes timeout
+    });
+    
+    console.log('SCAN-DEBUG: About to call processEmailsAsync...');
+    console.log('SCAN-DEBUG: processEmailsAsync function exists:', typeof processEmailsAsync);
+    const processingPromise = processEmailsAsync(gmailToken, scanId, dbUserId, isMockMode);
+    console.log('SCAN-DEBUG: processEmailsAsync called, setting up race condition...');
+    
+    Promise.race([processingPromise, timeoutPromise]).catch(error => {
+      console.error('SCAN-DEBUG: Async email processing failed:', error);
+      console.error('SCAN-DEBUG: Error stack:', error.stack);
+      // Update scan status to error
+      updateScanStatus(scanId, dbUserId, {
+        status: 'error',
+        error_message: `Async processing failed: ${error.message}`,
+        updated_at: new Date().toISOString()
+      }).catch(updateError => {
+        console.error('SCAN-DEBUG: Failed to update scan status to error:', updateError);
+      });
+    });
+
+  } catch (error) {
+    console.error('SCAN-DEBUG: Error in email scan handler:', error);
+    console.error('SCAN-DEBUG: Error stack:', error.stack);
+    return res.status(500).json({ 
+      error: 'Internal server error',
+      message: error.message
+    });
+  }
+}
