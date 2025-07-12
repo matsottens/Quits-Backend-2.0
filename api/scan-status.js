@@ -37,11 +37,27 @@ export default async function handler(req, res) {
     const token = authHeader.substring(7);
     const jwtSecret = process.env.JWT_SECRET || 'dev_secret_DO_NOT_USE_IN_PRODUCTION';
     const decoded = jwt.verify(token, jwtSecret);
-    const userId = decoded.id || decoded.sub;
+    const googleId = decoded.id || decoded.sub;
 
-    if (!userId) {
+    if (!googleId) {
       return res.status(401).json({ error: 'Invalid user ID in token' });
     }
+
+    // Look up the user in the database to get the UUID
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('id')
+      .eq('google_id', googleId)
+      .single();
+
+    if (userError || !user) {
+      console.error('SCAN-STATUS-DEBUG: User lookup error:', userError);
+      return res.status(401).json({ error: 'User not found in database' });
+    }
+
+    const userId = user.id; // This is the UUID
+    console.log('SCAN-STATUS-DEBUG: Google ID:', googleId);
+    console.log('SCAN-STATUS-DEBUG: Database User ID (UUID):', userId);
 
     // Get scanId from path or query parameters
     const pathParts = req.url.split('/');
