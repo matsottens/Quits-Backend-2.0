@@ -309,48 +309,66 @@ const fetchEmailsFromGmail = async (gmailToken) => {
 
 // Function to fetch detailed email content
 const fetchEmailContent = async (gmailToken, messageId) => {
-  console.log(`SCAN-DEBUG: Fetching content for email ID: ${messageId}`);
-  if (!gmailToken) {
-    console.error(`SCAN-DEBUG: No Gmail token provided to fetchEmailContent for messageId: ${messageId}`);
-    return null;
-  }
-  if (!messageId) {
-    console.error('SCAN-DEBUG: No messageId provided to fetchEmailContent');
-    return null;
-  }
+  console.log(`SCAN-DEBUG: Fetching email content for message ${messageId}`);
+  
   try {
-    const apiUrl = `https://www.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=full`;
-    console.log(`SCAN-DEBUG: Gmail content API URL: ${apiUrl}`);
+    const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=full`;
     
-    const response = await fetch(apiUrl, {
+    // Add timeout to prevent hanging requests
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+    
+    const response = await fetch(url, {
       headers: {
-        'Authorization': `Bearer ${gmailToken}`
-      }
+        Authorization: `Bearer ${gmailToken}`,
+        'Content-Type': 'application/json',
+      },
+      signal: controller.signal
     });
     
-    console.log(`SCAN-DEBUG: Gmail content API response status: ${response.status}`);
+    clearTimeout(timeoutId);
+    
+    console.log(`SCAN-DEBUG: Gmail API response status for message ${messageId}: ${response.status}`);
     
     if (!response.ok) {
       const errorText = await response.text();
-      console.error(`SCAN-DEBUG: Error fetching email content: ${response.status} ${response.statusText}`);
-      console.error(`SCAN-DEBUG: Error response: ${errorText}`);
-      return null;
+      console.error(`SCAN-DEBUG: Gmail API error for message ${messageId}: ${response.status} ${errorText}`);
+      throw new Error(`Gmail API error: ${response.status} ${errorText}`);
     }
     
-    const data = await response.json();
-    console.log(`SCAN-DEBUG: Successfully fetched email content, parts count: ${data.payload?.parts?.length || 0}`);
-    
-    // Log MIME type and structure
-    console.log(`SCAN-DEBUG: Email MIME type: ${data.payload?.mimeType}`);
-    if (data.payload?.parts) {
-      const partTypes = data.payload.parts.map(p => p.mimeType).join(', ');
-      console.log(`SCAN-DEBUG: Email part types: ${partTypes}`);
+    // Safely parse JSON response
+    let data;
+    try {
+      const responseText = await response.text();
+      console.log(`SCAN-DEBUG: Response text length for message ${messageId}: ${responseText.length}`);
+      
+      if (!responseText || responseText.trim() === '') {
+        console.error(`SCAN-DEBUG: Empty response for message ${messageId}`);
+        throw new Error('Empty response from Gmail API');
+      }
+      
+      data = JSON.parse(responseText);
+    } catch (parseError) {
+      console.error(`SCAN-DEBUG: JSON parse error for message ${messageId}:`, parseError);
+      console.error(`SCAN-DEBUG: Response text preview:`, responseText?.substring(0, 200));
+      throw new Error(`JSON parse error: ${parseError.message}`);
     }
     
+    if (!data) {
+      console.error(`SCAN-DEBUG: No data returned for message ${messageId}`);
+      throw new Error('No data returned from Gmail API');
+    }
+    
+    console.log(`SCAN-DEBUG: Successfully fetched email content for message ${messageId}`);
     return data;
+    
   } catch (error) {
-    console.error(`SCAN-DEBUG: Exception fetching email content: ${error.message}`);
-    return null;
+    if (error.name === 'AbortError') {
+      console.error(`SCAN-DEBUG: Gmail API request timed out for message ${messageId}`);
+      throw new Error(`Gmail API request timed out for message ${messageId}`);
+    }
+    console.error(`SCAN-DEBUG: Error fetching email content for message ${messageId}:`, error);
+    throw error;
   }
 };
 
@@ -1292,13 +1310,13 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
           // Skip if we've already processed this message
           if (processedMessageIds.has(messageId)) {
             console.log(`SCAN-DEBUG: Skipping duplicate message ${messageId}`);
-            return;
+            return { success: true };
           }
           
           // Mark this message as processed
           processedMessageIds.add(messageId);
           
-          // Fetch email content with timeout
+          // Fetch email content with timeout and better error handling
           console.log(`SCAN-DEBUG: Fetching content for email ${messageId}`);
           let emailData;
           try {
@@ -1309,23 +1327,37 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
               )
             ]);
           } catch (fetchError) {
-            console.error(`SCAN-DEBUG: Error fetching email ${messageId}:`, fetchError);
-            return;
+            console.error(`SCAN-DEBUG: Error fetching email ${messageId}:`, fetchError.message);
+            // Continue with next email instead of failing the entire batch
+            return { success: false, error: fetchError.message };
           }
           
           if (!emailData) {
             console.log(`SCAN-DEBUG: No email data for message ${messageId}, skipping`);
-            return;
+            return { success: false, error: 'No email data' };
           }
           
-          // Extract email details
-          const headers = emailData.payload.headers || [];
-          const { subject, from, date } = parseEmailHeaders(headers);
-          const emailBody = extractEmailBody(emailData);
+          // Extract email details with error handling
+          let subject, from, date, emailBody;
+          try {
+            const headers = emailData.payload?.headers || [];
+            const parsedHeaders = parseEmailHeaders(headers);
+            subject = parsedHeaders.subject;
+            from = parsedHeaders.from;
+            date = parsedHeaders.date;
+            emailBody = extractEmailBody(emailData);
+            
+            console.log(`SCAN-DEBUG: Email details - Subject: "${subject}", From: "${from}"`);
+          } catch (parseError) {
+            console.error(`SCAN-DEBUG: Error parsing email headers for ${messageId}:`, parseError.message);
+            // Use fallback values
+            subject = 'Unknown Subject';
+            from = 'Unknown Sender';
+            date = new Date().toISOString();
+            emailBody = 'Email content could not be parsed';
+          }
           
-          console.log(`SCAN-DEBUG: Email details - Subject: "${subject}", From: "${from}"`);
-          
-          // Store email data in database
+          // Store email data in database with error handling
           const emailDataRecord = {
             scan_id: scanId,
             user_id: userId,
@@ -1395,7 +1427,7 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
             
           if (emailDataError) {
             console.error('SCAN-DEBUG: Error storing email data:', emailDataError);
-            return;
+            return { success: false, error: emailDataError.message };
           } else {
             console.log(`SCAN-DEBUG: Successfully stored email data for message ${messageId} with ID: ${emailDataResult.id}`);
           }
@@ -1403,7 +1435,7 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
           // Validate that we have a valid email_data_id before proceeding
           if (!emailDataResult || !emailDataResult.id) {
             console.error('SCAN-DEBUG: emailDataResult is null or missing ID:', emailDataResult);
-            return;
+            return { success: false, error: 'No email data ID' };
           }
           
           console.log(`SCAN-DEBUG: Validated email_data_id: ${emailDataResult.id}`);
@@ -1486,7 +1518,7 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
           
         } catch (emailError) {
           console.error(`SCAN-DEBUG: Error processing email ${emailIndex + 1}:`, emailError);
-          return { success: false, error: emailError };
+          return { success: false, error: emailError.message };
         }
       });
       
@@ -1599,40 +1631,32 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
     console.error('SCAN-DEBUG: Error in async processEmails:', error);
     console.error('SCAN-DEBUG: Error stack:', error.stack);
     
-    // Even if there's an error, try to complete the scan
+    // Update scan status to error but don't fail completely
     try {
-      console.log('SCAN-DEBUG: Attempting to complete scan despite error...');
       await updateScanStatus(scanId, userId, {
-        status: 'ready_for_analysis',
-        progress: 90,
-        error_message: error.message,
-        completed_at: new Date().toISOString()
+        status: 'error',
+        error_message: `Email processing error: ${error.message}`,
+        updated_at: new Date().toISOString()
       });
-      
-      // Still try to trigger the Edge Function
-      console.log('SCAN-DEBUG: Attempting to trigger Edge Function despite error...');
-      const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
-      const triggerResponse = await fetch(
-        "https://dstsluflwxzkwouxcjkh.supabase.co/functions/v1/gemini-scan",
-        { 
-          method: "POST",
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${serviceRoleKey}`
-          }
-        }
-      );
-      
-      if (triggerResponse.ok) {
-        console.log('SCAN-DEBUG: Edge Function triggered successfully despite error');
-      } else {
-        const errorText = await triggerResponse.text();
-        console.error('SCAN-DEBUG: Failed to trigger Edge Function despite error:', errorText);
-      }
-    } catch (fallbackError) {
-      console.error('SCAN-DEBUG: Fallback completion also failed:', fallbackError);
+    } catch (updateError) {
+      console.error('SCAN-DEBUG: Error updating scan status after failure:', updateError);
     }
     
-    throw error;
+    // Even if there's an error, try to complete the scan if we processed any emails
+    if (processedCount > 0) {
+      console.log(`SCAN-DEBUG: Attempting to complete scan despite errors. Processed ${processedCount} emails.`);
+      try {
+        await updateScanStatus(scanId, userId, {
+          status: 'ready_for_analysis',
+          progress: PROGRESS.ready_for_analysis,
+          emails_processed: processedCount,
+          subscriptions_found: 0,
+          completed_at: new Date().toISOString()
+        });
+        console.log('SCAN-DEBUG: Scan completed despite errors');
+      } catch (completionError) {
+        console.error('SCAN-DEBUG: Error completing scan:', completionError);
+      }
+    }
   }
 };
