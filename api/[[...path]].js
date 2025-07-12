@@ -120,6 +120,11 @@ export default async function handler(req, res) {
         return res.status(405).json({ error: 'Method not supported for this endpoint' });
       }
     } 
+    else if (fullPath.includes('/email-scan')) {
+      // Email scan endpoint - route to the real handler
+      const emailScanHandler = (await import('./email-scan.js')).default;
+      return emailScanHandler(req, res);
+    }
     else if (fullPath.includes('/scan-status')) {
       // Scan status endpoint
       if (req.method === 'GET') {
