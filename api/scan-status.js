@@ -1,13 +1,34 @@
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 
+// Token verification function
+const verifyToken = (token, req) => {
+  try {
+    const jwtSecret = process.env.JWT_SECRET || 'dev_secret_DO_NOT_USE_IN_PRODUCTION';
+    return jwt.verify(token, jwtSecret);
+  } catch (error) {
+    console.error('Token verification error:', error.message);
+    return null;
+  }
+};
+
 export default async function handler(req, res) {
   console.log('SCAN-STATUS-DEBUG: Handler called');
   console.log('SCAN-STATUS-DEBUG: Method:', req.method);
   console.log('SCAN-STATUS-DEBUG: URL:', req.url);
+  console.log('SCAN-STATUS-DEBUG: Headers:', {
+    'authorization': req.headers.authorization ? 'Present' : 'Missing',
+    'content-type': req.headers['content-type']
+  });
+
+  // Set CORS headers
+  res.setHeader('Access-Control-Allow-Origin', 'https://www.quits.cc');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token, Pragma, X-API-Key, X-Api-Version, X-Device-ID');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Max-Age', '86400');
 
   if (req.method === 'OPTIONS') {
-    console.log('SCAN-STATUS-DEBUG: Handling OPTIONS request');
     return res.status(204).end();
   }
 
@@ -28,18 +49,30 @@ export default async function handler(req, res) {
   console.log('SCAN-STATUS-DEBUG: Final supabaseKey:', supabaseKey ? 'Set' : 'Not set');
   
   try {
-    // Extract and verify authorization token
+    // Extract and verify token
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      console.log('SCAN-STATUS-DEBUG: Missing or invalid authorization header');
       return res.status(401).json({ error: 'Missing or invalid authorization header' });
     }
 
     const token = authHeader.substring(7);
-    const jwtSecret = process.env.JWT_SECRET || 'dev_secret_DO_NOT_USE_IN_PRODUCTION';
-    const decoded = jwt.verify(token, jwtSecret);
+    console.log('SCAN-STATUS-DEBUG: Token length:', token.length);
+    
+    const decoded = verifyToken(token, req);
+    if (!decoded) {
+      console.log('SCAN-STATUS-DEBUG: Token verification failed');
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+
+    console.log('SCAN-STATUS-DEBUG: Token verified successfully');
+    console.log('SCAN-STATUS-DEBUG: Decoded token keys:', Object.keys(decoded));
+    
     const googleId = decoded.id || decoded.sub;
+    console.log('SCAN-STATUS-DEBUG: Google ID from token:', googleId);
 
     if (!googleId) {
+      console.log('SCAN-STATUS-DEBUG: No Google ID found in token');
       return res.status(401).json({ error: 'Invalid user ID in token' });
     }
 
@@ -55,6 +88,7 @@ export default async function handler(req, res) {
     console.log('SCAN-STATUS-DEBUG: Final scan ID:', scanId);
 
     // Look up the user in the database to get the UUID
+    console.log('SCAN-STATUS-DEBUG: Looking up user with Google ID:', googleId);
     const { data: user, error: userError } = await supabase
       .from('users')
       .select('id')
@@ -63,6 +97,7 @@ export default async function handler(req, res) {
 
     if (userError || !user) {
       console.error('SCAN-STATUS-DEBUG: User lookup error:', userError);
+      console.error('SCAN-STATUS-DEBUG: User data:', user);
       
       // If user doesn't exist yet, this might be a new user whose scan is still being processed
       // Return a status indicating the scan is still being set up
@@ -94,6 +129,7 @@ export default async function handler(req, res) {
 
     if (scanId && scanId !== 'latest') {
       // Query by specific scan ID
+      console.log('SCAN-STATUS-DEBUG: Querying by specific scan ID:', scanId);
       const { data, error: scanError } = await supabase
         .from('scan_history')
         .select('*')
@@ -103,8 +139,10 @@ export default async function handler(req, res) {
       
       scan = data;
       error = scanError;
+      console.log('SCAN-STATUS-DEBUG: Specific scan query result:', { scan, error });
     } else {
       // Query latest scan for user
+      console.log('SCAN-STATUS-DEBUG: Querying latest scan for user');
       const { data, error: scanError } = await supabase
         .from('scan_history')
         .select('*')
@@ -115,6 +153,7 @@ export default async function handler(req, res) {
       
       scan = data;
       error = scanError;
+      console.log('SCAN-STATUS-DEBUG: Latest scan query result:', { scan, error });
     }
 
     if (error) {
