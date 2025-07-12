@@ -1338,21 +1338,31 @@ const processEmails = async (gmailToken, scanId, userId) => {
 
     // Check for existing subscriptions to avoid duplicates
     console.log('SCAN-DEBUG: Checking for existing subscriptions to avoid duplicates');
+    console.log('SCAN-DEBUG: About to query subscriptions table for user ID:', userId);
     let existingSubscriptions = null;
     let existingSubsError = null;
     
     try {
+      console.log('SCAN-DEBUG: Executing Supabase query for existing subscriptions...');
       const result = await supabase
         .from('subscriptions')
         .select('name, provider, email_id')
         .eq('user_id', userId);
       
+      console.log('SCAN-DEBUG: Supabase query completed');
+      console.log('SCAN-DEBUG: Query result:', result);
+      
       existingSubscriptions = result.data;
       existingSubsError = result.error;
     } catch (supabaseError) {
       console.error('SCAN-DEBUG: Exception during existing subscriptions query:', supabaseError);
+      console.error('SCAN-DEBUG: Exception stack:', supabaseError.stack);
       existingSubsError = supabaseError;
     }
+    
+    console.log('SCAN-DEBUG: Existing subscriptions query completed');
+    console.log('SCAN-DEBUG: existingSubscriptions:', existingSubscriptions);
+    console.log('SCAN-DEBUG: existingSubsError:', existingSubsError);
     
     if (existingSubsError) {
       console.error('SCAN-DEBUG: Error fetching existing subscriptions:', existingSubsError);
@@ -1362,6 +1372,7 @@ const processEmails = async (gmailToken, scanId, userId) => {
     }
     
     // Create a set of existing subscription identifiers for quick lookup
+    console.log('SCAN-DEBUG: Creating existing subscription identifiers set...');
     const existingSubscriptionIds = new Set();
     if (existingSubscriptions) {
       existingSubscriptions.forEach(sub => {
@@ -1372,15 +1383,25 @@ const processEmails = async (gmailToken, scanId, userId) => {
         if (id2) existingSubscriptionIds.add(id2);
       });
     }
+    console.log('SCAN-DEBUG: Existing subscription identifiers set created');
     
     console.log('SCAN-DEBUG: About to fetch emails from Gmail');
     console.log('SCAN-DEBUG: Gmail token available for fetchEmailsFromGmail:', !!gmailToken);
     console.log('SCAN-DEBUG: Gmail token length:', gmailToken?.length || 0);
     
     // Fetch emails from Gmail
-    const emails = await fetchEmailsFromGmail(gmailToken);
-    console.log(`SCAN-DEBUG: Fetched ${emails.length} emails from Gmail`);
-    console.log('SCAN-DEBUG: Email fetching completed successfully');
+    let emails = [];
+    try {
+      console.log('SCAN-DEBUG: Calling fetchEmailsFromGmail function...');
+      emails = await fetchEmailsFromGmail(gmailToken);
+      console.log(`SCAN-DEBUG: Fetched ${emails.length} emails from Gmail`);
+      console.log('SCAN-DEBUG: Email fetching completed successfully');
+    } catch (fetchError) {
+      console.error('SCAN-DEBUG: Error in fetchEmailsFromGmail:', fetchError);
+      console.error('SCAN-DEBUG: Fetch error stack:', fetchError.stack);
+      console.log('SCAN-DEBUG: Continuing with empty emails array due to fetch error');
+      emails = [];
+    }
     
     if (emails.length === 0) {
       console.log('SCAN-DEBUG: No emails found, setting scan to ready_for_analysis');
