@@ -1,5 +1,21 @@
-import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
+// Function to normalize service names for better duplicate detection
+function normalizeServiceName(name: string): string {
+  if (!name) return '';
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ') // Remove non-alphanumeric characters
+    .replace(/\b(inc|llc|ltd|corp|co|company|limited|incorporated)\b/g, '') // Remove company suffixes
+    .replace(/\s+/g, ' ') // Collapse multiple spaces
+    .trim();
+}
 
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
@@ -256,6 +272,25 @@ serve(async (_req) => {
         // Only process if it's actually a subscription
         if (geminiResult && geminiResult.is_subscription && geminiResult.subscription_name) {
           console.log(`Found subscription: ${geminiResult.subscription_name} for email ${email.id}`);
+          
+          // Check for duplicates before creating subscription
+          const normalizedServiceName = normalizeServiceName(geminiResult.subscription_name);
+          console.log(`Normalized service name: "${geminiResult.subscription_name}" -> "${normalizedServiceName}"`);
+          
+          // Check if subscription already exists
+          const { data: existingSubscriptions, error: checkError } = await supabase
+            .from("subscriptions")
+            .select("name")
+            .eq("user_id", scan.user_id)
+            .ilike("name", `%${normalizedServiceName}%`);
+          
+          if (checkError) {
+            console.error(`Error checking for existing subscriptions:`, checkError);
+          } else if (existingSubscriptions && existingSubscriptions.length > 0) {
+            console.log(`Subscription "${geminiResult.subscription_name}" (normalized: "${normalizedServiceName}") already exists, skipping`);
+            console.log(`Existing subscriptions found:`, existingSubscriptions.map(s => s.name));
+            continue;
+          }
           
           // 4. Store the result in subscription_analysis
           const { error: analysisError } = await supabase.from("subscription_analysis").insert({

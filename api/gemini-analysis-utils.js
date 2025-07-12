@@ -8,7 +8,22 @@ const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
 const supabaseKey = supabaseServiceRoleKey || supabaseServiceKey;
 
+if (!supabaseUrl || !supabaseKey) {
+  throw new Error('Missing Supabase environment variables');
+}
+
 const supabase = createClient(supabaseUrl, supabaseKey);
+
+// Function to normalize service names for better duplicate detection
+const normalizeServiceName = (name) => {
+  if (!name) return '';
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ') // Remove non-alphanumeric characters
+    .replace(/\b(inc|llc|ltd|corp|co|company|limited|incorporated)\b/g, '') // Remove company suffixes
+    .replace(/\s+/g, ' ') // Collapse multiple spaces
+    .trim();
+};
 
 // Gemini API configuration
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
@@ -48,16 +63,22 @@ async function convertAnalysisToSubscriptions(userId, scanId) {
           continue;
         }
 
-        // Check if subscription already exists for this analysis
-        const { data: existingSubscription } = await supabase
-          .from('subscriptions')
-          .select('id')
-          .eq('user_id', userId)
-          .eq('name', analysis.subscription_name)
-          .single();
+        // Normalize the subscription name for duplicate checking
+        const normalizedName = normalizeServiceName(analysis.subscription_name);
+        console.log(`Normalized subscription name: "${analysis.subscription_name}" -> "${normalizedName}"`);
 
-        if (existingSubscription) {
-          console.log(`Subscription "${analysis.subscription_name}" already exists, skipping`);
+        // Check if subscription already exists using normalized name
+        const { data: existingSubscriptions, error: checkError } = await supabase
+          .from('subscriptions')
+          .select('id, name')
+          .eq('user_id', userId)
+          .ilike('name', `%${normalizedName}%`);
+
+        if (checkError) {
+          console.error(`Error checking for existing subscriptions:`, checkError);
+        } else if (existingSubscriptions && existingSubscriptions.length > 0) {
+          console.log(`Subscription "${analysis.subscription_name}" (normalized: "${normalizedName}") already exists, skipping`);
+          console.log(`Existing subscriptions found:`, existingSubscriptions.map(s => s.name));
           continue;
         }
 
