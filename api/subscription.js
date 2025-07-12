@@ -379,9 +379,9 @@ export default async function handler(req, res) {
           const subscriptions = await response.json();
           console.log(`Found ${subscriptions.length} subscriptions for user ${dbUserId}`);
           
-          // Also fetch auto-detected subscriptions from analysis results
+          // Also fetch auto-detected subscriptions from analysis results (both completed and pending)
           const analysisResponse = await fetch(
-            `${supabaseUrl}/rest/v1/subscription_analysis?user_id=eq.${dbUserId}&analysis_status=eq.completed&select=*`,
+            `${supabaseUrl}/rest/v1/subscription_analysis?user_id=eq.${dbUserId}&analysis_status=in.(completed,pending)&select=*`,
             {
               method: 'GET',
               headers: {
@@ -395,7 +395,7 @@ export default async function handler(req, res) {
           let analysisSubscriptions = [];
           if (analysisResponse.ok) {
             analysisSubscriptions = await analysisResponse.json();
-            console.log(`Found ${analysisSubscriptions.length} auto-detected subscriptions from analysis`);
+            console.log(`Found ${analysisSubscriptions.length} auto-detected subscriptions from analysis (completed + pending)`);
           }
           
           // If no analysis results yet, wait a bit and retry (for new users)
@@ -405,9 +405,9 @@ export default async function handler(req, res) {
             // Wait 5 seconds for analysis to complete
             await new Promise(resolve => setTimeout(resolve, 5000));
             
-            // Retry fetching analysis results
+            // Retry fetching analysis results (including pending)
             const retryAnalysisResponse = await fetch(
-              `${supabaseUrl}/rest/v1/subscription_analysis?user_id=eq.${dbUserId}&analysis_status=eq.completed&select=*`,
+              `${supabaseUrl}/rest/v1/subscription_analysis?user_id=eq.${dbUserId}&analysis_status=in.(completed,pending)&select=*`,
               {
                 method: 'GET',
                 headers: {
@@ -420,52 +420,33 @@ export default async function handler(req, res) {
             
             if (retryAnalysisResponse.ok) {
               analysisSubscriptions = await retryAnalysisResponse.json();
-              console.log(`After retry: Found ${analysisSubscriptions.length} auto-detected subscriptions from analysis`);
+              console.log(`After retry: Found ${analysisSubscriptions.length} auto-detected subscriptions from analysis (completed + pending)`);
             }
           }
           
-          // Combine manual subscriptions and auto-detected ones
-          const allSubscriptions = [...subscriptions];
-          
-          // Add auto-detected subscriptions that aren't already in the subscriptions table
-          for (const analysis of analysisSubscriptions) {
-            const alreadyExists = subscriptions.some(sub => sub.name === analysis.subscription_name);
-            if (!alreadyExists) {
-              allSubscriptions.push({
-                id: `analysis_${analysis.id}`,
-                name: analysis.subscription_name,
-                price: analysis.price || 0,
-                billing_cycle: analysis.billing_cycle || 'monthly',
-                next_billing_date: analysis.next_billing_date,
-                category: 'auto-detected',
-                is_manual: false,
-                source_analysis_id: analysis.id,
-                service_provider: analysis.service_provider,
-                confidence_score: analysis.confidence_score,
-                created_at: analysis.created_at,
-                updated_at: analysis.updated_at
-              });
-            }
-          }
+          // Combine manual subscriptions with analysis results
+          const allSubscriptions = [
+            ...subscriptions.map(sub => ({ ...sub, source: 'manual' })),
+            ...analysisSubscriptions.map(analysis => ({
+              id: `analysis_${analysis.id}`, // Use analysis ID with prefix
+              name: analysis.subscription_name,
+              price: parseFloat(analysis.price || 0),
+              currency: analysis.currency || 'USD',
+              billing_cycle: analysis.billing_cycle || 'monthly',
+              next_billing_date: analysis.next_billing_date,
+              service_provider: analysis.service_provider,
+              category: 'auto-detected',
+              is_manual: false,
+              source: 'email_scan',
+              source_analysis_id: analysis.id,
+              confidence_score: analysis.confidence_score,
+              analysis_status: analysis.analysis_status, // Include analysis status
+              created_at: analysis.created_at,
+              updated_at: analysis.updated_at
+            }))
+          ];
           
           console.log(`Total subscriptions (manual + auto-detected): ${allSubscriptions.length}`);
-          
-          // Return empty array if no subscriptions found (no more mock data)
-          if (!allSubscriptions || allSubscriptions.length === 0) {
-            console.log('No subscriptions found, returning empty array');
-            return res.status(200).json({
-              success: true,
-              subscriptions: [],
-              meta: {
-                total: 0,
-                totalMonthly: 0,
-                totalYearly: 0,
-                totalAnnualized: 0,
-                db_user_id: dbUserId,
-                message: 'No subscriptions found. Email analysis may still be in progress.'
-              }
-            });
-          }
           
           // Calculate subscription metrics
           const monthlyTotal = allSubscriptions
@@ -490,6 +471,8 @@ export default async function handler(req, res) {
             source_analysis_id: sub.source_analysis_id,
             service_provider: sub.service_provider,
             confidence_score: sub.confidence_score,
+            analysis_status: sub.analysis_status, // Include analysis status for frontend
+            is_pending: sub.analysis_status === 'pending', // Flag for pending analysis
             createdAt: sub.created_at,
             updatedAt: sub.updated_at
           }));
