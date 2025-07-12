@@ -1698,33 +1698,20 @@ export default async function handler(req, res) {
     console.log('SCAN-DEBUG: Using database user ID:', dbUserId);
 
     // Start email processing in background
-    console.log('SCAN-DEBUG: About to start processEmails in background');
+    console.log('SCAN-DEBUG: About to start processEmails and await completion');
     console.log('SCAN-DEBUG: Gmail token available:', !!gmailToken);
     console.log('SCAN-DEBUG: Scan ID:', scanId);
     console.log('SCAN-DEBUG: Database User ID:', dbUserId);
-    
+    console.log('SCAN-DEBUG: Starting processEmails...');
     try {
-      console.log('SCAN-DEBUG: Starting processEmails...');
-      processEmails(gmailToken, scanId, dbUserId).catch(error => {
-        console.error('SCAN-DEBUG: Error processing emails:', error);
-        console.error('SCAN-DEBUG: Error stack:', error.stack);
-        updateScanStatus(scanId, dbUserId, {
-          status: 'error',
-          progress: 0
-        }).catch(console.error);
-      });
-      console.log('SCAN-DEBUG: processEmails started successfully');
+      await processEmails(gmailToken, scanId, dbUserId);
+      console.log('SCAN-DEBUG: processEmails completed successfully');
+      res.status(202).json({ success: true, scanId: scanId });
     } catch (error) {
-      console.error('SCAN-DEBUG: Error starting processEmails:', error);
+      console.error('SCAN-DEBUG: Error in processEmails:', error);
       console.error('SCAN-DEBUG: Error stack:', error.stack);
+      res.status(500).json({ error: 'Failed to process emails', details: error.message });
     }
-
-    console.log('SCAN-DEBUG: Returning success response');
-    return res.status(200).json({
-      success: true,
-      scanId,
-      message: 'Scan started successfully'
-    });
 
   } catch (error) {
     console.error('SCAN-DEBUG: Error in email scan handler:', error);
