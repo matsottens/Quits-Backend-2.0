@@ -1,4 +1,10 @@
 export default async function handler(req, res) {
+  console.log('TRIGGER-DEBUG: ===== GEMINI SCAN TRIGGER CALLED =====');
+  console.log('TRIGGER-DEBUG: Method:', req.method);
+  console.log('TRIGGER-DEBUG: URL:', req.url);
+  console.log('TRIGGER-DEBUG: Headers:', Object.keys(req.headers));
+  console.log('TRIGGER-DEBUG: Body:', req.body);
+  
   // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', 'https://www.quits.cc');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
@@ -7,18 +13,18 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Max-Age', '86400');
 
   if (req.method === 'OPTIONS') {
+    console.log('TRIGGER-DEBUG: Handling OPTIONS preflight request');
     return res.status(204).end();
   }
 
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+  // Accept both GET (for cron jobs) and POST (for frontend requests)
+  if (req.method !== 'GET' && req.method !== 'POST') {
+    console.log('TRIGGER-DEBUG: Invalid method:', req.method);
+    return res.status(405).json({ error: 'Method not allowed. Use GET or POST.' });
   }
 
   try {
-    console.log('TRIGGER-DEBUG: ===== GEMINI SCAN TRIGGER CALLED =====');
-    console.log('TRIGGER-DEBUG: Method:', req.method);
-    console.log('TRIGGER-DEBUG: Headers:', Object.keys(req.headers));
-    console.log('TRIGGER-DEBUG: Body:', req.body);
+    console.log('TRIGGER-DEBUG: Processing', req.method, 'request');
     
     // Check if we have the required environment variables
     if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
