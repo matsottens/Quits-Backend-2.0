@@ -1,65 +1,117 @@
 // Script to apply subscriptions table migration to Supabase
-const fs = require('fs');
 const { createClient } = require('@supabase/supabase-js');
+const fs = require('fs');
+const path = require('path');
+
+// Load environment variables
 require('dotenv').config();
 
-// Get Supabase configuration from environment variables
 const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-console.log('Supabase URL:', supabaseUrl);
-console.log('Supabase Key:', supabaseKey ? `${supabaseKey.substring(0, 10)}...` : 'undefined');
-
-if (!supabaseUrl || !supabaseKey) {
-  console.error('Error: SUPABASE_URL and SUPABASE_SERVICE_KEY must be defined in .env file');
+if (!supabaseUrl || !supabaseServiceRoleKey) {
+  console.error('Missing required environment variables:');
+  console.error('SUPABASE_URL:', supabaseUrl ? 'Set' : 'Missing');
+  console.error('SUPABASE_SERVICE_ROLE_KEY:', supabaseServiceRoleKey ? 'Set' : 'Missing');
   process.exit(1);
 }
 
-// Create Supabase client with the service role key (full admin access)
-const supabase = createClient(supabaseUrl, supabaseKey);
-
-// Read the SQL migration file
-const sqlContent = fs.readFileSync('./supabase/migrations/20240423_create_subscriptions_table.sql', 'utf8');
-console.log('SQL content loaded, length:', sqlContent.length);
+const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
 
 async function applyMigration() {
-  console.log('Applying subscriptions table migration to Supabase...');
+  console.log('Starting subscription migration...');
   
   try {
-    // Execute the SQL migration
-    const { data, error } = await supabase.rpc('exec_sql', { sql: sqlContent });
+    // Read the migration SQL file
+    const migrationPath = path.join(__dirname, 'supabase-migrations.sql');
+    const migrationSQL = fs.readFileSync(migrationPath, 'utf8');
     
-    if (error) {
-      console.error('Error applying migration:', error);
-      
-      // Fallback: show the SQL to be executed manually
-      console.log('\nDirect SQL execution failed. Please execute the following SQL manually:');
-      console.log('\n-------- SQL MIGRATION SCRIPT --------\n');
-      console.log(sqlContent);
-      console.log('\n--------------------------------------\n');
-      
-      console.log('Instructions:');
-      console.log('1. Go to https://app.supabase.com/project/{PROJECT_ID}/sql/new');
-      console.log('2. Paste the SQL above into the editor');
-      console.log('3. Click "Run" to execute the migration');
-    } else {
-      console.log('Migration applied successfully!');
-      console.log('Data:', data);
+    console.log('Migration SQL loaded, applying to database...');
+    
+    // Split the SQL into individual statements
+    const statements = migrationSQL
+      .split(';')
+      .map(stmt => stmt.trim())
+      .filter(stmt => stmt.length > 0 && !stmt.startsWith('--'));
+    
+    console.log(`Found ${statements.length} SQL statements to execute`);
+    
+    // Execute each statement
+    for (let i = 0; i < statements.length; i++) {
+      const statement = statements[i];
+      if (statement.trim()) {
+        console.log(`Executing statement ${i + 1}/${statements.length}...`);
+        
+        try {
+          const { error } = await supabase.rpc('exec_sql', { sql: statement });
+          
+          if (error) {
+            // Some statements might fail if they already exist, which is okay
+            if (error.message.includes('already exists') || error.message.includes('duplicate key')) {
+              console.log(`Statement ${i + 1} skipped (already exists): ${error.message}`);
+            } else {
+              console.error(`Statement ${i + 1} failed:`, error.message);
+              // Continue with other statements
+            }
+          } else {
+            console.log(`Statement ${i + 1} executed successfully`);
+          }
+        } catch (execError) {
+          console.error(`Error executing statement ${i + 1}:`, execError.message);
+          // Continue with other statements
+        }
+      }
     }
+    
+    // Verify the tables were created
+    console.log('\nVerifying tables...');
+    
+    const tablesToCheck = [
+      'scan_history',
+      'email_data', 
+      'subscription_analysis',
+      'subscription_examples'
+    ];
+    
+    for (const tableName of tablesToCheck) {
+      try {
+        const { data, error } = await supabase
+          .from(tableName)
+          .select('*')
+          .limit(1);
+        
+        if (error) {
+          console.error(`❌ Table ${tableName} verification failed:`, error.message);
+        } else {
+          console.log(`✅ Table ${tableName} exists and is accessible`);
+        }
+      } catch (checkError) {
+        console.error(`❌ Error checking table ${tableName}:`, checkError.message);
+      }
+    }
+    
+    // Check if subscription_examples has data
+    try {
+      const { data: examples, error: examplesError } = await supabase
+        .from('subscription_examples')
+        .select('*');
+      
+      if (examplesError) {
+        console.error('❌ Error checking subscription_examples data:', examplesError.message);
+      } else {
+        console.log(`✅ subscription_examples table has ${examples?.length || 0} records`);
+      }
+    } catch (checkError) {
+      console.error('❌ Error checking subscription_examples data:', checkError.message);
+    }
+    
+    console.log('\nMigration completed!');
+    
   } catch (error) {
-    console.error('Error:', error);
-    
-    // Fallback: show the SQL to be executed manually
-    console.log('\nError occurred. Please execute the following SQL manually:');
-    console.log('\n-------- SQL MIGRATION SCRIPT --------\n');
-    console.log(sqlContent);
-    console.log('\n--------------------------------------\n');
-    
-    console.log('Instructions:');
-    console.log('1. Go to https://app.supabase.com/project/{PROJECT_ID}/sql/new');
-    console.log('2. Paste the SQL above into the editor');
-    console.log('3. Click "Run" to execute the migration');
+    console.error('Migration failed:', error);
+    process.exit(1);
   }
 }
 
+// Run the migration
 applyMigration(); 

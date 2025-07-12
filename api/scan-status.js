@@ -205,12 +205,48 @@ export default async function handler(req, res) {
       subscriptions_found: scan.subscriptions_found || 0
     };
 
+    // Get additional information for failed or pending scans
+    let additionalInfo = {};
+    
+    if (scan.status === 'failed' || scan.status === 'pending' || scan.status === 'ready_for_analysis') {
+      // Get subscription analysis data to show what was found
+      const { data: analysisData, error: analysisError } = await supabase
+        .from('subscription_analysis')
+        .select('id, subscription_name, analysis_status, confidence_score, created_at')
+        .eq('scan_id', scan.scan_id)
+        .order('created_at', { ascending: false });
+
+      if (!analysisError && analysisData) {
+        additionalInfo.analysis_results = analysisData;
+        additionalInfo.pending_count = analysisData.filter(a => a.analysis_status === 'pending').length;
+        additionalInfo.completed_count = analysisData.filter(a => a.analysis_status === 'completed').length;
+        additionalInfo.failed_count = analysisData.filter(a => a.analysis_status === 'failed').length;
+      }
+
+      // For failed scans, include error message
+      if (scan.status === 'failed' && scan.error_message) {
+        additionalInfo.error_message = scan.error_message;
+      }
+
+      // For ready_for_analysis scans, check if they've been stuck too long
+      if (scan.status === 'ready_for_analysis') {
+        const scanAge = Date.now() - new Date(scan.created_at).getTime();
+        const maxWaitTime = 5 * 60 * 1000; // 5 minutes
+        
+        if (scanAge > maxWaitTime) {
+          additionalInfo.stuck_warning = true;
+          additionalInfo.scan_age_minutes = Math.floor(scanAge / (60 * 1000));
+        }
+      }
+    }
+
     res.status(200).json({ 
       status: scan.status, 
       scan_id: scan.scan_id, 
       created_at: scan.created_at,
       progress: progress,
-      stats: stats
+      stats: stats,
+      ...additionalInfo
     });
   } catch (error) {
     console.error('Unexpected error in scan-status:', error);
@@ -227,6 +263,8 @@ const calculateProgress = (scan) => {
     progress = 50 + (scan.progress || 0) / 2; // Analysis phase: 50-100%
   } else if (scan.status === 'completed') {
     progress = 100;
+  } else if (scan.status === 'failed') {
+    progress = scan.progress || 0; // Keep the progress where it failed
   }
   return progress;
 }; 

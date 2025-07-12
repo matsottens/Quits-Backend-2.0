@@ -55,6 +55,20 @@ CREATE TABLE IF NOT EXISTS public.subscription_analysis (
     FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE
 );
 
+-- Create the subscription_examples table to store detected subscription patterns
+CREATE TABLE IF NOT EXISTS public.subscription_examples (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    service_name TEXT NOT NULL,
+    sender_pattern TEXT NOT NULL,
+    subject_pattern TEXT NOT NULL,
+    amount DECIMAL(10, 2),
+    currency TEXT,
+    billing_frequency TEXT,
+    confidence DECIMAL(3, 2) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- Add indexes for faster queries
 CREATE INDEX IF NOT EXISTS idx_scan_history_scan_id ON public.scan_history(scan_id);
 CREATE INDEX IF NOT EXISTS idx_scan_history_user_id ON public.scan_history(user_id);
@@ -64,16 +78,28 @@ CREATE INDEX IF NOT EXISTS idx_email_data_gmail_message_id ON public.email_data(
 CREATE INDEX IF NOT EXISTS idx_subscription_analysis_email_data_id ON public.subscription_analysis(email_data_id);
 CREATE INDEX IF NOT EXISTS idx_subscription_analysis_user_id ON public.subscription_analysis(user_id);
 CREATE INDEX IF NOT EXISTS idx_subscription_analysis_scan_id ON public.subscription_analysis(scan_id);
+CREATE INDEX IF NOT EXISTS idx_subscription_examples_service_name ON public.subscription_examples(service_name);
 
 -- Add comment for documentation
 COMMENT ON TABLE public.scan_history IS 'Records of email scanning operations and their status';
 COMMENT ON TABLE public.email_data IS 'Individual email data extracted from Gmail API';
 COMMENT ON TABLE public.subscription_analysis IS 'Results of Gemini AI analysis of email data for subscription detection';
+COMMENT ON TABLE public.subscription_examples IS 'Stores detected subscription patterns to improve future detection';
+
+-- Insert initial example data for known subscriptions
+INSERT INTO public.subscription_examples (service_name, sender_pattern, subject_pattern, amount, currency, billing_frequency, confidence)
+VALUES 
+('NBA League Pass', 'NBA <NBA@nbaemail.nba.com>', 'NBA League Pass Subscription Confirmation', 16.99, 'EUR', 'monthly', 0.95),
+('Babbel', 'Apple <no_reply@email.apple.com>', 'Your subscription confirmation', 53.99, 'EUR', 'quarterly', 0.95),
+('Vercel Premium', 'Vercel Inc. <invoice+statements@vercel.com>', 'Your receipt from Vercel Inc.', 20.00, 'USD', 'monthly', 0.95),
+('Ahrefs Starter', 'Ahrefs <billing@ahrefs.com>', 'Thank you for your payment', 27.00, 'EUR', 'monthly', 0.95)
+ON CONFLICT (id) DO NOTHING;
 
 -- Grant access to authenticated users
 ALTER TABLE public.scan_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.email_data ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.subscription_analysis ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.subscription_examples ENABLE ROW LEVEL SECURITY;
 
 -- Create policies for row level security
 CREATE POLICY "Users can view their own scan history"
@@ -121,4 +147,15 @@ WITH CHECK (true);
 CREATE POLICY "API can update subscription analysis"
 ON public.subscription_analysis
 FOR UPDATE
-USING (true); 
+USING (true);
+
+-- Subscription examples policies (read-only for all authenticated users)
+CREATE POLICY "Users can view subscription examples"
+ON public.subscription_examples
+FOR SELECT
+USING (true);
+
+CREATE POLICY "API can insert subscription examples"
+ON public.subscription_examples
+FOR INSERT
+WITH CHECK (true); 
