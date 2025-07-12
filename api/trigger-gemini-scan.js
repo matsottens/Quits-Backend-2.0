@@ -15,7 +15,19 @@ export default async function handler(req, res) {
   }
 
   try {
+    console.log('TRIGGER-DEBUG: ===== GEMINI SCAN TRIGGER CALLED =====');
+    console.log('TRIGGER-DEBUG: Method:', req.method);
+    console.log('TRIGGER-DEBUG: Headers:', Object.keys(req.headers));
+    console.log('TRIGGER-DEBUG: Body:', req.body);
+    
+    // Check if we have the required environment variables
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      console.error('TRIGGER-DEBUG: Missing SUPABASE_SERVICE_ROLE_KEY');
+      return res.status(500).json({ error: 'Missing service role key' });
+    }
+    
     console.log('TRIGGER-DEBUG: Triggering Gemini analysis for scans ready_for_analysis');
+    console.log('TRIGGER-DEBUG: Edge Function URL: https://dstsluflwxzkwouxcjkh.supabase.co/functions/v1/gemini-scan');
     
     const response = await fetch(
       "https://dstsluflwxzkwouxcjkh.supabase.co/functions/v1/gemini-scan",
@@ -27,6 +39,8 @@ export default async function handler(req, res) {
         }
       }
     );
+    
+    console.log('TRIGGER-DEBUG: Edge Function response status:', response.status);
     
     if (!response.ok) {
       const errorText = await response.text();
@@ -47,6 +61,7 @@ export default async function handler(req, res) {
     });
   } catch (error) {
     console.error('TRIGGER-DEBUG: Error triggering Gemini analysis:', error);
+    console.error('TRIGGER-DEBUG: Error stack:', error.stack);
     res.status(500).json({ 
       error: 'Failed to trigger Gemini analysis',
       details: error.message 

@@ -95,109 +95,174 @@ ${emailText}
     }
   };
 
-  try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body)
-    });
+  // Implement retry logic with exponential backoff for rate limiting
+  const maxRetries = 3;
+  let lastError = null;
 
-    if (!response.ok) {
-      console.error(`Gemini API error: ${response.status} ${response.statusText}`);
-      return { error: `Gemini API error: ${response.status}`, is_subscription: false };
-    }
-
-    const data = await response.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-    
-    if (!text) {
-      console.error("No response text from Gemini API");
-      return { error: "No response from Gemini API", is_subscription: false };
-    }
-
-    // Try to extract JSON from the response
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        console.error("No JSON found in Gemini response:", text);
-        return { error: "No JSON found in response", is_subscription: false };
-      }
+      console.log(`Edge Function: Gemini API attempt ${attempt}/${maxRetries}`);
       
-      const result = JSON.parse(jsonMatch[0]);
-      
-      // Validate the result structure
-      if (typeof result.is_subscription !== 'boolean') {
-        console.error("Invalid result structure - missing is_subscription:", result);
-        return { error: "Invalid result structure", is_subscription: false };
-      }
-      
-      // Validate subscription data if it's a subscription
-      if (result.is_subscription) {
-        // If subscription_name is missing, try to extract it from the email content
-        if (!result.subscription_name || typeof result.subscription_name !== 'string') {
-          console.log("Subscription name missing, attempting to extract from email content");
-          // Try to extract service name from email content or use a fallback
-          const emailLower = emailText.toLowerCase();
-          let extractedName: string | null = null;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+
+      if (!response.ok) {
+        console.error(`Edge Function: Gemini API error (attempt ${attempt}): ${response.status} ${response.statusText}`);
+        
+        // If we hit rate limits, implement exponential backoff
+        if (response.status === 429) {
+          lastError = new Error(`Gemini API rate limit hit (attempt ${attempt})`);
           
-          // Look for common service indicators in the email
-          if (emailLower.includes('netflix') || emailLower.includes('nflx')) extractedName = 'Netflix';
-          else if (emailLower.includes('spotify')) extractedName = 'Spotify';
-          else if (emailLower.includes('amazon') || emailLower.includes('prime')) extractedName = 'Amazon Prime';
-          else if (emailLower.includes('disney') || emailLower.includes('disney+')) extractedName = 'Disney+';
-          else if (emailLower.includes('hbo') || emailLower.includes('max')) extractedName = 'HBO Max';
-          else if (emailLower.includes('youtube') || emailLower.includes('yt premium')) extractedName = 'YouTube Premium';
-          else if (emailLower.includes('apple')) extractedName = 'Apple Services';
-          else if (emailLower.includes('hulu')) extractedName = 'Hulu';
-          else if (emailLower.includes('paramount') || emailLower.includes('paramount+')) extractedName = 'Paramount+';
-          else if (emailLower.includes('peacock')) extractedName = 'Peacock';
-          else if (emailLower.includes('adobe')) extractedName = 'Adobe Creative Cloud';
-          else if (emailLower.includes('microsoft') || emailLower.includes('office 365')) extractedName = 'Microsoft 365';
-          else if (emailLower.includes('google one') || emailLower.includes('drive storage')) extractedName = 'Google One';
-          else if (emailLower.includes('dropbox')) extractedName = 'Dropbox';
-          else if (emailLower.includes('nba') || emailLower.includes('league pass')) extractedName = 'NBA League Pass';
-          else if (emailLower.includes('babbel')) extractedName = 'Babbel';
-          else if (emailLower.includes('chegg')) extractedName = 'Chegg';
-          else if (emailLower.includes('grammarly')) extractedName = 'Grammarly';
-          else if (emailLower.includes('nordvpn') || emailLower.includes('vpn')) extractedName = 'NordVPN';
-          else if (emailLower.includes('peloton')) extractedName = 'Peloton';
-          else if (emailLower.includes('duolingo')) extractedName = 'Duolingo';
-          else if (emailLower.includes('notion')) extractedName = 'Notion';
-          else if (emailLower.includes('canva')) extractedName = 'Canva';
-          else if (emailLower.includes('nytimes') || emailLower.includes('ny times')) extractedName = 'New York Times';
-          else if (emailLower.includes('vercel')) extractedName = 'Vercel';
-          
-          if (extractedName) {
-            result.subscription_name = extractedName;
-            console.log(`Extracted subscription name: ${extractedName}`);
+          if (attempt < maxRetries) {
+            const backoffDelay = Math.pow(2, attempt) * 1000; // 2s, 4s, 8s
+            console.log(`Edge Function: Rate limit hit, backing off for ${backoffDelay}ms before retry`);
+            await new Promise(resolve => setTimeout(resolve, backoffDelay));
+            continue; // Try again
           } else {
-            // If we still can't find a name, use a generic name but still process it
-            result.subscription_name = 'Unknown Service';
-            console.log("Using generic name 'Unknown Service' for subscription");
+            console.log('Edge Function: Max retries reached for rate limiting');
+            return { error: `Rate limit exceeded after ${maxRetries} attempts`, is_subscription: false };
           }
         }
         
-        // Ensure price is a number
-        if (result.price !== undefined && typeof result.price !== 'number') {
-          result.price = parseFloat(result.price) || 0;
+        // For other errors, throw immediately
+        throw new Error(`Gemini API error: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+      
+      if (!text) {
+        console.error("Edge Function: No response text from Gemini API");
+        if (attempt < maxRetries) {
+          console.log(`Edge Function: Empty response, retrying (attempt ${attempt + 1})`);
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          continue;
+        } else {
+          return { error: "No response from Gemini API", is_subscription: false };
+        }
+      }
+
+      // Try to extract JSON from the response
+      try {
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) {
+          console.error("Edge Function: No JSON found in Gemini response:", text);
+          if (attempt < maxRetries) {
+            console.log(`Edge Function: Invalid JSON format, retrying (attempt ${attempt + 1})`);
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            continue;
+          } else {
+            return { error: "No JSON found in response", is_subscription: false };
+          }
         }
         
-        // Ensure confidence_score is a number
-        if (result.confidence_score !== undefined && typeof result.confidence_score !== 'number') {
-          result.confidence_score = parseFloat(result.confidence_score) || 0.8;
+        const result = JSON.parse(jsonMatch[0]);
+        
+        // Validate the result structure
+        if (typeof result.is_subscription !== 'boolean') {
+          console.error("Edge Function: Invalid result structure - missing is_subscription:", result);
+          if (attempt < maxRetries) {
+            console.log(`Edge Function: Invalid result structure, retrying (attempt ${attempt + 1})`);
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            continue;
+          } else {
+            return { error: "Invalid result structure", is_subscription: false };
+          }
+        }
+        
+        // Validate subscription data if it's a subscription
+        if (result.is_subscription) {
+          // If subscription_name is missing, try to extract it from the email content
+          if (!result.subscription_name || typeof result.subscription_name !== 'string') {
+            console.log("Edge Function: Subscription name missing, attempting to extract from email content");
+            // Try to extract service name from email content or use a fallback
+            const emailLower = emailText.toLowerCase();
+            let extractedName: string | null = null;
+            
+            // Look for common service indicators in the email
+            if (emailLower.includes('netflix') || emailLower.includes('nflx')) extractedName = 'Netflix';
+            else if (emailLower.includes('spotify')) extractedName = 'Spotify';
+            else if (emailLower.includes('amazon') || emailLower.includes('prime')) extractedName = 'Amazon Prime';
+            else if (emailLower.includes('disney') || emailLower.includes('disney+')) extractedName = 'Disney+';
+            else if (emailLower.includes('hbo') || emailLower.includes('max')) extractedName = 'HBO Max';
+            else if (emailLower.includes('youtube') || emailLower.includes('yt premium')) extractedName = 'YouTube Premium';
+            else if (emailLower.includes('apple')) extractedName = 'Apple Services';
+            else if (emailLower.includes('hulu')) extractedName = 'Hulu';
+            else if (emailLower.includes('paramount') || emailLower.includes('paramount+')) extractedName = 'Paramount+';
+            else if (emailLower.includes('peacock')) extractedName = 'Peacock';
+            else if (emailLower.includes('adobe')) extractedName = 'Adobe Creative Cloud';
+            else if (emailLower.includes('microsoft') || emailLower.includes('office 365')) extractedName = 'Microsoft 365';
+            else if (emailLower.includes('google one') || emailLower.includes('drive storage')) extractedName = 'Google One';
+            else if (emailLower.includes('dropbox')) extractedName = 'Dropbox';
+            else if (emailLower.includes('nba') || emailLower.includes('league pass')) extractedName = 'NBA League Pass';
+            else if (emailLower.includes('babbel')) extractedName = 'Babbel';
+            else if (emailLower.includes('chegg')) extractedName = 'Chegg';
+            else if (emailLower.includes('grammarly')) extractedName = 'Grammarly';
+            else if (emailLower.includes('nordvpn') || emailLower.includes('vpn')) extractedName = 'NordVPN';
+            else if (emailLower.includes('peloton')) extractedName = 'Peloton';
+            else if (emailLower.includes('duolingo')) extractedName = 'Duolingo';
+            else if (emailLower.includes('notion')) extractedName = 'Notion';
+            else if (emailLower.includes('canva')) extractedName = 'Canva';
+            else if (emailLower.includes('nytimes') || emailLower.includes('ny times')) extractedName = 'New York Times';
+            else if (emailLower.includes('vercel')) extractedName = 'Vercel';
+            
+            if (extractedName) {
+              result.subscription_name = extractedName;
+              console.log(`Edge Function: Extracted subscription name: ${extractedName}`);
+            } else {
+              // If we still can't find a name, use a generic name but still process it
+              result.subscription_name = 'Unknown Service';
+              console.log("Edge Function: Using generic name 'Unknown Service' for subscription");
+            }
+          }
+          
+          // Ensure price is a number
+          if (result.price !== undefined && typeof result.price !== 'number') {
+            result.price = parseFloat(result.price) || 0;
+          }
+          
+          // Ensure confidence_score is a number
+          if (result.confidence_score !== undefined && typeof result.confidence_score !== 'number') {
+            result.confidence_score = parseFloat(result.confidence_score) || 0.8;
+          }
+        }
+        
+        return result;
+      } catch (parseError) {
+        console.error(`Edge Function: Failed to parse Gemini JSON response (attempt ${attempt}):`, parseError);
+        console.error("Edge Function: Raw response text:", text);
+        
+        if (attempt < maxRetries) {
+          console.log(`Edge Function: JSON parse error, retrying (attempt ${attempt + 1})`);
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          continue;
+        } else {
+          return { error: "Failed to parse JSON response", is_subscription: false };
         }
       }
       
-      return result;
-    } catch (parseError) {
-      console.error("Failed to parse Gemini JSON response:", parseError);
-      console.error("Raw response text:", text);
-      return { error: "Failed to parse JSON response", is_subscription: false };
+    } catch (error) {
+      console.error(`Edge Function: Error calling Gemini API (attempt ${attempt}):`, error);
+      lastError = error;
+      
+      if (attempt < maxRetries) {
+        const retryDelay = Math.pow(2, attempt) * 1000; // Exponential backoff
+        console.log(`Edge Function: API error, retrying in ${retryDelay}ms (attempt ${attempt + 1})`);
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
+      } else {
+        console.log('Edge Function: Max retries reached');
+        break;
+      }
     }
-  } catch (error) {
-    console.error("Error calling Gemini API:", error);
-    return { error: "API call failed", is_subscription: false };
   }
+  
+  // If we get here, all retries failed
+  console.log('Edge Function: All Gemini API attempts failed');
+  console.log('Edge Function: Last error:', lastError?.message);
+  return { error: "API call failed after all retries", is_subscription: false };
 }
 
 serve(async (_req) => {
@@ -253,6 +318,9 @@ serve(async (_req) => {
       // 3. Analyze each email with Gemini
       for (const email of emails) {
         console.log(`Analyzing email ${email.id} with subject: ${email.subject}`);
+        
+        // Add a delay to prevent rate limiting
+        await new Promise(resolve => setTimeout(resolve, 3000)); // 3 second delay between calls
         
         const geminiResult = await analyzeEmailWithGemini(email.content || "");
         

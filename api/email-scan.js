@@ -361,6 +361,7 @@ const analyzeEmailWithGemini = async (emailContent) => {
     console.error('SCAN-DEBUG: No emailContent provided to analyzeEmailWithGemini');
     return { isSubscription: false, confidence: 0 };
   }
+  
   try {
     // Check if Gemini API key exists
     console.log(`SCAN-DEBUG: Checking for Gemini API key: ${!!process.env.GEMINI_API_KEY}`);
@@ -368,332 +369,7 @@ const analyzeEmailWithGemini = async (emailContent) => {
     
     if (!process.env.GEMINI_API_KEY) {
       console.warn('GEMINI_API_KEY not found, using fallback pattern analysis');
-      
-      try {
-        // Extract headers for pattern analysis
-        const headers = emailContent.payload.headers || [];
-        const { subject, from } = parseEmailHeaders(headers);
-        
-        // Create a simulated subscription detection with high confidence for common services
-        const fromLower = from ? from.toLowerCase() : '';
-        const subjectLower = subject ? subject.toLowerCase() : '';
-        
-        console.log(`SCAN-DEBUG: Fallback analysis - Subject: "${subject}", From: "${from}"`);
-        
-        // Check for common subscription services in sender or subject
-        const commonServices = [
-          { pattern: /netflix|nflx/i, name: 'Netflix', amount: 15.99 },
-          { pattern: /spotify/i, name: 'Spotify', amount: 9.99 },
-          { pattern: /amazon prime|prime video/i, name: 'Amazon Prime', amount: 14.99 },
-          { pattern: /disney\+/i, name: 'Disney+', amount: 7.99 },
-          { pattern: /hbo|max/i, name: 'HBO Max', amount: 14.99 },
-          { pattern: /youtube|yt premium/i, name: 'YouTube Premium', amount: 11.99 },
-          { pattern: /apple/i, name: 'Apple', amount: 9.99 },
-          { pattern: /hulu/i, name: 'Hulu', amount: 7.99 },
-          { pattern: /paramount\+/i, name: 'Paramount+', amount: 9.99 },
-          { pattern: /peacock/i, name: 'Peacock', amount: 5.99 },
-          { pattern: /adobe/i, name: 'Adobe Creative Cloud', amount: 54.99 },
-          { pattern: /microsoft|office 365/i, name: 'Microsoft 365', amount: 6.99 },
-          { pattern: /google one|drive storage/i, name: 'Google One', amount: 1.99 },
-          { pattern: /dropbox/i, name: 'Dropbox', amount: 11.99 },
-          { pattern: /nba|league pass/i, name: 'NBA League Pass', amount: 14.99 },
-          { pattern: /babbel/i, name: 'Babbel', amount: 6.95 },
-          { pattern: /chegg/i, name: 'Chegg', amount: 14.95 },
-          { pattern: /grammarly/i, name: 'Grammarly', amount: 12.00 },
-          { pattern: /nordvpn|vpn/i, name: 'NordVPN', amount: 11.95 },
-          { pattern: /peloton/i, name: 'Peloton', amount: 44.00 },
-          { pattern: /duolingo/i, name: 'Duolingo', amount: 6.99 },
-          { pattern: /notion/i, name: 'Notion', amount: 8.00 },
-          { pattern: /canva/i, name: 'Canva', amount: 12.99 },
-          { pattern: /nytimes|ny times/i, name: 'New York Times', amount: 17.00 }
-        ];
-        
-        for (const service of commonServices) {
-          if (service.pattern.test(fromLower) || service.pattern.test(subjectLower)) {
-            console.log(`SCAN-DEBUG: Detected ${service.name} subscription using pattern matching`);
-            
-            try {
-              // Check for specific pricing in the email body
-              const body = extractEmailBody(emailContent);
-              const bodyLower = body ? body.toLowerCase() : '';
-              
-              // Enhanced price extraction with multiple patterns
-              let amount = service.amount; // Default amount
-              let currency = 'USD'; // Default currency
-              
-              // Look for currency symbols followed by numbers
-              const currencyPatterns = [
-                /\$(\d+\.?\d*)/g,  // $19.99 or $20
-                /€(\d+\.?\d*)/g,  // €19.99 or €20
-                /£(\d+\.?\d*)/g,  // £19.99 or £20
-                /¥(\d+\.?\d*)/g,  // ¥1999 or ¥2000
-              ];
-              
-              let foundPrice = false;
-              for (const pattern of currencyPatterns) {
-                const matches = bodyLower.match(pattern);
-                if (matches && matches.length > 0) {
-                  // Take the first match that looks like a reasonable subscription price
-                  for (const match of matches) {
-                    const price = parseFloat(match.replace(/[^\d.]/g, ''));
-                    if (price > 0 && price < 1000) { // Reasonable subscription price range
-                      amount = price;
-                      foundPrice = true;
-                      // Determine currency from the symbol
-                      if (match.includes('€')) currency = 'EUR';
-                      else if (match.includes('£')) currency = 'GBP';
-                      else if (match.includes('¥')) currency = 'JPY';
-                      else currency = 'USD';
-                      break;
-                    }
-                  }
-                  if (foundPrice) break;
-                }
-              }
-              
-              // If no currency symbol found, look for currency codes
-              if (!foundPrice) {
-                const currencyCodePatterns = [
-                  /(\d+\.?\d*)\s*(usd|dollars?)/gi,
-                  /(\d+\.?\d*)\s*(eur|euros?)/gi,
-                  /(\d+\.?\d*)\s*(gbp|pounds?)/gi,
-                ];
-                
-                for (const pattern of currencyCodePatterns) {
-                  const matches = bodyLower.match(pattern);
-                  if (matches && matches.length > 0) {
-                    const price = parseFloat(matches[0].replace(/[^\d.]/g, ''));
-                    if (price > 0 && price < 1000) {
-                      amount = price;
-                      foundPrice = true;
-                      // Determine currency from the code
-                      if (matches[0].toLowerCase().includes('eur')) currency = 'EUR';
-                      else if (matches[0].toLowerCase().includes('gbp')) currency = 'GBP';
-                      else currency = 'USD';
-                      break;
-                    }
-                  }
-                }
-              }
-              
-              // Enhanced frequency detection
-              let frequency = 'monthly'; // Default frequency
-              const frequencyPatterns = [
-                { pattern: /month(ly)?|per\s*month/i, value: 'monthly' },
-                { pattern: /year(ly)?|annual|per\s*year/i, value: 'yearly' },
-                { pattern: /week(ly)?|per\s*week/i, value: 'weekly' },
-                { pattern: /quarter(ly)?|per\s*quarter/i, value: 'quarterly' },
-                { pattern: /bi.?month(ly)?|every\s*2\s*months/i, value: 'bimonthly' },
-                { pattern: /semi.?annual|every\s*6\s*months/i, value: 'semiannual' },
-              ];
-              
-              for (const freqPattern of frequencyPatterns) {
-                if (freqPattern.pattern.test(bodyLower) || freqPattern.pattern.test(subjectLower)) {
-                  frequency = freqPattern.value;
-                  break;
-                }
-              }
-              
-              // Generate next billing date based on frequency
-              const nextBillingDate = new Date();
-              if (frequency === 'monthly') nextBillingDate.setMonth(nextBillingDate.getMonth() + 1);
-              else if (frequency === 'yearly') nextBillingDate.setFullYear(nextBillingDate.getFullYear() + 1);
-              else if (frequency === 'weekly') nextBillingDate.setDate(nextBillingDate.getDate() + 7);
-              else if (frequency === 'quarterly') nextBillingDate.setMonth(nextBillingDate.getMonth() + 3);
-              else if (frequency === 'bimonthly') nextBillingDate.setMonth(nextBillingDate.getMonth() + 2);
-              else if (frequency === 'semiannual') nextBillingDate.setMonth(nextBillingDate.getMonth() + 6);
-              
-              console.log(`SCAN-DEBUG: Extracted price: ${amount} ${currency} ${frequency}`);
-              
-              return {
-                isSubscription: true,
-                serviceName: service.name,
-                amount: amount,
-                currency: currency,
-                billingFrequency: frequency,
-                nextBillingDate: nextBillingDate.toISOString().split('T')[0],
-                confidence: foundPrice ? 0.85 : 0.7 // Lower confidence if no specific price found
-              };
-            } catch (priceExtractionError) {
-              console.error(`SCAN-DEBUG: Error in price extraction for ${service.name}:`, priceExtractionError);
-              // Return a basic result without enhanced price extraction
-              return {
-                isSubscription: true,
-                serviceName: service.name,
-                amount: service.amount,
-                currency: 'USD',
-                billingFrequency: 'monthly',
-                nextBillingDate: new Date(new Date().setMonth(new Date().getMonth() + 1)).toISOString().split('T')[0],
-                confidence: 0.7
-              };
-            }
-          }
-        }
-        
-        // Check for keywords that indicate subscriptions in the subject
-        const subscriptionKeywords = [
-          /subscri(be|ption)/i, 
-          /renew(al|ed)/i, 
-          /bill(ing|ed)/i, 
-          /payment/i, 
-          /invoice/i, 
-          /receipt/i, 
-          /charge/i,
-          /plan/i,
-          /membership/i,
-          /monthly/i,
-          /yearly/i,
-          /trial/i
-        ];
-        
-        let keywordMatch = false;
-        for (const keyword of subscriptionKeywords) {
-          if (keyword.test(subjectLower)) {
-            keywordMatch = true;
-            break;
-          }
-        }
-        
-        if (keywordMatch) {
-          console.log(`SCAN-DEBUG: Detected potential subscription based on keywords in subject: "${subject}"`);
-          
-          try {
-            // Extract a service name from the sender domain
-            let serviceName = 'Unknown Service';
-            if (from) {
-              const domainMatch = from.match(/@([^>]+)/) || from.match(/([^<\s]+)$/);
-              if (domainMatch) {
-                const domain = domainMatch[1].replace(/\.[^.]+$/, ''); // Remove TLD
-                serviceName = domain.charAt(0).toUpperCase() + domain.slice(1);
-              }
-            }
-            
-            // Enhanced price and frequency extraction for keyword-based detection
-            const body = extractEmailBody(emailContent);
-            const bodyLower = body ? body.toLowerCase() : '';
-            
-            let amount = 9.99; // Default amount
-            let currency = 'USD'; // Default currency
-            let frequency = 'monthly'; // Default frequency
-            
-            // Look for currency symbols followed by numbers
-            const currencyPatterns = [
-              /\$(\d+\.?\d*)/g,  // $19.99 or $20
-              /€(\d+\.?\d*)/g,  // €19.99 or €20
-              /£(\d+\.?\d*)/g,  // £19.99 or £20
-              /¥(\d+\.?\d*)/g,  // ¥1999 or ¥2000
-            ];
-            
-            let foundPrice = false;
-            for (const pattern of currencyPatterns) {
-              const matches = bodyLower.match(pattern);
-              if (matches && matches.length > 0) {
-                // Take the first match that looks like a reasonable subscription price
-                for (const match of matches) {
-                  const price = parseFloat(match.replace(/[^\d.]/g, ''));
-                  if (price > 0 && price < 1000) { // Reasonable subscription price range
-                    amount = price;
-                    foundPrice = true;
-                    // Determine currency from the symbol
-                    if (match.includes('€')) currency = 'EUR';
-                    else if (match.includes('£')) currency = 'GBP';
-                    else if (match.includes('¥')) currency = 'JPY';
-                    else currency = 'USD';
-                    break;
-                  }
-                }
-                if (foundPrice) break;
-              }
-            }
-            
-            // If no currency symbol found, look for currency codes
-            if (!foundPrice) {
-              const currencyCodePatterns = [
-                /(\d+\.?\d*)\s*(usd|dollars?)/gi,
-                /(\d+\.?\d*)\s*(eur|euros?)/gi,
-                /(\d+\.?\d*)\s*(gbp|pounds?)/gi,
-              ];
-              
-              for (const pattern of currencyCodePatterns) {
-                const matches = bodyLower.match(pattern);
-                if (matches && matches.length > 0) {
-                  const price = parseFloat(matches[0].replace(/[^\d.]/g, ''));
-                  if (price > 0 && price < 1000) {
-                    amount = price;
-                    foundPrice = true;
-                    // Determine currency from the code
-                    if (matches[0].toLowerCase().includes('eur')) currency = 'EUR';
-                    else if (matches[0].toLowerCase().includes('gbp')) currency = 'GBP';
-                    else currency = 'USD';
-                    break;
-                  }
-                }
-              }
-            }
-            
-            // Enhanced frequency detection
-            const frequencyPatterns = [
-              { pattern: /month(ly)?|per\s*month/i, value: 'monthly' },
-              { pattern: /year(ly)?|annual|per\s*year/i, value: 'yearly' },
-              { pattern: /week(ly)?|per\s*week/i, value: 'weekly' },
-              { pattern: /quarter(ly)?|per\s*quarter/i, value: 'quarterly' },
-              { pattern: /bi.?month(ly)?|every\s*2\s*months/i, value: 'bimonthly' },
-              { pattern: /semi.?annual|every\s*6\s*months/i, value: 'semiannual' },
-            ];
-            
-            for (const freqPattern of frequencyPatterns) {
-              if (freqPattern.pattern.test(bodyLower) || freqPattern.pattern.test(subjectLower)) {
-                frequency = freqPattern.value;
-                break;
-              }
-            }
-            
-            // Generate next billing date based on frequency
-            const nextBillingDate = new Date();
-            if (frequency === 'monthly') nextBillingDate.setMonth(nextBillingDate.getMonth() + 1);
-            else if (frequency === 'yearly') nextBillingDate.setFullYear(nextBillingDate.getFullYear() + 1);
-            else if (frequency === 'weekly') nextBillingDate.setDate(nextBillingDate.getDate() + 7);
-            else if (frequency === 'quarterly') nextBillingDate.setMonth(nextBillingDate.getMonth() + 3);
-            else if (frequency === 'bimonthly') nextBillingDate.setMonth(nextBillingDate.getMonth() + 2);
-            else if (frequency === 'semiannual') nextBillingDate.setMonth(nextBillingDate.getMonth() + 6);
-            
-            console.log(`SCAN-DEBUG: Keyword-based detection - Extracted price: ${amount} ${currency} ${frequency}`);
-            
-            return {
-              isSubscription: true,
-              serviceName: serviceName,
-              amount: amount,
-              currency: currency,
-              billingFrequency: frequency,
-              nextBillingDate: nextBillingDate.toISOString().split('T')[0],
-              confidence: foundPrice ? 0.6 : 0.5 // Lower confidence for keyword-based detection
-            };
-          } catch (keywordExtractionError) {
-            console.error(`SCAN-DEBUG: Error in keyword-based price extraction:`, keywordExtractionError);
-            // Return a basic result without enhanced price extraction
-            return {
-              isSubscription: true,
-              serviceName: 'Unknown Service',
-              amount: 9.99,
-              currency: 'USD',
-              billingFrequency: 'monthly',
-              nextBillingDate: new Date(new Date().setMonth(new Date().getMonth() + 1)).toISOString().split('T')[0],
-              confidence: 0.5
-            };
-          }
-        }
-        
-        return {
-          isSubscription: false,
-          confidence: 0.7
-        };
-      } catch (fallbackError) {
-        console.error('SCAN-DEBUG: Error in fallback pattern analysis:', fallbackError);
-        return {
-          isSubscription: false,
-          confidence: 0.5
-        };
-      }
+      return await performFallbackAnalysis(emailContent);
     }
     
     // If we get here, proceed with Gemini API integration
@@ -714,6 +390,9 @@ ${body}
     `;
 
     console.log(`Analyzing email "${subject}" with Gemini AI...`);
+    
+    // Add a delay to prevent rate limiting (increased from 2s to 3s)
+    await new Promise(resolve => setTimeout(resolve, 3000)); // 3 second delay between calls
     
     // Create an enhanced prompt with examples
     const enhancedPrompt = `
@@ -806,86 +485,537 @@ ${formattedEmail}
 
 JSON Output:
 `;
-    
-    // Call Gemini API
-    const response = await fetch('https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': process.env.GEMINI_API_KEY
-      },
-      body: JSON.stringify({
-        contents: [{
-          parts: [{
-            text: enhancedPrompt
-          }]
-        }],
-        generationConfig: {
-          temperature: 0.1, // Lower temperature for more precise answers
-          maxOutputTokens: 1024,
-        }
-      })
-    });
 
-    if (!response.ok) {
-      const errorData = await response.json();
-      console.error('Gemini API error:', errorData);
-      throw new Error(`Gemini API error: ${response.status} ${response.statusText}`);
-    }
-
-    const data = await response.json();
+    // Implement retry logic with exponential backoff for rate limiting
+    const maxRetries = 3;
+    let lastError = null;
     
-    // Extract text from response
-    const geminiText = data.candidates[0].content.parts[0].text;
-    console.log('Gemini API response received, extracting JSON data');
-    
-    // Extract JSON from text (handle cases where text may contain markdown or other content)
-    const jsonMatch = geminiText.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        const result = JSON.parse(jsonMatch[0]);
-        console.log('Parsed result:', result.isSubscription ? 'Subscription detected' : 'Not a subscription');
+        console.log(`SCAN-DEBUG: Gemini API attempt ${attempt}/${maxRetries}`);
         
-        // If a subscription is detected with high confidence, log the details
-        if (result.isSubscription && result.confidence > 0.7) {
-          console.log(`SCAN-DEBUG: High confidence subscription detected: ${result.serviceName}, ${result.amount} ${result.currency} ${result.billingFrequency}`);
+        // Call Gemini API
+        const response = await fetch('https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': process.env.GEMINI_API_KEY
+          },
+          body: JSON.stringify({
+            contents: [{
+              parts: [{
+                text: enhancedPrompt
+              }]
+            }],
+            generationConfig: {
+              temperature: 0.1, // Lower temperature for more precise answers
+              maxOutputTokens: 1024,
+            }
+          })
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          console.error(`SCAN-DEBUG: Gemini API error (attempt ${attempt}):`, errorData);
           
-          // Store this example for future reference
-          await storeSubscriptionExample(from, subject, result);
+          // If we hit rate limits, implement exponential backoff
+          if (response.status === 429) {
+            lastError = new Error(`Gemini API rate limit hit (attempt ${attempt})`);
+            
+            if (attempt < maxRetries) {
+              const backoffDelay = Math.pow(2, attempt) * 1000; // 2s, 4s, 8s
+              console.log(`SCAN-DEBUG: Rate limit hit, backing off for ${backoffDelay}ms before retry`);
+              await new Promise(resolve => setTimeout(resolve, backoffDelay));
+              continue; // Try again
+            } else {
+              console.log('SCAN-DEBUG: Max retries reached for rate limiting, falling back to pattern matching');
+              return await performFallbackAnalysis(emailContent);
+            }
+          }
+          
+          // For other errors, throw immediately
+          throw new Error(`Gemini API error: ${response.status} ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        
+        // Extract text from response
+        const geminiText = data.candidates[0].content.parts[0].text;
+        console.log('SCAN-DEBUG: Gemini API response received, extracting JSON data');
+        
+        // Extract JSON from text (handle cases where text may contain markdown or other content)
+        const jsonMatch = geminiText.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          try {
+            const result = JSON.parse(jsonMatch[0]);
+            console.log('SCAN-DEBUG: Parsed result:', result.isSubscription ? 'Subscription detected' : 'Not a subscription');
+            
+            // If a subscription is detected with high confidence, log the details
+            if (result.isSubscription && result.confidence > 0.7) {
+              console.log(`SCAN-DEBUG: High confidence subscription detected: ${result.serviceName}, ${result.amount} ${result.currency} ${result.billingFrequency}`);
+              
+              // Store this example for future reference
+              await storeSubscriptionExample(from, subject, result);
+            }
+            
+            return result;
+          } catch (parseError) {
+            console.error('SCAN-DEBUG: Error parsing Gemini response JSON:', parseError);
+            console.error('SCAN-DEBUG: Raw response:', geminiText);
+            
+            if (attempt < maxRetries) {
+              console.log(`SCAN-DEBUG: JSON parse error, retrying (attempt ${attempt + 1})`);
+              await new Promise(resolve => setTimeout(resolve, 1000)); // Short delay before retry
+              continue;
+            } else {
+              return await performFallbackAnalysis(emailContent);
+            }
+          }
+        } else {
+          console.warn('SCAN-DEBUG: Unexpected Gemini response format, using fallback analysis');
+          console.warn('SCAN-DEBUG: Raw response:', geminiText);
+          
+          if (attempt < maxRetries) {
+            console.log(`SCAN-DEBUG: Invalid response format, retrying (attempt ${attempt + 1})`);
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            continue;
+          } else {
+            return await performFallbackAnalysis(emailContent);
+          }
         }
         
-        return result;
-      } catch (parseError) {
-        console.error('Error parsing Gemini response JSON:', parseError);
-        console.error('Raw response:', geminiText);
-        return analyzeEmailForSubscriptions(emailContent);
+      } catch (error) {
+        console.error(`SCAN-DEBUG: Error in Gemini API attempt ${attempt}:`, error);
+        lastError = error;
+        
+        if (attempt < maxRetries) {
+          const retryDelay = Math.pow(2, attempt) * 1000; // Exponential backoff
+          console.log(`SCAN-DEBUG: API error, retrying in ${retryDelay}ms (attempt ${attempt + 1})`);
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+        } else {
+          console.log('SCAN-DEBUG: Max retries reached, falling back to pattern matching');
+          break;
+        }
       }
-    } else {
-      console.warn('Unexpected Gemini response format, using fallback analysis');
-      console.warn('Raw response:', geminiText);
-      return analyzeEmailForSubscriptions(emailContent);
     }
+    
+    // If we get here, all retries failed
+    console.log('SCAN-DEBUG: All Gemini API attempts failed, using fallback analysis');
+    console.log('SCAN-DEBUG: Last error:', lastError?.message);
+    return await performFallbackAnalysis(emailContent);
+    
   } catch (error) {
-    console.error('Error analyzing email with Gemini:', error);
+    console.error('SCAN-DEBUG: Error analyzing email with Gemini:', error);
     // Fallback to pattern matching if Gemini API fails
-    console.log('Falling back to pattern matching for subscription detection');
-    try {
-      const body = extractEmailBody(emailContent);
-      const headers = emailContent.payload.headers || [];
-      const { subject, from } = parseEmailHeaders(headers);
-      
-      return analyzeEmailForSubscriptions({
-        body,
-        subject,
-        from
-      });
-    } catch (fallbackError) {
-      console.error('Error in fallback pattern analysis:', fallbackError);
-      return {
-        isSubscription: false,
-        confidence: 0.5
-      };
+    console.log('SCAN-DEBUG: Falling back to pattern matching for subscription detection');
+    return await performFallbackAnalysis(emailContent);
+  }
+};
+
+// Helper function for fallback analysis
+const performFallbackAnalysis = async (emailContent) => {
+  try {
+    // Extract headers for pattern analysis
+    const headers = emailContent.payload.headers || [];
+    const { subject, from } = parseEmailHeaders(headers);
+    
+    // Create a simulated subscription detection with high confidence for common services
+    const fromLower = from ? from.toLowerCase() : '';
+    const subjectLower = subject ? subject.toLowerCase() : '';
+    
+    console.log(`SCAN-DEBUG: Fallback analysis - Subject: "${subject}", From: "${from}"`);
+    
+    // Check for common subscription services in sender or subject
+    const commonServices = [
+      { pattern: /netflix|nflx/i, name: 'Netflix', amount: 15.99 },
+      { pattern: /spotify/i, name: 'Spotify', amount: 9.99 },
+      { pattern: /amazon prime|prime video/i, name: 'Amazon Prime', amount: 14.99 },
+      { pattern: /disney\+/i, name: 'Disney+', amount: 7.99 },
+      { pattern: /hbo|max/i, name: 'HBO Max', amount: 14.99 },
+      { pattern: /youtube|yt premium/i, name: 'YouTube Premium', amount: 11.99 },
+      { pattern: /apple/i, name: 'Apple', amount: 9.99 },
+      { pattern: /hulu/i, name: 'Hulu', amount: 7.99 },
+      { pattern: /paramount\+/i, name: 'Paramount+', amount: 9.99 },
+      { pattern: /peacock/i, name: 'Peacock', amount: 5.99 },
+      { pattern: /adobe/i, name: 'Adobe Creative Cloud', amount: 54.99 },
+      { pattern: /microsoft|office 365/i, name: 'Microsoft 365', amount: 6.99 },
+      { pattern: /google one|drive storage/i, name: 'Google One', amount: 1.99 },
+      { pattern: /dropbox/i, name: 'Dropbox', amount: 11.99 },
+      { pattern: /nba|league pass/i, name: 'NBA League Pass', amount: 14.99 },
+      { pattern: /babbel/i, name: 'Babbel', amount: 6.95 },
+      { pattern: /chegg/i, name: 'Chegg', amount: 14.95 },
+      { pattern: /grammarly/i, name: 'Grammarly', amount: 12.00 },
+      { pattern: /nordvpn|vpn/i, name: 'NordVPN', amount: 11.95 },
+      { pattern: /peloton/i, name: 'Peloton', amount: 44.00 },
+      { pattern: /duolingo/i, name: 'Duolingo', amount: 6.99 },
+      { pattern: /notion/i, name: 'Notion', amount: 8.00 },
+      { pattern: /canva/i, name: 'Canva', amount: 12.99 },
+      { pattern: /nytimes|ny times/i, name: 'New York Times', amount: 17.00 }
+    ];
+    
+    for (const service of commonServices) {
+      if (service.pattern.test(fromLower) || service.pattern.test(subjectLower)) {
+        console.log(`SCAN-DEBUG: Detected ${service.name} subscription using pattern matching`);
+        
+        try {
+          // Check for specific pricing in the email body
+          const body = extractEmailBody(emailContent);
+          const bodyLower = body ? body.toLowerCase() : '';
+          
+          // Enhanced price extraction with multiple patterns
+          let amount = service.amount; // Default amount
+          let currency = 'USD'; // Default currency
+          
+          // Look for currency symbols followed by numbers
+          const currencyPatterns = [
+            /\$(\d+\.?\d*)/g,  // $19.99 or $20
+            /€(\d+\.?\d*)/g,  // €19.99 or €20
+            /£(\d+\.?\d*)/g,  // £19.99 or £20
+            /¥(\d+\.?\d*)/g,  // ¥1999 or ¥2000
+          ];
+          
+          let foundPrice = false;
+          for (const pattern of currencyPatterns) {
+            const matches = bodyLower.match(pattern);
+            if (matches && matches.length > 0) {
+              // Take the first match that looks like a reasonable subscription price
+              for (const match of matches) {
+                const price = parseFloat(match.replace(/[^\d.]/g, ''));
+                if (price > 0 && price < 1000) { // Reasonable subscription price range
+                  amount = price;
+                  foundPrice = true;
+                  // Determine currency from the symbol
+                  if (match.includes('€')) currency = 'EUR';
+                  else if (match.includes('£')) currency = 'GBP';
+                  else if (match.includes('¥')) currency = 'JPY';
+                  else currency = 'USD';
+                  break;
+                }
+              }
+              if (foundPrice) break;
+            }
+          }
+          
+          // If no currency symbol found, look for currency codes
+          if (!foundPrice) {
+            const currencyCodePatterns = [
+              /(\d+\.?\d*)\s*(usd|dollars?)/gi,
+              /(\d+\.?\d*)\s*(eur|euros?)/gi,
+              /(\d+\.?\d*)\s*(gbp|pounds?)/gi,
+            ];
+            
+            for (const pattern of currencyCodePatterns) {
+              const matches = bodyLower.match(pattern);
+              if (matches && matches.length > 0) {
+                const price = parseFloat(matches[0].replace(/[^\d.]/g, ''));
+                if (price > 0 && price < 1000) {
+                  amount = price;
+                  foundPrice = true;
+                  // Determine currency from the code
+                  if (matches[0].toLowerCase().includes('eur')) currency = 'EUR';
+                  else if (matches[0].toLowerCase().includes('gbp')) currency = 'GBP';
+                  else currency = 'USD';
+                  break;
+                }
+              }
+            }
+          }
+          
+          // Enhanced frequency detection
+          let frequency = 'monthly'; // Default frequency
+          const frequencyPatterns = [
+            { pattern: /month(ly)?|per\s*month/i, value: 'monthly' },
+            { pattern: /year(ly)?|annual|per\s*year/i, value: 'yearly' },
+            { pattern: /week(ly)?|per\s*week/i, value: 'weekly' },
+            { pattern: /quarter(ly)?|per\s*quarter/i, value: 'quarterly' },
+            { pattern: /bi.?month(ly)?|every\s*2\s*months/i, value: 'bimonthly' },
+            { pattern: /semi.?annual|every\s*6\s*months/i, value: 'semiannual' },
+          ];
+          
+          for (const freqPattern of frequencyPatterns) {
+            if (freqPattern.pattern.test(bodyLower) || freqPattern.pattern.test(subjectLower)) {
+              frequency = freqPattern.value;
+              break;
+            }
+          }
+          
+          // Generate next billing date based on frequency
+          const nextBillingDate = new Date();
+          if (frequency === 'monthly') nextBillingDate.setMonth(nextBillingDate.getMonth() + 1);
+          else if (frequency === 'yearly') nextBillingDate.setFullYear(nextBillingDate.getFullYear() + 1);
+          else if (frequency === 'weekly') nextBillingDate.setDate(nextBillingDate.getDate() + 7);
+          else if (frequency === 'quarterly') nextBillingDate.setMonth(nextBillingDate.getMonth() + 3);
+          else if (frequency === 'bimonthly') nextBillingDate.setMonth(nextBillingDate.getMonth() + 2);
+          else if (frequency === 'semiannual') nextBillingDate.setMonth(nextBillingDate.getMonth() + 6);
+          
+          console.log(`SCAN-DEBUG: Extracted price: ${amount} ${currency} ${frequency}`);
+          
+          return {
+            isSubscription: true,
+            serviceName: service.name,
+            amount: amount,
+            currency: currency,
+            billingFrequency: frequency,
+            nextBillingDate: nextBillingDate.toISOString().split('T')[0],
+            confidence: foundPrice ? 0.85 : 0.7 // Lower confidence if no specific price found
+          };
+        } catch (priceExtractionError) {
+          console.error(`SCAN-DEBUG: Error in price extraction for ${service.name}:`, priceExtractionError);
+          // Return a basic result without enhanced price extraction
+          return {
+            isSubscription: true,
+            serviceName: service.name,
+            amount: service.amount,
+            currency: 'USD',
+            billingFrequency: 'monthly',
+            nextBillingDate: new Date(new Date().setMonth(new Date().getMonth() + 1)).toISOString().split('T')[0],
+            confidence: 0.7
+          };
+        }
+      }
     }
+    
+    // Check for keywords that indicate subscriptions in the subject
+    const subscriptionKeywords = [
+      /subscri(be|ption)/i, 
+      /renew(al|ed)/i, 
+      /bill(ing|ed)/i, 
+      /payment/i, 
+      /invoice/i, 
+      /receipt/i, 
+      /charge/i,
+      /plan/i,
+      /membership/i,
+      /monthly/i,
+      /yearly/i,
+      /trial/i
+    ];
+    
+    let keywordMatch = false;
+    for (const keyword of subscriptionKeywords) {
+      if (keyword.test(subjectLower)) {
+        keywordMatch = true;
+        break;
+      }
+    }
+    
+    if (keywordMatch) {
+      console.log(`SCAN-DEBUG: Detected potential subscription based on keywords in subject: "${subject}"`);
+      
+      try {
+        // Extract a service name from the sender domain or subject
+        let serviceName = 'Unknown Service';
+        if (from) {
+          const domainMatch = from.match(/@([^>]+)/) || from.match(/([^<\s]+)$/);
+          if (domainMatch) {
+            const domain = domainMatch[1].replace(/\.[^.]+$/, ''); // Remove TLD
+            serviceName = domain.charAt(0).toUpperCase() + domain.slice(1);
+          }
+        }
+        
+        // Try to extract service name from subject
+        if (subjectLower.includes('nba') || subjectLower.includes('league pass')) {
+          serviceName = 'NBA League Pass';
+        } else if (subjectLower.includes('babbel')) {
+          serviceName = 'Babbel';
+        } else if (subjectLower.includes('vercel')) {
+          serviceName = 'Vercel';
+        } else if (subjectLower.includes('ahrefs')) {
+          serviceName = 'Ahrefs';
+        } else if (subjectLower.includes('netflix')) {
+          serviceName = 'Netflix';
+        } else if (subjectLower.includes('spotify')) {
+          serviceName = 'Spotify';
+        } else if (subjectLower.includes('amazon') || subjectLower.includes('prime')) {
+          serviceName = 'Amazon Prime';
+        } else if (subjectLower.includes('disney')) {
+          serviceName = 'Disney+';
+        } else if (subjectLower.includes('hbo') || subjectLower.includes('max')) {
+          serviceName = 'HBO Max';
+        } else if (subjectLower.includes('youtube') || subjectLower.includes('yt premium')) {
+          serviceName = 'YouTube Premium';
+        } else if (subjectLower.includes('apple')) {
+          serviceName = 'Apple Services';
+        } else if (subjectLower.includes('hulu')) {
+          serviceName = 'Hulu';
+        } else if (subjectLower.includes('paramount')) {
+          serviceName = 'Paramount+';
+        } else if (subjectLower.includes('peacock')) {
+          serviceName = 'Peacock';
+        } else if (subjectLower.includes('adobe')) {
+          serviceName = 'Adobe Creative Cloud';
+        } else if (subjectLower.includes('microsoft') || subjectLower.includes('office 365')) {
+          serviceName = 'Microsoft 365';
+        } else if (subjectLower.includes('google one') || subjectLower.includes('drive storage')) {
+          serviceName = 'Google One';
+        } else if (subjectLower.includes('dropbox')) {
+          serviceName = 'Dropbox';
+        } else if (subjectLower.includes('chegg')) {
+          serviceName = 'Chegg';
+        } else if (subjectLower.includes('grammarly')) {
+          serviceName = 'Grammarly';
+        } else if (subjectLower.includes('nordvpn') || subjectLower.includes('vpn')) {
+          serviceName = 'NordVPN';
+        } else if (subjectLower.includes('peloton')) {
+          serviceName = 'Peloton';
+        } else if (subjectLower.includes('duolingo')) {
+          serviceName = 'Duolingo';
+        } else if (subjectLower.includes('notion')) {
+          serviceName = 'Notion';
+        } else if (subjectLower.includes('canva')) {
+          serviceName = 'Canva';
+        } else if (subjectLower.includes('nytimes') || subjectLower.includes('ny times')) {
+          serviceName = 'New York Times';
+        }
+        
+        // If still no service name found, try to extract from subject more intelligently
+        if (serviceName === 'Unknown Service') {
+          // Look for patterns like "Service Name Subscription" or "Service Name Confirmation"
+          const servicePatterns = [
+            /([A-Z][A-Za-z\s]+)\s+(?:Subscription|Confirmation|Receipt|Payment|Billing)/i,
+            /(?:Subscription|Confirmation|Receipt|Payment|Billing)\s+for\s+([A-Z][A-Za-z\s]+)/i,
+            /([A-Z][A-Za-z\s]+)\s+(?:Plan|Service|Account)/i
+          ];
+          
+          for (const pattern of servicePatterns) {
+            const match = subject.match(pattern);
+            if (match && match[1]) {
+              const extractedName = match[1].trim();
+              // Filter out common words that aren't service names
+              if (!/^(subscription|confirmation|receipt|payment|billing|plan|service|account|your|the|a|an)$/i.test(extractedName)) {
+                serviceName = extractedName;
+                console.log(`SCAN-DEBUG: Extracted service name from subject pattern: "${serviceName}"`);
+                break;
+              }
+            }
+          }
+        }
+        
+        // Enhanced price and frequency extraction for keyword-based detection
+        const body = extractEmailBody(emailContent);
+        const bodyLower = body ? body.toLowerCase() : '';
+        
+        let amount = 9.99; // Default amount
+        let currency = 'USD'; // Default currency
+        let frequency = 'monthly'; // Default frequency
+        
+        // Look for currency symbols followed by numbers
+        const currencyPatterns = [
+          /\$(\d+\.?\d*)/g,  // $19.99 or $20
+          /€(\d+\.?\d*)/g,  // €19.99 or €20
+          /£(\d+\.?\d*)/g,  // £19.99 or £20
+          /¥(\d+\.?\d*)/g,  // ¥1999 or ¥2000
+        ];
+        
+        let foundPrice = false;
+        for (const pattern of currencyPatterns) {
+          const matches = bodyLower.match(pattern);
+          if (matches && matches.length > 0) {
+            // Take the first match that looks like a reasonable subscription price
+            for (const match of matches) {
+              const price = parseFloat(match.replace(/[^\d.]/g, ''));
+              if (price > 0 && price < 1000) { // Reasonable subscription price range
+                amount = price;
+                foundPrice = true;
+                // Determine currency from the symbol
+                if (match.includes('€')) currency = 'EUR';
+                else if (match.includes('£')) currency = 'GBP';
+                else if (match.includes('¥')) currency = 'JPY';
+                else currency = 'USD';
+                break;
+              }
+            }
+            if (foundPrice) break;
+          }
+        }
+        
+        // If no currency symbol found, look for currency codes
+        if (!foundPrice) {
+          const currencyCodePatterns = [
+            /(\d+\.?\d*)\s*(usd|dollars?)/gi,
+            /(\d+\.?\d*)\s*(eur|euros?)/gi,
+            /(\d+\.?\d*)\s*(gbp|pounds?)/gi,
+          ];
+          
+          for (const pattern of currencyCodePatterns) {
+            const matches = bodyLower.match(pattern);
+            if (matches && matches.length > 0) {
+              const price = parseFloat(matches[0].replace(/[^\d.]/g, ''));
+              if (price > 0 && price < 1000) {
+                amount = price;
+                foundPrice = true;
+                // Determine currency from the code
+                if (matches[0].toLowerCase().includes('eur')) currency = 'EUR';
+                else if (matches[0].toLowerCase().includes('gbp')) currency = 'GBP';
+                else currency = 'USD';
+                break;
+              }
+            }
+          }
+        }
+        
+        // Enhanced frequency detection
+        const frequencyPatterns = [
+          { pattern: /month(ly)?|per\s*month/i, value: 'monthly' },
+          { pattern: /year(ly)?|annual|per\s*year/i, value: 'yearly' },
+          { pattern: /week(ly)?|per\s*week/i, value: 'weekly' },
+          { pattern: /quarter(ly)?|per\s*quarter/i, value: 'quarterly' },
+          { pattern: /bi.?month(ly)?|every\s*2\s*months/i, value: 'bimonthly' },
+          { pattern: /semi.?annual|every\s*6\s*months/i, value: 'semiannual' },
+        ];
+        
+        for (const freqPattern of frequencyPatterns) {
+          if (freqPattern.pattern.test(bodyLower) || freqPattern.pattern.test(subjectLower)) {
+            frequency = freqPattern.value;
+            break;
+          }
+        }
+        
+        // Generate next billing date based on frequency
+        const nextBillingDate = new Date();
+        if (frequency === 'monthly') nextBillingDate.setMonth(nextBillingDate.getMonth() + 1);
+        else if (frequency === 'yearly') nextBillingDate.setFullYear(nextBillingDate.getFullYear() + 1);
+        else if (frequency === 'weekly') nextBillingDate.setDate(nextBillingDate.getDate() + 7);
+        else if (frequency === 'quarterly') nextBillingDate.setMonth(nextBillingDate.getMonth() + 3);
+        else if (frequency === 'bimonthly') nextBillingDate.setMonth(nextBillingDate.getMonth() + 2);
+        else if (frequency === 'semiannual') nextBillingDate.setMonth(nextBillingDate.getMonth() + 6);
+        
+        console.log(`SCAN-DEBUG: Keyword-based detection - Extracted price: ${amount} ${currency} ${frequency}`);
+        
+        return {
+          isSubscription: true,
+          serviceName: serviceName,
+          amount: amount,
+          currency: currency,
+          billingFrequency: frequency,
+          nextBillingDate: nextBillingDate.toISOString().split('T')[0],
+          confidence: foundPrice ? 0.6 : 0.5 // Lower confidence for keyword-based detection
+        };
+      } catch (keywordExtractionError) {
+        console.error(`SCAN-DEBUG: Error in keyword-based price extraction:`, keywordExtractionError);
+        // Return a basic result without enhanced price extraction
+        return {
+          isSubscription: true,
+          serviceName: 'Unknown Service',
+          amount: 9.99,
+          currency: 'USD',
+          billingFrequency: 'monthly',
+          nextBillingDate: new Date(new Date().setMonth(new Date().getMonth() + 1)).toISOString().split('T')[0],
+          confidence: 0.5
+        };
+      }
+    }
+    
+    return {
+      isSubscription: false,
+      confidence: 0.7
+    };
+  } catch (fallbackError) {
+    console.error('SCAN-DEBUG: Error in fallback pattern analysis:', fallbackError);
+    return {
+      isSubscription: false,
+      confidence: 0.5
+    };
   }
 };
 
@@ -1603,6 +1733,31 @@ const processEmails = async (gmailToken, scanId, userId) => {
       subscriptions_found: totalSubscriptionCount,
       completed_at: new Date().toISOString()
     });
+    
+    // Manually trigger the Gemini Edge Function to ensure it gets called
+    console.log('SCAN-DEBUG: Manually triggering Gemini Edge Function');
+    try {
+      const triggerResponse = await fetch(
+        "https://dstsluflwxzkwouxcjkh.supabase.co/functions/v1/gemini-scan",
+        { 
+          method: "POST",
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${supabaseKey}`
+          }
+        }
+      );
+      
+      if (triggerResponse.ok) {
+        const triggerData = await triggerResponse.json();
+        console.log('SCAN-DEBUG: Gemini Edge Function triggered successfully:', triggerData);
+      } else {
+        const errorText = await triggerResponse.text();
+        console.error('SCAN-DEBUG: Failed to trigger Gemini Edge Function:', triggerResponse.status, errorText);
+      }
+    } catch (triggerError) {
+      console.error('SCAN-DEBUG: Error triggering Gemini Edge Function:', triggerError);
+    }
             
     console.log(`SCAN-DEBUG: Email processing completed for scan ${scanId}`);
     console.log(`SCAN-DEBUG: Total emails processed: ${processedCount}`);
