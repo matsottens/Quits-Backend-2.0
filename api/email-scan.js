@@ -1096,6 +1096,14 @@ const processEmails = async (gmailToken, scanId, userId) => {
   }
             
   try {
+    console.log('SCAN-DEBUG: About to update initial scan status');
+    // Update scan status to in_progress
+    await updateScanStatus(scanId, userId, {
+      status: 'in_progress',
+      progress: 10
+    });
+    console.log('SCAN-DEBUG: Initial scan status updated successfully');
+
     // Check for existing subscriptions to avoid duplicates
     console.log('SCAN-DEBUG: Checking for existing subscriptions to avoid duplicates');
     const { data: existingSubscriptions, error: existingSubsError } = await supabase
@@ -1121,124 +1129,126 @@ const processEmails = async (gmailToken, scanId, userId) => {
       });
     }
     
-    console.log('SCAN-DEBUG: About to update initial scan status');
-    // Update initial scan status
+    console.log('SCAN-DEBUG: About to fetch emails from Gmail');
+    // Fetch emails from Gmail
+    const emails = await fetchEmailsFromGmail(gmailToken);
+    console.log(`SCAN-DEBUG: Fetched ${emails.length} emails from Gmail`);
+    
+    if (emails.length === 0) {
+      console.log('SCAN-DEBUG: No emails found, setting scan to ready_for_analysis');
+      await updateScanStatus(scanId, userId, {
+        status: 'ready_for_analysis',
+        progress: 100,
+        emails_found: 0,
+        emails_processed: 0,
+        subscriptions_found: 0,
+        completed_at: new Date().toISOString()
+      });
+      return;
+    }
+    
+    // Update scan status with email count
     await updateScanStatus(scanId, userId, {
-                  status: 'in_progress',
-      progress: 0,
-      emails_found: 0,
-      emails_to_process: 0,
-      emails_processed: 0,
-      subscriptions_found: 0
+      emails_found: emails.length,
+      emails_to_process: emails.length,
+      progress: 20
     });
-    console.log('SCAN-DEBUG: Initial scan status updated successfully');
-            
-            // Fetch emails from Gmail
-            console.log('SCAN-DEBUG: About to call fetchEmailsFromGmail');
-            const messages = await fetchEmailsFromGmail(gmailToken);
-    console.log(`SCAN-DEBUG: fetchEmailsFromGmail completed, found ${messages.length} emails to process`);
-    console.log(`SCAN-DEBUG: First few message IDs: ${messages.slice(0, 3).map(m => m.id || m).join(', ')}`);
+    console.log('SCAN-DEBUG: Updated scan status with email count');
 
-    // Update scan status with total emails found
-    console.log('SCAN-DEBUG: About to update scan status with email count');
-    await updateScanStatus(scanId, userId, {
-              status: 'in_progress',
-      progress: 10,
-              emails_found: messages.length,
-      emails_to_process: messages.length,
-      emails_processed: 0,
-      subscriptions_found: 0
-            });
-    console.log('SCAN-DEBUG: Scan status updated with email count');
-            
-            let processedCount = 0;
+    let processedCount = 0;
     let subscriptionsFound = 0;
-            
-    console.log('SCAN-DEBUG: Starting to process emails in loop');
-    // Process emails in batches
-            for (let i = 0; i < messages.length; i++) {
-              const message = messages[i];
-              processedCount++;
-              
-      // Calculate progress (10-90% range for email processing)
-      const progress = Math.min(90, Math.floor(10 + (processedCount / messages.length) * 80));
-              
-      // Update progress every 5 emails
-              if (processedCount % 5 === 0 || processedCount === messages.length) {
+    
+    console.log('SCAN-DEBUG: Starting email processing loop');
+    // Process each email
+    for (let i = 0; i < emails.length; i++) {
+      try {
+        console.log(`SCAN-DEBUG: Processing email ${i + 1}/${emails.length}`);
+        const message = emails[i];
+        
+        // Update progress
+        const progress = 20 + (i / emails.length) * 30; // 20-50% for email processing
         await updateScanStatus(scanId, userId, {
-          progress,
-                  emails_processed: processedCount,
-          subscriptions_found: subscriptionsFound
-                });
-        console.log(`SCAN-DEBUG: Processed ${processedCount}/${messages.length} emails (${progress}%)`);
-              }
-              
-      // Get email content
-      console.log(`SCAN-DEBUG: Fetching content for email ${i + 1}/${messages.length} (ID: ${message.id || message})`);
-      const emailData = await fetchEmailContent(gmailToken, message.id || message);
-      if (!emailData) {
-        console.log(`SCAN-DEBUG: Skipping email ${message.id || message} - failed to fetch content`);
-        continue;
-      }
-      
-      // Log the email subject and sender
-      const headers = emailData.payload?.headers || [];
-      const { subject, from, date } = parseEmailHeaders(headers);
-      console.log(`SCAN-DEBUG: Analyzing email ${i + 1}/${messages.length} - Subject: ${subject}, From: ${from}`);
-      
-      // Extract email body content
-      const emailBody = extractEmailBody(emailData);
-      
-      // Store email data in email_data table for Gemini Edge Function
-      console.log(`SCAN-DEBUG: Storing email data for Gemini analysis`);
-      const emailDataRecord = {
-        scan_id: scanId,
-        user_id: userId,
-        gmail_message_id: message.id || message,
-        subject: subject,
-        sender: from,
-        date: date,
-        content: emailBody,
-        content_preview: emailBody.substring(0, 500),
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-      
-      const { error: emailDataError } = await supabase
-        .from('email_data')
-        .insert(emailDataRecord);
+          progress: Math.round(progress),
+          emails_processed: i
+        });
         
-      if (emailDataError) {
-        console.error('SCAN-DEBUG: Error storing email data:', emailDataError);
-      } else {
-        console.log(`SCAN-DEBUG: Successfully stored email data for message ${message.id || message}`);
-      }
-      
-      // Analyze email with Gemini
-      const analysis = await analyzeEmailWithGemini(emailData);
-      console.log(`SCAN-DEBUG: Gemini analysis result for email ${message.id || message}:`, JSON.stringify(analysis));
-
-      // If subscription detected with good confidence, check for duplicates and save it
-      if (analysis.isSubscription && analysis.confidence > 0.6) {
-        console.log(`SCAN-DEBUG: Detected subscription: ${analysis.serviceName} (${analysis.confidence} confidence)`);
+        // Fetch email content
+        console.log(`SCAN-DEBUG: Fetching content for email ${message.id || message}`);
+        const emailData = await fetchEmailContent(gmailToken, message.id || message);
         
-        // Check if this subscription already exists
-        const subscriptionId1 = `${analysis.serviceName?.toLowerCase()}-${analysis.serviceProvider?.toLowerCase()}`;
-        const subscriptionId2 = `email-${message.id || message}`;
-        
-        const isDuplicate = existingSubscriptionIds.has(subscriptionId1) || existingSubscriptionIds.has(subscriptionId2);
-        
-        if (isDuplicate) {
-          console.log(`SCAN-DEBUG: Subscription ${analysis.serviceName} already exists, skipping`);
-        } else {
-          console.log(`SCAN-DEBUG: New subscription detected, saving: ${analysis.serviceName}`);
-          await saveSubscription(userId, analysis);
-          subscriptionsFound++;
-          
-          // Add to existing subscription IDs to prevent duplicates in this scan
-          if (subscriptionId1) existingSubscriptionIds.add(subscriptionId1);
-          if (subscriptionId2) existingSubscriptionIds.add(subscriptionId2);
+        if (!emailData) {
+          console.log(`SCAN-DEBUG: No email data for message ${message.id || message}, skipping`);
+          continue;
         }
+        
+        // Extract email details
+        const headers = emailData.payload.headers || [];
+        const { subject, from, date } = parseEmailHeaders(headers);
+        const emailBody = extractEmailBody(emailData);
+        
+        console.log(`SCAN-DEBUG: Email details - Subject: "${subject}", From: "${from}"`);
+        
+        // Store email data in database
+        const emailDataRecord = {
+          scan_id: scanId,
+          user_id: userId,
+          gmail_message_id: message.id || message,
+          subject: subject,
+          sender: from,
+          date: date,
+          content: emailBody,
+          content_preview: emailBody.substring(0, 500),
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+        
+        console.log(`SCAN-DEBUG: Storing email data for message ${message.id || message}`);
+        const { error: emailDataError } = await supabase
+          .from('email_data')
+          .insert(emailDataRecord);
+          
+        if (emailDataError) {
+          console.error('SCAN-DEBUG: Error storing email data:', emailDataError);
+        } else {
+          console.log(`SCAN-DEBUG: Successfully stored email data for message ${message.id || message}`);
+        }
+        
+        // Analyze email with Gemini
+        console.log(`SCAN-DEBUG: Analyzing email with Gemini: "${subject}"`);
+        const analysis = await analyzeEmailWithGemini(emailData);
+        console.log(`SCAN-DEBUG: Gemini analysis result for email ${message.id || message}:`, JSON.stringify(analysis));
+
+        // If subscription detected with good confidence, check for duplicates and save it
+        if (analysis.isSubscription && analysis.confidence > 0.6) {
+          console.log(`SCAN-DEBUG: Detected subscription: ${analysis.serviceName} (${analysis.confidence} confidence)`);
+          
+          // Check if this subscription already exists
+          const subscriptionId1 = `${analysis.serviceName?.toLowerCase()}-${analysis.serviceProvider?.toLowerCase()}`;
+          const subscriptionId2 = `email-${message.id || message}`;
+          
+          const isDuplicate = existingSubscriptionIds.has(subscriptionId1) || existingSubscriptionIds.has(subscriptionId2);
+          
+          if (isDuplicate) {
+            console.log(`SCAN-DEBUG: Subscription ${analysis.serviceName} already exists, skipping`);
+          } else {
+            console.log(`SCAN-DEBUG: New subscription detected, saving: ${analysis.serviceName}`);
+            await saveSubscription(userId, analysis);
+            subscriptionsFound++;
+            
+            // Add to existing subscription IDs to prevent duplicates in this scan
+            if (subscriptionId1) existingSubscriptionIds.add(subscriptionId1);
+            if (subscriptionId2) existingSubscriptionIds.add(subscriptionId2);
+          }
+        }
+        
+        processedCount++;
+        console.log(`SCAN-DEBUG: Successfully processed email ${i + 1}/${emails.length}`);
+        
+      } catch (emailError) {
+        console.error(`SCAN-DEBUG: Error processing email ${i + 1}:`, emailError);
+        console.error(`SCAN-DEBUG: Error stack:`, emailError.stack);
+        // Continue with next email instead of failing completely
+        continue;
       }
     }
 
@@ -1254,6 +1264,7 @@ const processEmails = async (gmailToken, scanId, userId) => {
     console.log(`SCAN-DEBUG: Total subscriptions for user: ${totalSubscriptionCount} (existing + new)`);
     
     // Update final status to ready_for_analysis so Gemini can process it
+    console.log('SCAN-DEBUG: Setting scan status to ready_for_analysis');
     await updateScanStatus(scanId, userId, {
       status: 'ready_for_analysis',
       progress: 100,
@@ -1271,7 +1282,7 @@ const processEmails = async (gmailToken, scanId, userId) => {
     console.error('SCAN-DEBUG: Error in processEmails:', error);
     console.error('SCAN-DEBUG: Error stack:', error.stack);
     await updateScanStatus(scanId, userId, {
-                status: 'error',
+      status: 'error',
       error: error.message,
       progress: 0
     });
