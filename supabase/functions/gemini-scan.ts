@@ -128,7 +128,8 @@ ${emailText}
           lastError = new Error(`Gemini API rate limit hit (attempt ${attempt})`);
           
           if (attempt < maxRetries) {
-            const backoffDelay = Math.pow(2, attempt) * 1000; // 2s, 4s, 8s
+            // Longer exponential backoff for rate limits: 30s, 60s, 120s
+            const backoffDelay = Math.pow(2, attempt) * 15000; // 30s, 60s, 120s
             console.log(`Edge Function: Rate limit hit, backing off for ${backoffDelay}ms before retry`);
             await new Promise(resolve => setTimeout(resolve, backoffDelay));
             continue; // Try again
@@ -260,7 +261,7 @@ ${emailText}
       lastError = error;
       
       if (attempt < maxRetries) {
-        const retryDelay = Math.pow(2, attempt) * 1000; // Exponential backoff
+        const retryDelay = Math.pow(2, attempt) * 5000; // Longer exponential backoff: 10s, 20s, 40s
         console.log(`Edge Function: API error, retrying in ${retryDelay}ms (attempt ${attempt + 1})`);
         await new Promise(resolve => setTimeout(resolve, retryDelay));
       } else {
@@ -358,8 +359,8 @@ From: ${emailData.sender}
 Content: ${emailData.content}
           `.trim();
           
-          // Add a delay to prevent rate limiting
-          await new Promise(resolve => setTimeout(resolve, 3000)); // 3 second delay between calls
+          // Add a delay to prevent rate limiting - increased from 3s to 15s
+          await new Promise(resolve => setTimeout(resolve, 15000)); // 15 second delay between calls
           
           const geminiResult = await analyzeEmailWithGemini(emailContent);
           
@@ -493,4 +494,4 @@ Content: ${emailData.content}
       details: error.message 
     }), { status: 500 });
   }
-}); 
+});

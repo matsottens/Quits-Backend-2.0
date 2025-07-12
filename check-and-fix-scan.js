@@ -1,5 +1,9 @@
 // Check and fix current scan status
 import fetch from 'node-fetch';
+import { config } from 'dotenv';
+
+// Load environment variables from .env file
+config();
 
 const SUPABASE_URL = 'https://dstsluflwxzkwouxcjkh.supabase.co';
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
