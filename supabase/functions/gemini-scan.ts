@@ -9,19 +9,25 @@ async function analyzeEmailWithGemini(emailText: string) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 
   const prompt = `
-You are a specialized AI system designed to analyze emails and identify subscription services.
+You are a specialized AI system designed to analyze emails and identify subscription services and recurring payments.
 
-Analyze the following email content to determine if it relates to a subscription service.
+Analyze the following email content to determine if it relates to a subscription service or recurring payment.
 Look for indicators such as:
-- Regular payment mentions (monthly, annually, etc.)
-- Subscription confirmation or renewal notices
-- Billing details for recurring services
+- Regular payment mentions (monthly, annually, quarterly, weekly, etc.)
+- Subscription confirmation, renewal, or billing notices
+- Receipts for recurring services
 - Trial period information
 - Account or membership information
+- Payment confirmations for services
+- Billing statements
+- Service confirmations
+- Any email that mentions a service with recurring payments
 
-If this email is about a subscription, extract the following details:
-- Service name: The name of the subscription service
-- Price: The amount charged (ignore one-time fees, focus on recurring charges)
+IMPORTANT: Be inclusive rather than exclusive. If there's any indication of a recurring service or subscription, mark it as a subscription.
+
+If this email is about a subscription or recurring service, extract the following details:
+- Service name: The name of the subscription service (extract from sender, subject, or content)
+- Price: The amount charged (look for any monetary amounts)
 - Currency: USD, EUR, etc.
 - Billing frequency: monthly, yearly, quarterly, weekly, etc.
 - Next billing date: When the next payment will occur (in YYYY-MM-DD format if possible)
@@ -29,10 +35,10 @@ If this email is about a subscription, extract the following details:
 
 FORMAT YOUR RESPONSE AS A JSON OBJECT with the following structure:
 
-For subscription emails:
+For subscription/recurring service emails:
 {
   "is_subscription": true,
-  "subscription_name": "The service name",
+  "subscription_name": "The service name (extract from any available information)",
   "price": 19.99,
   "currency": "USD",
   "billing_cycle": "monthly", 
@@ -47,12 +53,16 @@ For non-subscription emails:
   "confidence_score": 0.95
 }
 
-IMPORTANT: 
+IMPORTANT GUIDELINES: 
 - Always return valid JSON
 - Use null for missing dates
 - Ensure price is a number, not a string
 - Use standard currency codes (USD, EUR, GBP, etc.)
 - Use standard billing cycles (monthly, yearly, quarterly, weekly, etc.)
+- If you can identify a service but not the exact name, use the sender domain or company name
+- If you can't find a specific price, use 0 but still mark as subscription if it's clearly a service
+- Be generous in identifying subscriptions - better to include than exclude
+- Look at sender email addresses, subject lines, and content for service identification
 
 Email:
 """
@@ -107,9 +117,48 @@ ${emailText}
       
       // Validate subscription data if it's a subscription
       if (result.is_subscription) {
+        // If subscription_name is missing, try to extract it from the email content
         if (!result.subscription_name || typeof result.subscription_name !== 'string') {
-          console.error("Invalid subscription data - missing subscription_name:", result);
-          return { error: "Invalid subscription data", is_subscription: false };
+          console.log("Subscription name missing, attempting to extract from email content");
+          // Try to extract service name from email content or use a fallback
+          const emailLower = emailText.toLowerCase();
+          let extractedName: string | null = null;
+          
+          // Look for common service indicators in the email
+          if (emailLower.includes('netflix') || emailLower.includes('nflx')) extractedName = 'Netflix';
+          else if (emailLower.includes('spotify')) extractedName = 'Spotify';
+          else if (emailLower.includes('amazon') || emailLower.includes('prime')) extractedName = 'Amazon Prime';
+          else if (emailLower.includes('disney') || emailLower.includes('disney+')) extractedName = 'Disney+';
+          else if (emailLower.includes('hbo') || emailLower.includes('max')) extractedName = 'HBO Max';
+          else if (emailLower.includes('youtube') || emailLower.includes('yt premium')) extractedName = 'YouTube Premium';
+          else if (emailLower.includes('apple')) extractedName = 'Apple Services';
+          else if (emailLower.includes('hulu')) extractedName = 'Hulu';
+          else if (emailLower.includes('paramount') || emailLower.includes('paramount+')) extractedName = 'Paramount+';
+          else if (emailLower.includes('peacock')) extractedName = 'Peacock';
+          else if (emailLower.includes('adobe')) extractedName = 'Adobe Creative Cloud';
+          else if (emailLower.includes('microsoft') || emailLower.includes('office 365')) extractedName = 'Microsoft 365';
+          else if (emailLower.includes('google one') || emailLower.includes('drive storage')) extractedName = 'Google One';
+          else if (emailLower.includes('dropbox')) extractedName = 'Dropbox';
+          else if (emailLower.includes('nba') || emailLower.includes('league pass')) extractedName = 'NBA League Pass';
+          else if (emailLower.includes('babbel')) extractedName = 'Babbel';
+          else if (emailLower.includes('chegg')) extractedName = 'Chegg';
+          else if (emailLower.includes('grammarly')) extractedName = 'Grammarly';
+          else if (emailLower.includes('nordvpn') || emailLower.includes('vpn')) extractedName = 'NordVPN';
+          else if (emailLower.includes('peloton')) extractedName = 'Peloton';
+          else if (emailLower.includes('duolingo')) extractedName = 'Duolingo';
+          else if (emailLower.includes('notion')) extractedName = 'Notion';
+          else if (emailLower.includes('canva')) extractedName = 'Canva';
+          else if (emailLower.includes('nytimes') || emailLower.includes('ny times')) extractedName = 'New York Times';
+          else if (emailLower.includes('vercel')) extractedName = 'Vercel';
+          
+          if (extractedName) {
+            result.subscription_name = extractedName;
+            console.log(`Extracted subscription name: ${extractedName}`);
+          } else {
+            // If we still can't find a name, use a generic name but still process it
+            result.subscription_name = 'Unknown Service';
+            console.log("Using generic name 'Unknown Service' for subscription");
+          }
         }
         
         // Ensure price is a number
@@ -190,6 +239,13 @@ serve(async (_req) => {
         console.log(`Analyzing email ${email.id} with subject: ${email.subject}`);
         
         const geminiResult = await analyzeEmailWithGemini(email.content || "");
+        
+        console.log(`Gemini result for email ${email.id}:`, {
+          is_subscription: geminiResult.is_subscription,
+          subscription_name: geminiResult.subscription_name,
+          price: geminiResult.price,
+          error: geminiResult.error
+        });
 
         // Check for errors in Gemini analysis
         if (geminiResult.error) {
