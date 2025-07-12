@@ -260,7 +260,7 @@ export default async function handler(req, res) {
                 });
               }
               
-              // Fetch manual and auto-detected subscriptions
+              // Fetch manual subscriptions from subscriptions table
               const response = await fetch(
                 `${supabaseUrl}/rest/v1/subscriptions?user_id=eq.${dbUserId}&select=*`, 
                 {
@@ -279,10 +279,81 @@ export default async function handler(req, res) {
               }
               
               const subscriptions = await response.json();
-              console.log(`[PATH] Found ${subscriptions.length} subscriptions for user ${dbUserId}`);
+              console.log(`[PATH] Found ${subscriptions.length} manual subscriptions for user ${dbUserId}`);
+              
+              // Also fetch auto-detected subscriptions from analysis results
+              const analysisResponse = await fetch(
+                `${supabaseUrl}/rest/v1/subscription_analysis?user_id=eq.${dbUserId}&analysis_status=eq.completed&select=*`,
+                {
+                  method: 'GET',
+                  headers: {
+                    'apikey': supabaseKey,
+                    'Authorization': `Bearer ${supabaseKey}`,
+                    'Content-Type': 'application/json'
+                  }
+                }
+              );
+              
+              let analysisSubscriptions = [];
+              if (analysisResponse.ok) {
+                analysisSubscriptions = await analysisResponse.json();
+                console.log(`[PATH] Found ${analysisSubscriptions.length} auto-detected subscriptions from analysis`);
+              }
+              
+              // If no analysis results yet, wait a bit and retry (for new users)
+              if (analysisSubscriptions.length === 0 && subscriptions.length === 0) {
+                console.log('[PATH] No subscriptions found, waiting for analysis to complete...');
+                
+                // Wait 5 seconds for analysis to complete
+                await new Promise(resolve => setTimeout(resolve, 5000));
+                
+                // Retry fetching analysis results
+                const retryAnalysisResponse = await fetch(
+                  `${supabaseUrl}/rest/v1/subscription_analysis?user_id=eq.${dbUserId}&analysis_status=eq.completed&select=*`,
+                  {
+                    method: 'GET',
+                    headers: {
+                      'apikey': supabaseKey,
+                      'Authorization': `Bearer ${supabaseKey}`,
+                      'Content-Type': 'application/json'
+                    }
+                  }
+                );
+                
+                if (retryAnalysisResponse.ok) {
+                  analysisSubscriptions = await retryAnalysisResponse.json();
+                  console.log(`[PATH] After retry: Found ${analysisSubscriptions.length} auto-detected subscriptions from analysis`);
+                }
+              }
+              
+              // Combine manual subscriptions and auto-detected ones
+              const allSubscriptions = [...subscriptions];
+              
+              // Add auto-detected subscriptions that aren't already in the subscriptions table
+              for (const analysis of analysisSubscriptions) {
+                const alreadyExists = subscriptions.some(sub => sub.name === analysis.subscription_name);
+                if (!alreadyExists) {
+                  allSubscriptions.push({
+                    id: `analysis_${analysis.id}`,
+                    name: analysis.subscription_name,
+                    price: analysis.price || 0,
+                    billing_cycle: analysis.billing_cycle || 'monthly',
+                    next_billing_date: analysis.next_billing_date,
+                    category: 'auto-detected',
+                    is_manual: false,
+                    source_analysis_id: analysis.id,
+                    service_provider: analysis.service_provider,
+                    confidence_score: analysis.confidence_score,
+                    created_at: analysis.created_at,
+                    updated_at: analysis.updated_at
+                  });
+                }
+              }
+              
+              console.log(`[PATH] Total subscriptions (manual + auto-detected): ${allSubscriptions.length}`);
               
               // If no subscriptions are found, return suggestion to scan emails
-              if (!subscriptions || subscriptions.length === 0) {
+              if (!allSubscriptions || allSubscriptions.length === 0) {
                 console.log('[PATH] No subscriptions found');
                 
                 // Check if we can offer email scanning
@@ -298,7 +369,8 @@ export default async function handler(req, res) {
                       totalAnnualized: 0,
                       source: 'path_handler',
                       can_scan_emails: true,
-                      db_user_id: dbUserId
+                      db_user_id: dbUserId,
+                      message: 'No subscriptions found. Email analysis may still be in progress.'
                     }
                   });
                 }
@@ -314,24 +386,25 @@ export default async function handler(req, res) {
                     totalAnnualized: 0,
                     source: 'path_handler',
                     can_scan_emails: false,
-                    db_user_id: dbUserId
+                    db_user_id: dbUserId,
+                    message: 'No subscriptions found. Email analysis may still be in progress.'
                   }
                 });
               }
               
               // Calculate subscription metrics
-              const monthlyTotal = subscriptions
+              const monthlyTotal = allSubscriptions
                 .filter(sub => sub.billing_cycle === 'monthly')
                 .reduce((sum, sub) => sum + parseFloat(sub.price || 0), 0);
                 
-              const yearlyTotal = subscriptions
+              const yearlyTotal = allSubscriptions
                 .filter(sub => sub.billing_cycle === 'yearly')
                 .reduce((sum, sub) => sum + parseFloat(sub.price || 0), 0);
                 
               const annualizedCost = monthlyTotal * 12 + yearlyTotal;
               
               // Map database field names to frontend expected format
-              const formattedSubscriptions = subscriptions.map(sub => ({
+              const formattedSubscriptions = allSubscriptions.map(sub => ({
                 id: sub.id,
                 name: sub.name,
                 price: parseFloat(sub.price || 0),
@@ -339,8 +412,8 @@ export default async function handler(req, res) {
                 nextBillingDate: sub.next_billing_date,
                 category: sub.category || 'other',
                 is_manual: sub.is_manual || false,
-                is_detected: sub.source === 'email_scan',
-                confidence: sub.confidence,
+                is_detected: sub.source === 'email_scan' || sub.id?.startsWith('analysis_'),
+                confidence: sub.confidence_score,
                 createdAt: sub.created_at,
                 updatedAt: sub.updated_at
               }));
@@ -349,7 +422,7 @@ export default async function handler(req, res) {
                 success: true,
                 subscriptions: formattedSubscriptions,
                 meta: {
-                  total: subscriptions.length,
+                  total: allSubscriptions.length,
                   totalMonthly: monthlyTotal,
                   totalYearly: yearlyTotal,
                   totalAnnualized: annualizedCost,
@@ -357,8 +430,8 @@ export default async function handler(req, res) {
                   source: 'path_handler',
                   db_user_id: dbUserId,
                   can_scan_emails: !!(isGeminiScanningAvailable() && gmailToken),
-                  auto_detected_count: subscriptions.filter(sub => sub.source === 'email_scan').length,
-                  manual_count: subscriptions.filter(sub => !sub.source || sub.source !== 'email_scan').length
+                  auto_detected_count: allSubscriptions.filter(sub => !sub.is_manual).length,
+                  manual_count: allSubscriptions.filter(sub => sub.is_manual).length
                 }
               });
             } catch (error) {
