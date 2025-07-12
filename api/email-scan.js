@@ -1207,17 +1207,30 @@ const updateScanStatus = async (scanId, dbUserId, updates) => {
   
   try {
     const timestamp = new Date().toISOString();
-    const fullUpdates = {
-      ...updates,
-      timestamp,
-      last_update: timestamp
-    };
+    
+    // Only include fields that exist in the scan_history table
+    const allowedFields = [
+      'status', 'progress', 'emails_found', 'emails_to_process', 
+      'emails_processed', 'subscriptions_found', 'completed_at', 'updated_at'
+    ];
+    
+    const filteredUpdates = {};
+    Object.keys(updates).forEach(key => {
+      if (allowedFields.includes(key)) {
+        filteredUpdates[key] = updates[key];
+      } else {
+        console.log(`SCAN-DEBUG: Skipping field '${key}' as it may not exist in scan_history table`);
+      }
+    });
+    
+    // Always include updated_at timestamp
+    filteredUpdates.updated_at = timestamp;
 
     // Only fetch current scan status if email stats are completely missing (undefined/null)
     // Don't override explicit 0 values
-    if (fullUpdates.emails_found === undefined || fullUpdates.emails_found === null ||
-        fullUpdates.emails_to_process === undefined || fullUpdates.emails_to_process === null ||
-        fullUpdates.emails_processed === undefined || fullUpdates.emails_processed === null) {
+    if (filteredUpdates.emails_found === undefined || filteredUpdates.emails_found === null ||
+        filteredUpdates.emails_to_process === undefined || filteredUpdates.emails_to_process === null ||
+        filteredUpdates.emails_processed === undefined || filteredUpdates.emails_processed === null) {
       console.log('SCAN-DEBUG: Some email stats missing, fetching current scan status');
       const currentScan = await fetch(`${supabaseUrl}/rest/v1/scan_history?scan_id=eq.${scanId}`, {
         headers: {
@@ -1232,20 +1245,20 @@ const updateScanStatus = async (scanId, dbUserId, updates) => {
         if (currentData && currentData.length > 0) {
           const current = currentData[0];
           // Only use defaults if the values are undefined/null, not if they're explicitly 0
-          if (fullUpdates.emails_found === undefined || fullUpdates.emails_found === null) {
-            fullUpdates.emails_found = current.emails_found || 0;
+          if (filteredUpdates.emails_found === undefined || filteredUpdates.emails_found === null) {
+            filteredUpdates.emails_found = current.emails_found || 0;
           }
-          if (fullUpdates.emails_to_process === undefined || fullUpdates.emails_to_process === null) {
-            fullUpdates.emails_to_process = current.emails_to_process || 0;
+          if (filteredUpdates.emails_to_process === undefined || filteredUpdates.emails_to_process === null) {
+            filteredUpdates.emails_to_process = current.emails_to_process || 0;
           }
-          if (fullUpdates.emails_processed === undefined || fullUpdates.emails_processed === null) {
-            fullUpdates.emails_processed = current.emails_processed || 0;
+          if (filteredUpdates.emails_processed === undefined || filteredUpdates.emails_processed === null) {
+            filteredUpdates.emails_processed = current.emails_processed || 0;
           }
         }
       }
     }
 
-    console.log('SCAN-DEBUG: Final update data:', JSON.stringify(fullUpdates, null, 2));
+    console.log('SCAN-DEBUG: Final update data:', JSON.stringify(filteredUpdates, null, 2));
 
     const response = await fetch(`${supabaseUrl}/rest/v1/scan_history?scan_id=eq.${scanId}`, {
       method: 'PATCH',
@@ -1254,7 +1267,7 @@ const updateScanStatus = async (scanId, dbUserId, updates) => {
         'Authorization': `Bearer ${supabaseKey}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify(fullUpdates)
+      body: JSON.stringify(filteredUpdates)
     });
 
     if (!response.ok) {
@@ -1566,7 +1579,6 @@ const processEmails = async (gmailToken, scanId, userId) => {
     console.error('SCAN-DEBUG: Error stack:', error.stack);
     await updateScanStatus(scanId, userId, {
       status: 'error',
-      error: error.message,
       progress: 0
     });
     throw error;
@@ -1698,7 +1710,6 @@ export default async function handler(req, res) {
         console.error('SCAN-DEBUG: Error stack:', error.stack);
         updateScanStatus(scanId, dbUserId, {
           status: 'error',
-          error: error.message,
           progress: 0
         }).catch(console.error);
       });
