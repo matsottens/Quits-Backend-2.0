@@ -52,6 +52,25 @@ export default async function handler(req, res) {
 
     if (userError || !user) {
       console.error('SCAN-STATUS-DEBUG: User lookup error:', userError);
+      
+      // If user doesn't exist yet, this might be a new user whose scan is still being processed
+      // Return a status indicating the scan is still being set up
+      if (userError && userError.code === 'PGRST116') {
+        console.log('SCAN-STATUS-DEBUG: User not found, scan may still be being set up');
+        return res.status(200).json({
+          status: 'pending',
+          scan_id: scanId,
+          progress: 0,
+          stats: {
+            emails_found: 0,
+            emails_to_process: 0,
+            emails_processed: 0,
+            subscriptions_found: 0
+          },
+          message: 'Scan is being set up, please wait...'
+        });
+      }
+      
       return res.status(401).json({ error: 'User not found in database' });
     }
 
