@@ -5,13 +5,6 @@ export default async function handler(req, res) {
   console.log('SCAN-STATUS-DEBUG: Handler called');
   console.log('SCAN-STATUS-DEBUG: Method:', req.method);
   console.log('SCAN-STATUS-DEBUG: URL:', req.url);
-  
-  // Set CORS headers
-  res.setHeader('Access-Control-Allow-Origin', 'https://www.quits.cc');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token, Pragma, X-API-Key, X-Api-Version, X-Device-ID');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Max-Age', '86400');
 
   if (req.method === 'OPTIONS') {
     console.log('SCAN-STATUS-DEBUG: Handling OPTIONS request');
@@ -23,6 +16,10 @@ export default async function handler(req, res) {
   }
 
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
+  
+  // Debug Supabase connection
+  console.log('SCAN-STATUS-DEBUG: SUPABASE_URL:', process.env.SUPABASE_URL ? 'Set' : 'Not set');
+  console.log('SCAN-STATUS-DEBUG: SUPABASE_SERVICE_KEY:', process.env.SUPABASE_SERVICE_KEY ? 'Set' : 'Not set');
   
   try {
     // Extract and verify authorization token
