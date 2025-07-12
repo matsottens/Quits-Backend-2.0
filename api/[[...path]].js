@@ -120,37 +120,6 @@ export default async function handler(req, res) {
         return res.status(405).json({ error: 'Method not supported for this endpoint' });
       }
     } 
-    else if (fullPath.includes('/email-scan')) {
-      // Email scan endpoint
-      if (req.method === 'POST') {
-        // Extract and verify token
-        const authHeader = req.headers.authorization;
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
-          return res.status(401).json({ error: 'Missing or invalid authorization header' });
-        }
-
-        const token = authHeader.substring(7);
-        const decoded = verifyToken(token, req);
-
-        if (!decoded) {
-          return res.status(401).json({ error: 'Invalid or expired token' });
-        }
-
-        // Return mock scan response
-        const mockScanId = 'scan_' + Math.random().toString(36).substring(2, 15);
-        return res.status(202).json({
-          success: true,
-          message: 'Email scan initiated successfully',
-          scanId: mockScanId,
-          estimatedTime: '30 seconds',
-          user: {
-            email: decoded.email
-          }
-        });
-      } else {
-        return res.status(405).json({ error: 'Method not supported for this endpoint' });
-      }
-    } 
     else if (fullPath.includes('/scan-status')) {
       // Scan status endpoint
       if (req.method === 'GET') {
