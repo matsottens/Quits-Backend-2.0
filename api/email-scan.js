@@ -13,6 +13,9 @@ const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
 const supabaseKey = supabaseServiceRoleKey || supabaseServiceKey;
 
+// Initialize Supabase client
+const supabase = createClient(supabaseUrl, supabaseKey);
+
 // Add logging to help debug
 console.log(`Email-scan: Supabase URL defined: ${!!supabaseUrl}`);
 console.log(`Email-scan: Supabase key defined: ${!!supabaseKey}`);
@@ -101,9 +104,6 @@ const fetchEmailsFromGmail = async (gmailToken) => {
     
     // Fetch subscription examples from the database for targeted search
     console.log('SCAN-DEBUG: About to fetch subscription examples from database');
-    const supabaseUrl = process.env.SUPABASE_URL;
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
     
     console.log('SCAN-DEBUG: Fetching subscription examples from database');
     const { data: examples, error } = await supabase
@@ -1055,6 +1055,7 @@ const searchEmails = async (gmail, query) => {
 };
 
 const processEmails = async (gmailToken, scanId, userId) => {
+  console.log('SCAN-DEBUG: ===== PROCESS EMAILS FUNCTION CALLED =====');
   console.log('SCAN-DEBUG: Starting processEmails');
   console.log('SCAN-DEBUG: Gmail token provided:', !!gmailToken);
   console.log('SCAN-DEBUG: Scan ID provided:', scanId);
@@ -1258,14 +1259,26 @@ export default async function handler(req, res) {
     console.log('SCAN-DEBUG: Using database user ID:', dbUserId);
 
     // Start email processing in background
-    processEmails(gmailToken, scanId, dbUserId).catch(error => {
-      console.error('SCAN-DEBUG: Error processing emails:', error);
-      updateScanStatus(scanId, dbUserId, {
-        status: 'error',
-        error: error.message,
-        progress: 0
-      }).catch(console.error);
-    });
+    console.log('SCAN-DEBUG: About to start processEmails in background');
+    console.log('SCAN-DEBUG: Gmail token available:', !!gmailToken);
+    console.log('SCAN-DEBUG: Scan ID:', scanId);
+    console.log('SCAN-DEBUG: Database User ID:', dbUserId);
+    
+    try {
+      processEmails(gmailToken, scanId, dbUserId).catch(error => {
+        console.error('SCAN-DEBUG: Error processing emails:', error);
+        console.error('SCAN-DEBUG: Error stack:', error.stack);
+        updateScanStatus(scanId, dbUserId, {
+          status: 'error',
+          error: error.message,
+          progress: 0
+        }).catch(console.error);
+      });
+      console.log('SCAN-DEBUG: processEmails started successfully');
+    } catch (error) {
+      console.error('SCAN-DEBUG: Error starting processEmails:', error);
+      console.error('SCAN-DEBUG: Error stack:', error.stack);
+    }
 
     return res.status(200).json({
       success: true,
