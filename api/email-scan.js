@@ -731,7 +731,12 @@ const validateGmailToken = async (token) => {
     }
 
   try {
-    const gmail = google.gmail({ version: 'v1', auth: token });
+    // Create OAuth2 client and set credentials
+    const oauth2Client = new google.auth.OAuth2();
+    oauth2Client.setCredentials({ access_token: token });
+    
+    // Initialize Gmail API with the OAuth2 client
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
     console.log('SCAN-DEBUG: Making test call to Gmail API');
     const response = await gmail.users.getProfile({ userId: 'me' });
     console.log('SCAN-DEBUG: Gmail API response:', response.status);
