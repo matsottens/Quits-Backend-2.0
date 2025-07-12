@@ -1458,10 +1458,22 @@ const processEmails = async (gmailToken, scanId, userId) => {
     
     console.log('SCAN-DEBUG: Starting email processing loop');
     // Process each email
+    const processedMessageIds = new Set(); // Track processed message IDs to avoid duplicates
+    
     for (let i = 0; i < emails.length; i++) {
       try {
         console.log(`SCAN-DEBUG: Processing email ${i + 1}/${emails.length}`);
         const message = emails[i];
+        const messageId = message.id || message;
+        
+        // Skip if we've already processed this message
+        if (processedMessageIds.has(messageId)) {
+          console.log(`SCAN-DEBUG: Skipping duplicate message ${messageId}`);
+          continue;
+        }
+        
+        // Mark this message as processed
+        processedMessageIds.add(messageId);
         
         // Update progress
         const progress = 20 + (i / emails.length) * 30; // 20-50% for email processing
@@ -1471,11 +1483,11 @@ const processEmails = async (gmailToken, scanId, userId) => {
         });
         
         // Fetch email content
-        console.log(`SCAN-DEBUG: Fetching content for email ${message.id || message}`);
-        const emailData = await fetchEmailContent(gmailToken, message.id || message);
+        console.log(`SCAN-DEBUG: Fetching content for email ${messageId}`);
+        const emailData = await fetchEmailContent(gmailToken, messageId);
         
         if (!emailData) {
-          console.log(`SCAN-DEBUG: No email data for message ${message.id || message}, skipping`);
+          console.log(`SCAN-DEBUG: No email data for message ${messageId}, skipping`);
           continue;
         }
         
@@ -1490,7 +1502,7 @@ const processEmails = async (gmailToken, scanId, userId) => {
         const emailDataRecord = {
           scan_id: scanId,
           user_id: userId,
-          gmail_message_id: message.id || message,
+          gmail_message_id: messageId,
           subject: subject,
           sender: from,
           date: date,
@@ -1500,7 +1512,7 @@ const processEmails = async (gmailToken, scanId, userId) => {
           updated_at: new Date().toISOString()
         };
         
-        console.log(`SCAN-DEBUG: Storing email data for message ${message.id || message}`);
+        console.log(`SCAN-DEBUG: Storing email data for message ${messageId}`);
         const { error: emailDataError } = await supabase
           .from('email_data')
           .insert(emailDataRecord);
@@ -1508,7 +1520,7 @@ const processEmails = async (gmailToken, scanId, userId) => {
         if (emailDataError) {
           console.error('SCAN-DEBUG: Error storing email data:', emailDataError);
         } else {
-          console.log(`SCAN-DEBUG: Successfully stored email data for message ${message.id || message}`);
+          console.log(`SCAN-DEBUG: Successfully stored email data for message ${messageId}`);
         }
         
         // Analyze email with Gemini
@@ -1516,7 +1528,7 @@ const processEmails = async (gmailToken, scanId, userId) => {
         let analysis;
         try {
           analysis = await analyzeEmailWithGemini(emailData);
-          console.log(`SCAN-DEBUG: Gemini analysis result for email ${message.id || message}:`, JSON.stringify(analysis));
+          console.log(`SCAN-DEBUG: Gemini analysis result for email ${messageId}:`, JSON.stringify(analysis));
         } catch (analysisError) {
           console.error(`SCAN-DEBUG: Error analyzing email with Gemini:`, analysisError);
           console.error(`SCAN-DEBUG: Analysis error stack:`, analysisError.stack);
@@ -1530,7 +1542,7 @@ const processEmails = async (gmailToken, scanId, userId) => {
           
           // Check if this subscription already exists
           const subscriptionId1 = `${analysis.serviceName?.toLowerCase()}-${analysis.serviceProvider?.toLowerCase()}`;
-          const subscriptionId2 = `email-${message.id || message}`;
+          const subscriptionId2 = `email-${messageId}`;
           
           const isDuplicate = existingSubscriptionIds.has(subscriptionId1) || existingSubscriptionIds.has(subscriptionId2);
           
@@ -1554,7 +1566,7 @@ const processEmails = async (gmailToken, scanId, userId) => {
         }
         
         processedCount++;
-        console.log(`SCAN-DEBUG: Successfully processed email ${i + 1}/${emails.length}`);
+        console.log(`SCAN-DEBUG: Successfully processed email ${i + 1}/${emails.length} (${processedCount} unique emails processed)`);
         
       } catch (emailError) {
         console.error(`SCAN-DEBUG: Error processing email ${i + 1}:`, emailError);
