@@ -115,12 +115,39 @@ export default async function handler(req, res) {
         
         if (allScansError) {
           console.error('SCAN-STATUS-DEBUG: Error fetching all scans:', allScansError);
+          return res.status(500).json({ error: allScansError.message });
         } else {
           console.log('SCAN-STATUS-DEBUG: Found scans for user:', allScans);
+          
+          // If we found scans, return the latest one instead of error
+          if (allScans && allScans.length > 0) {
+            const latestScan = allScans[0];
+            console.log('SCAN-STATUS-DEBUG: Returning latest scan instead:', latestScan.scan_id);
+            
+            // Get the full scan data for the latest scan
+            const { data: fullScan, error: fullScanError } = await supabase
+              .from('scan_history')
+              .select('*')
+              .eq('scan_id', latestScan.scan_id)
+              .single();
+            
+            if (fullScanError) {
+              console.error('SCAN-STATUS-DEBUG: Error fetching full scan data:', fullScanError);
+              return res.status(500).json({ error: fullScanError.message });
+            }
+            
+            // Use the latest scan data
+            scan = fullScan;
+            error = null;
+          } else {
+            // No scans found at all
+            return res.status(404).json({ error: 'No scans found for user' });
+          }
         }
+      } else {
+        // Some other error occurred
+        return res.status(500).json({ error: error.message });
       }
-      
-      return res.status(500).json({ error: error.message });
     }
     
     if (!scan) {
