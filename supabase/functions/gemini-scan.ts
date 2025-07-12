@@ -21,7 +21,36 @@ const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
+// Add quota management at the top
+const QUOTA_CHECK_INTERVAL = 1000; // Check quota every 1 second
+const MAX_REQUESTS_PER_MINUTE = 60; // Conservative limit
+let requestCount = 0;
+let lastQuotaReset = Date.now();
+
+// Function to check if we're within quota limits
+function checkQuota(): boolean {
+  const now = Date.now();
+  if (now - lastQuotaReset > 60000) { // Reset every minute
+    requestCount = 0;
+    lastQuotaReset = now;
+  }
+  
+  if (requestCount >= MAX_REQUESTS_PER_MINUTE) {
+    console.log('Edge Function: Rate limit reached, waiting for quota reset');
+    return false;
+  }
+  
+  requestCount++;
+  return true;
+}
+
 async function analyzeEmailWithGemini(emailText: string) {
+  // Check quota before making request
+  if (!checkQuota()) {
+    console.log('Edge Function: Quota limit reached, skipping analysis');
+    return { error: "Rate limit reached, please try again later", is_subscription: false };
+  }
+
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 
   const prompt = `
@@ -96,7 +125,7 @@ ${emailText}
   };
 
   // Implement retry logic with exponential backoff for rate limiting
-  const maxRetries = 3;
+  const maxRetries = 2; // Reduced from 3 to avoid quota exhaustion
   let lastError = null;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -119,7 +148,12 @@ ${emailText}
             const errorData = await response.json();
             if (errorData.error && errorData.error.status === 'RESOURCE_EXHAUSTED') {
               console.log('Edge Function: Gemini API quota exhausted, stopping retries');
-              return { error: `Quota exhausted after ${attempt} attempts`, is_subscription: false };
+              // Update the scan status to indicate quota exhaustion
+              return { 
+                error: `Quota exhausted after ${attempt} attempts`, 
+                is_subscription: false,
+                quota_exhausted: true 
+              };
             }
           } catch (parseError) {
             // If we can't parse the error, assume it's a rate limit
@@ -128,8 +162,8 @@ ${emailText}
           lastError = new Error(`Gemini API rate limit hit (attempt ${attempt})`);
           
           if (attempt < maxRetries) {
-            // Longer exponential backoff for rate limits: 30s, 60s, 120s
-            const backoffDelay = Math.pow(2, attempt) * 15000; // 30s, 60s, 120s
+            // Shorter exponential backoff for rate limits: 10s, 20s
+            const backoffDelay = Math.pow(2, attempt) * 5000; // 10s, 20s
             console.log(`Edge Function: Rate limit hit, backing off for ${backoffDelay}ms before retry`);
             await new Promise(resolve => setTimeout(resolve, backoffDelay));
             continue; // Try again
@@ -374,6 +408,29 @@ Content: ${emailData.content}
           // Check for errors in Gemini analysis
           if (geminiResult.error) {
             console.error(`Edge Function: Gemini analysis error for analysis ${analysis.id}:`, geminiResult.error);
+            
+            // Check if this is a quota exhaustion error
+            if (geminiResult.quota_exhausted) {
+              console.log(`Edge Function: Quota exhausted during analysis, marking scan for retry`);
+              // Update scan status to indicate quota exhaustion
+              await supabase.from("scan_history").update({
+                status: "quota_exhausted",
+                error_message: "Gemini API quota exhausted. Analysis will resume when quota resets.",
+                updated_at: new Date().toISOString()
+              }).eq("id", scan.id);
+              
+              // Update analysis status to pending for retry
+              await supabase.from("subscription_analysis").update({
+                analysis_status: 'pending',
+                gemini_response: JSON.stringify({ error: geminiResult.error, quota_exhausted: true }),
+                updated_at: new Date().toISOString()
+              }).eq("id", analysis.id);
+              
+              // Stop processing this scan and move to next
+              console.log(`Edge Function: Stopping analysis for scan ${scan.scan_id} due to quota exhaustion`);
+              break;
+            }
+            
             // Update analysis status to failed
             await supabase.from("subscription_analysis").update({
               analysis_status: 'failed',

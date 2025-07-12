@@ -892,21 +892,31 @@ const createScanRecord = async (userId, decoded) => {
 
 // Function to update scan status
 const updateScanStatus = async (scanId, dbUserId, updates) => {
-  console.log('SCAN-DEBUG: Updating scan status with:', JSON.stringify(updates, null, 2));
-  
   try {
-    const timestamp = new Date().toISOString();
+    console.log(`SCAN-DEBUG: Updating scan status for ${scanId}, user ${dbUserId} with updates:`, updates);
     
-    // Only include fields that exist in the scan_history table
-    const allowedFields = [
-      'status', 'progress', 'emails_found', 'emails_to_process', 
-      'emails_processed', 'subscriptions_found', 'completed_at', 'updated_at'
+    // Add timestamp to track when updates occur
+    const timestamp = new Date().toISOString();
+    const lastUpdateTime = new Date().getTime();
+    
+    // Create full updates object with all necessary fields
+    const fullUpdates = {
+      ...updates,
+      updated_at: timestamp,
+      last_update_time: lastUpdateTime
+    };
+    
+    // Filter out fields that don't exist in the scan_history table
+    const validFields = [
+      'status', 'progress', 'emails_found', 'emails_to_process', 'emails_processed',
+      'subscriptions_found', 'potential_subscriptions', 'error_message', 'completed_at',
+      'updated_at', 'last_update_time'
     ];
     
     const filteredUpdates = {};
-    Object.keys(updates).forEach(key => {
-      if (allowedFields.includes(key)) {
-        filteredUpdates[key] = updates[key];
+    Object.keys(fullUpdates).forEach(key => {
+      if (validFields.includes(key)) {
+        filteredUpdates[key] = fullUpdates[key];
       } else {
         console.log(`SCAN-DEBUG: Skipping field '${key}' as it may not exist in scan_history table`);
       }
@@ -915,12 +925,10 @@ const updateScanStatus = async (scanId, dbUserId, updates) => {
     // Always include updated_at timestamp
     filteredUpdates.updated_at = timestamp;
 
-    // Only fetch current scan status if email stats are completely missing (undefined/null)
-    // Don't override explicit 0 values
-    if (filteredUpdates.emails_found === undefined || filteredUpdates.emails_found === null ||
-        filteredUpdates.emails_to_process === undefined || filteredUpdates.emails_to_process === null ||
-        filteredUpdates.emails_processed === undefined || filteredUpdates.emails_processed === null) {
-      console.log('SCAN-DEBUG: Some email stats missing, fetching current scan status');
+    // Ensure email stats are properly initialized
+    if (filteredUpdates.emails_found === undefined && filteredUpdates.emails_to_process === undefined && filteredUpdates.emails_processed === undefined) {
+      // Only fetch current scan status if ALL email stats are missing
+      console.log('SCAN-DEBUG: All email stats missing, fetching current scan status');
       const currentScan = await fetch(`${supabaseUrl}/rest/v1/scan_history?scan_id=eq.${scanId}`, {
         headers: {
           'apikey': supabaseKey,
@@ -933,17 +941,27 @@ const updateScanStatus = async (scanId, dbUserId, updates) => {
         const currentData = await currentScan.json();
         if (currentData && currentData.length > 0) {
           const current = currentData[0];
-          // Only use defaults if the values are undefined/null, not if they're explicitly 0
-          if (filteredUpdates.emails_found === undefined || filteredUpdates.emails_found === null) {
-            filteredUpdates.emails_found = current.emails_found || 0;
-          }
-          if (filteredUpdates.emails_to_process === undefined || filteredUpdates.emails_to_process === null) {
-            filteredUpdates.emails_to_process = current.emails_to_process || 0;
-          }
-          if (filteredUpdates.emails_processed === undefined || filteredUpdates.emails_processed === null) {
-            filteredUpdates.emails_processed = current.emails_processed || 0;
-          }
+          // Use existing values or sensible defaults
+          filteredUpdates.emails_found = current.emails_found || 0;
+          filteredUpdates.emails_to_process = current.emails_to_process || 0;
+          filteredUpdates.emails_processed = current.emails_processed || 0;
+          console.log('SCAN-DEBUG: Initialized email stats from current scan:', {
+            emails_found: filteredUpdates.emails_found,
+            emails_to_process: filteredUpdates.emails_to_process,
+            emails_processed: filteredUpdates.emails_processed
+          });
         }
+      }
+    } else {
+      // Ensure we have at least default values for missing stats
+      if (filteredUpdates.emails_found === undefined) {
+        filteredUpdates.emails_found = 0;
+      }
+      if (filteredUpdates.emails_to_process === undefined) {
+        filteredUpdates.emails_to_process = 0;
+      }
+      if (filteredUpdates.emails_processed === undefined) {
+        filteredUpdates.emails_processed = 0;
       }
     }
 

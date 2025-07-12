@@ -50,10 +50,20 @@ export default async function handler(req, res) {
       const data = await response.json();
       console.log('QUOTA-DEBUG: Gemini API quota check successful');
       
+      // Check for quota information in headers
+      const quotaHeaders = {};
+      ['x-quota-user', 'x-ratelimit-remaining', 'x-ratelimit-reset'].forEach(header => {
+        if (response.headers.get(header)) {
+          quotaHeaders[header] = response.headers.get(header);
+        }
+      });
+      
       return res.status(200).json({
         quota_status: 'available',
         message: 'Gemini API quota is available',
-        test_response: data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response text'
+        test_response: data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response text',
+        quota_headers: quotaHeaders,
+        timestamp: new Date().toISOString()
       });
     } else {
       const errorData = await response.json();
@@ -64,21 +74,24 @@ export default async function handler(req, res) {
           quota_status: 'exhausted',
           message: 'Gemini API quota has been exhausted',
           error_details: errorData.error,
-          recommendation: 'Consider upgrading your Gemini API plan or wait until the next billing cycle'
+          recommendation: 'Consider upgrading your Gemini API plan or wait until the next billing cycle',
+          timestamp: new Date().toISOString()
         });
       } else if (response.status === 429) {
         return res.status(200).json({
           quota_status: 'rate_limited',
           message: 'Gemini API is rate limited (temporary)',
           error_details: errorData.error,
-          recommendation: 'This is temporary, retry in a few minutes'
+          recommendation: 'This is temporary, retry in a few minutes',
+          timestamp: new Date().toISOString()
         });
       } else {
         return res.status(200).json({
           quota_status: 'error',
           message: 'Gemini API error',
           error_details: errorData.error,
-          status_code: response.status
+          status_code: response.status,
+          timestamp: new Date().toISOString()
         });
       }
     }
@@ -87,7 +100,8 @@ export default async function handler(req, res) {
     return res.status(500).json({ 
       error: 'Failed to check Gemini API quota',
       details: error.message,
-      quota_status: 'unknown'
+      quota_status: 'unknown',
+      timestamp: new Date().toISOString()
     });
   }
 } 

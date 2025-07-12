@@ -57,7 +57,8 @@ const routeMap = {
   '/api/analyzed-subscriptions': () => import('./analyzed-subscriptions.js').then(m => m.default || m),
   '/api/trigger-gemini-scan': () => import('./trigger-gemini-scan.js').then(m => m.default || m),
   // Debug endpoints
-  '/api/debug-scan-status': () => import('./debug-scan-status.js').then(m => m.default || m)
+  '/api/debug-scan-status': () => import('./debug-scan-status.js').then(m => m.default || m),
+  '/api/check-gemini-quota': () => import('./check-gemini-quota.js').then(m => m.default || m)
 };
 
 // Cache for loaded handlers

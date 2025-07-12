@@ -273,6 +273,10 @@ const calculateProgress = (scan) => {
     case 'analyzing':
       progress = 90;
       break;
+    case 'quota_exhausted':
+      // Keep progress at current level but indicate temporary pause
+      progress = Math.min(95, scan.progress || 90);
+      break;
     case 'completed':
       progress = 100;
       break;
