@@ -816,16 +816,82 @@ const storeSubscriptionExample = async (sender, subject, analysisResult) => {
 };
 
 // Function to create a scan record
-const createScanRecord = async (userId) => {
+const createScanRecord = async (userId, decoded) => {
   console.log('SCAN-DEBUG: Creating scan record for user:', userId);
   
   try {
+    // First, look up the database user ID using google_id or email
+    console.log('SCAN-DEBUG: Looking up database user ID for Google user ID:', userId);
+    
+    const userEmail = decoded.email;
+    
+    const userLookupResponse = await fetch(
+      `${supabaseUrl}/rest/v1/users?select=id,email,google_id&or=(email.eq.${encodeURIComponent(userEmail)},google_id.eq.${encodeURIComponent(userId)})`, 
+      {
+        method: 'GET',
+        headers: {
+          'apikey': supabaseKey,
+          'Authorization': `Bearer ${supabaseKey}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+    
+    if (!userLookupResponse.ok) {
+      const errorText = await userLookupResponse.text();
+      console.error('SCAN-DEBUG: User lookup failed:', errorText);
+      throw new Error(`User lookup failed: ${errorText}`);
+    }
+    
+    const users = await userLookupResponse.json();
+    
+    // Create a new user if not found
+    let dbUserId;
+    if (!users || users.length === 0) {
+      console.log(`SCAN-DEBUG: User not found in database, creating new user for: ${userEmail}`);
+      
+      // Create a new user
+      const createUserResponse = await fetch(
+        `${supabaseUrl}/rest/v1/users`, 
+        {
+          method: 'POST',
+          headers: {
+            'apikey': supabaseKey,
+            'Authorization': `Bearer ${supabaseKey}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=representation'
+          },
+          body: JSON.stringify({
+            email: userEmail,
+            google_id: userId,
+            name: decoded.name || userEmail.split('@')[0],
+            avatar_url: decoded.picture || null,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+        }
+      );
+      
+      if (!createUserResponse.ok) {
+        const errorText = await createUserResponse.text();
+        console.error('SCAN-DEBUG: Failed to create user:', errorText);
+        throw new Error(`Failed to create user: ${errorText}`);
+      }
+      
+      const newUser = await createUserResponse.json();
+      dbUserId = newUser[0].id;
+      console.log(`SCAN-DEBUG: Created new user with ID: ${dbUserId}`);
+    } else {
+      dbUserId = users[0].id;
+      console.log(`SCAN-DEBUG: Found existing user with ID: ${dbUserId}`);
+    }
+    
     const scanId = 'scan_' + Math.random().toString(36).substring(2, 15);
     const timestamp = new Date().toISOString();
     
     const scanRecord = {
       scan_id: scanId,
-      user_id: userId,
+      user_id: dbUserId, // Use the database user ID (UUID)
       status: 'pending',
       progress: 0,
       emails_found: 0,
@@ -858,7 +924,7 @@ const createScanRecord = async (userId) => {
     const result = await response.json();
     console.log('SCAN-DEBUG: Successfully created scan record:', result);
     
-    return scanId;
+    return { scanId, dbUserId };
   } catch (error) {
     console.error('SCAN-DEBUG: Error creating scan record:', error);
     throw error;
@@ -1148,13 +1214,14 @@ export default async function handler(req, res) {
     }
 
     // Create scan record
-    const scanId = await createScanRecord(userId);
+    const { scanId, dbUserId } = await createScanRecord(userId, decoded);
     console.log('SCAN-DEBUG: Created scan record with ID:', scanId);
+    console.log('SCAN-DEBUG: Using database user ID:', dbUserId);
 
     // Start email processing in background
-    processEmails(gmailToken, scanId, userId).catch(error => {
+    processEmails(gmailToken, scanId, dbUserId).catch(error => {
       console.error('SCAN-DEBUG: Error processing emails:', error);
-      updateScanStatus(scanId, userId, {
+      updateScanStatus(scanId, dbUserId, {
         status: 'error',
         error: error.message,
         progress: 0
