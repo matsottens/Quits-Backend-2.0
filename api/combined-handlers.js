@@ -131,9 +131,18 @@ async function findHandler(path) {
   // Check for exact matches first
   if (routeMap[path]) {
     console.log(`[combined-handlers] Found exact match for: ${path}`);
-    const handler = await routeMap[path]();
-    handlerCache[path] = handler;
-    return handler;
+    console.log(`[combined-handlers] Loading handler from routeMap[${path}]`);
+    try {
+      const handler = await routeMap[path]();
+      console.log(`[combined-handlers] Handler loaded successfully for: ${path}`);
+      console.log(`[combined-handlers] Handler type:`, typeof handler);
+      console.log(`[combined-handlers] Handler keys:`, Object.keys(handler || {}));
+      handlerCache[path] = handler;
+      return handler;
+    } catch (error) {
+      console.error(`[combined-handlers] Error loading handler for ${path}:`, error);
+      throw error;
+    }
   }
   
   // Check for nested path matching (like /api/subscription/123)
