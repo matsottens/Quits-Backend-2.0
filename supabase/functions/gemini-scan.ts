@@ -300,23 +300,24 @@ serve(async (_req) => {
     for (const scan of scans) {
       console.log(`Processing scan ${scan.scan_id} for user ${scan.user_id}`);
       
-      // 2. Get emails for this scan
-      const { data: emails, error: emailError } = await supabase
-        .from("email_data")
+      // 2. Get pre-identified potential subscriptions for this scan
+      const { data: potentialSubscriptions, error: subscriptionError } = await supabase
+        .from("subscription_analysis")
         .select("*")
-        .eq("scan_id", scan.scan_id);
+        .eq("scan_id", scan.scan_id)
+        .eq("analysis_status", "pending");
 
-      if (emailError) {
-        console.error(`Failed to fetch emails for scan ${scan.scan_id}:`, emailError);
+      if (subscriptionError) {
+        console.error(`Failed to fetch potential subscriptions for scan ${scan.scan_id}:`, subscriptionError);
         await supabase.from("scan_history").update({ 
           status: "error", 
-          error_message: emailError.message 
+          error_message: subscriptionError.message 
         }).eq("id", scan.id);
         continue;
       }
 
-      if (!emails || emails.length === 0) {
-        console.log(`No emails found for scan ${scan.scan_id}`);
+      if (!potentialSubscriptions || potentialSubscriptions.length === 0) {
+        console.log(`No potential subscriptions found for scan ${scan.scan_id}`);
         await supabase.from("scan_history").update({ 
           status: "completed", 
           completed_at: new Date().toISOString() 
@@ -324,18 +325,38 @@ serve(async (_req) => {
         continue;
       }
 
-      console.log(`Analyzing ${emails.length} emails for scan ${scan.scan_id}`);
+      console.log(`Analyzing ${potentialSubscriptions.length} potential subscriptions with Gemini for scan ${scan.scan_id}`);
 
-      // 3. Analyze each email with Gemini
-      for (const email of emails) {
-        console.log(`Analyzing email ${email.id} with subject: ${email.subject}`);
+      // 3. Analyze each potential subscription with Gemini
+      let processedCount = 0;
+      for (const analysis of potentialSubscriptions) {
+        console.log(`Analyzing potential subscription: ${analysis.subscription_name} for email ${analysis.email_data_id}`);
+        
+        // Get the email content for Gemini analysis
+        const { data: emailData, error: emailError } = await supabase
+          .from("email_data")
+          .select("content, subject, sender, gmail_message_id")
+          .eq("id", analysis.email_data_id)
+          .single();
+
+        if (emailError || !emailData) {
+          console.error(`Failed to fetch email data for analysis ${analysis.id}:`, emailError);
+          continue;
+        }
+
+        // Prepare email content for Gemini
+        const emailContent = `
+Subject: ${emailData.subject}
+From: ${emailData.sender}
+Content: ${emailData.content}
+        `.trim();
         
         // Add a delay to prevent rate limiting
         await new Promise(resolve => setTimeout(resolve, 3000)); // 3 second delay between calls
         
-        const geminiResult = await analyzeEmailWithGemini(email.content || "");
+        const geminiResult = await analyzeEmailWithGemini(emailContent);
         
-        console.log(`Gemini result for email ${email.id}:`, {
+        console.log(`Gemini result for analysis ${analysis.id}:`, {
           is_subscription: geminiResult.is_subscription,
           subscription_name: geminiResult.subscription_name,
           price: geminiResult.price,
@@ -344,13 +365,38 @@ serve(async (_req) => {
 
         // Check for errors in Gemini analysis
         if (geminiResult.error) {
-          console.error(`Gemini analysis error for email ${email.id}:`, geminiResult.error);
+          console.error(`Gemini analysis error for analysis ${analysis.id}:`, geminiResult.error);
+          // Update analysis status to failed
+          await supabase.from("subscription_analysis").update({
+            analysis_status: 'failed',
+            gemini_response: JSON.stringify({ error: geminiResult.error }),
+            updated_at: new Date().toISOString()
+          }).eq("id", analysis.id);
           continue;
         }
 
-        // Only process if it's actually a subscription
+        // Update the analysis record with Gemini results
+        const { error: updateError } = await supabase.from("subscription_analysis").update({
+          subscription_name: geminiResult.subscription_name || analysis.subscription_name,
+          price: geminiResult.price || analysis.price,
+          currency: geminiResult.currency || analysis.currency,
+          billing_cycle: geminiResult.billing_cycle || analysis.billing_cycle,
+          next_billing_date: geminiResult.next_billing_date,
+          service_provider: geminiResult.service_provider || analysis.service_provider,
+          confidence_score: geminiResult.confidence_score || analysis.confidence_score,
+          analysis_status: 'completed',
+          gemini_response: JSON.stringify(geminiResult),
+          updated_at: new Date().toISOString()
+        }).eq("id", analysis.id);
+
+        if (updateError) {
+          console.error(`Failed to update analysis record ${analysis.id}:`, updateError);
+          continue;
+        }
+
+        // Only create subscription if Gemini confirms it's a subscription
         if (geminiResult && geminiResult.is_subscription && geminiResult.subscription_name) {
-          console.log(`Found subscription: ${geminiResult.subscription_name} for email ${email.id}`);
+          console.log(`Gemini confirmed subscription: ${geminiResult.subscription_name}`);
           
           // Check for duplicates before creating subscription
           const normalizedServiceName = normalizeServiceName(geminiResult.subscription_name);
@@ -371,30 +417,7 @@ serve(async (_req) => {
             continue;
           }
           
-          // 4. Store the result in subscription_analysis
-          const { error: analysisError } = await supabase.from("subscription_analysis").insert({
-            email_data_id: email.id,
-            user_id: scan.user_id,
-            scan_id: scan.scan_id,
-            subscription_name: geminiResult.subscription_name,
-            price: geminiResult.price || 0,
-            currency: geminiResult.currency || 'USD',
-            billing_cycle: geminiResult.billing_cycle || 'monthly',
-            next_billing_date: geminiResult.next_billing_date,
-            service_provider: geminiResult.service_provider,
-            confidence_score: geminiResult.confidence_score || 0.8,
-            analysis_status: 'completed',
-            gemini_response: JSON.stringify(geminiResult),
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          });
-
-          if (analysisError) {
-            console.error(`Failed to insert subscription analysis for email ${email.id}:`, analysisError);
-            continue;
-          }
-
-          // 5. Insert into subscriptions table (using correct column names)
+          // Create subscription record
           const { error: subscriptionError } = await supabase.from("subscriptions").insert({
             user_id: scan.user_id,
             name: geminiResult.subscription_name,
@@ -402,32 +425,39 @@ serve(async (_req) => {
             currency: geminiResult.currency || 'USD',
             billing_cycle: geminiResult.billing_cycle || 'monthly',
             next_billing_date: geminiResult.next_billing_date,
-            provider: geminiResult.service_provider, // Use 'provider' instead of 'service_provider'
+            provider: geminiResult.service_provider,
             category: 'auto-detected',
-            email_id: email.gmail_message_id,
+            email_id: emailData.gmail_message_id,
             is_manual: false,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
           });
 
           if (subscriptionError) {
-            console.error(`Failed to insert subscription for email ${email.id}:`, subscriptionError);
+            console.error(`Failed to insert subscription for analysis ${analysis.id}:`, subscriptionError);
             continue;
           }
 
-          console.log(`Successfully processed subscription: ${geminiResult.subscription_name}`);
+          console.log(`Successfully created subscription: ${geminiResult.subscription_name}`);
+          processedCount++;
         } else {
-          console.log(`Email ${email.id} is not a subscription or missing required data`);
+          console.log(`Gemini determined this is not a subscription: ${analysis.subscription_name}`);
+          // Update analysis status to indicate it's not a subscription
+          await supabase.from("subscription_analysis").update({
+            analysis_status: 'not_subscription',
+            gemini_response: JSON.stringify(geminiResult),
+            updated_at: new Date().toISOString()
+          }).eq("id", analysis.id);
         }
       }
 
-      // 6. Mark scan as completed
+      // 4. Mark scan as completed
       await supabase.from("scan_history").update({ 
         status: "completed", 
         completed_at: new Date().toISOString() 
       }).eq("id", scan.id);
       
-      console.log(`Completed processing scan ${scan.scan_id}`);
+      console.log(`Completed processing scan ${scan.scan_id} - Created ${processedCount} subscriptions`);
     }
 
     return new Response(JSON.stringify({ 
