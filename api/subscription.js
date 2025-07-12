@@ -399,7 +399,7 @@ export default async function handler(req, res) {
           
           // Also fetch auto-detected subscriptions from analysis results
           const analysisResponse = await fetch(
-            `${supabaseUrl}/rest/v1/subscription_analysis?user_id=eq.${dbUserId}&or=(analysis_status.eq.completed,analysis_status.eq.pending)&select=*`,
+            `${supabaseUrl}/rest/v1/subscription_analysis?user_id=eq.${dbUserId}&analysis_status=eq.completed&select=*`,
             {
               method: 'GET',
               headers: {
@@ -414,13 +414,6 @@ export default async function handler(req, res) {
           if (analysisResponse.ok) {
             analysisSubscriptions = await analysisResponse.json();
             console.log(`Found ${analysisSubscriptions.length} auto-detected subscriptions from analysis`);
-            
-            // Log the status breakdown
-            const statusCounts = analysisSubscriptions.reduce((acc, item) => {
-              acc[item.analysis_status] = (acc[item.analysis_status] || 0) + 1;
-              return acc;
-            }, {});
-            console.log('Analysis status breakdown:', statusCounts);
           }
           
           // If no analysis results yet, wait a bit and retry (for new users)
@@ -432,7 +425,7 @@ export default async function handler(req, res) {
             
             // Retry fetching analysis results
             const retryAnalysisResponse = await fetch(
-              `${supabaseUrl}/rest/v1/subscription_analysis?user_id=eq.${dbUserId}&or=(analysis_status.eq.completed,analysis_status.eq.pending)&select=*`,
+              `${supabaseUrl}/rest/v1/subscription_analysis?user_id=eq.${dbUserId}&analysis_status=eq.completed&select=*`,
               {
                 method: 'GET',
                 headers: {
@@ -462,12 +455,11 @@ export default async function handler(req, res) {
                 price: analysis.price || 0,
                 billing_cycle: analysis.billing_cycle || 'monthly',
                 next_billing_date: analysis.next_billing_date,
-                category: analysis.analysis_status === 'pending' ? 'pending-analysis' : 'auto-detected',
+                category: 'auto-detected',
                 is_manual: false,
                 source_analysis_id: analysis.id,
                 service_provider: analysis.service_provider,
                 confidence_score: analysis.confidence_score,
-                analysis_status: analysis.analysis_status, // Include the analysis status
                 created_at: analysis.created_at,
                 updated_at: analysis.updated_at
               });
@@ -516,7 +508,6 @@ export default async function handler(req, res) {
             source_analysis_id: sub.source_analysis_id,
             service_provider: sub.service_provider,
             confidence_score: sub.confidence_score,
-            analysis_status: sub.analysis_status, // Include analysis status for frontend
             createdAt: sub.created_at,
             updatedAt: sub.updated_at
           }));

@@ -1376,16 +1376,21 @@ const processEmails = async (gmailToken, scanId, userId) => {
     // Manually trigger the Gemini Edge Function to ensure it gets called
     console.log('SCAN-DEBUG: Manually triggering Gemini Edge Function');
     try {
+      const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
+      console.log('SCAN-DEBUG: Using service role key for Edge Function trigger:', !!serviceRoleKey);
+      
       const triggerResponse = await fetch(
         "https://dstsluflwxzkwouxcjkh.supabase.co/functions/v1/gemini-scan",
         { 
           method: "POST",
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
+            'Authorization': `Bearer ${serviceRoleKey}`
           }
         }
       );
+      
+      console.log('SCAN-DEBUG: Edge Function trigger response status:', triggerResponse.status);
       
       if (triggerResponse.ok) {
         const triggerData = await triggerResponse.json();
@@ -1393,6 +1398,28 @@ const processEmails = async (gmailToken, scanId, userId) => {
       } else {
         const errorText = await triggerResponse.text();
         console.error('SCAN-DEBUG: Failed to trigger Gemini Edge Function:', triggerResponse.status, errorText);
+        
+        // Try alternative trigger method
+        console.log('SCAN-DEBUG: Trying alternative trigger method...');
+        const altTriggerResponse = await fetch(
+          "https://dstsluflwxzkwouxcjkh.supabase.co/functions/v1/gemini-scan",
+          { 
+            method: "POST",
+            headers: {
+              'Content-Type': 'application/json',
+              'apikey': serviceRoleKey,
+              'Authorization': `Bearer ${serviceRoleKey}`
+            }
+          }
+        );
+        
+        if (altTriggerResponse.ok) {
+          const altTriggerData = await altTriggerResponse.json();
+          console.log('SCAN-DEBUG: Alternative trigger successful:', altTriggerData);
+        } else {
+          const altErrorText = await altTriggerResponse.text();
+          console.error('SCAN-DEBUG: Alternative trigger also failed:', altErrorText);
+        }
       }
     } catch (triggerError) {
       console.error('SCAN-DEBUG: Error triggering Gemini Edge Function:', triggerError);
@@ -1419,19 +1446,23 @@ const processEmails = async (gmailToken, scanId, userId) => {
       
       // Still try to trigger the Edge Function
       console.log('SCAN-DEBUG: Attempting to trigger Edge Function despite error...');
+      const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
       const triggerResponse = await fetch(
         "https://dstsluflwxzkwouxcjkh.supabase.co/functions/v1/gemini-scan",
         { 
           method: "POST",
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
+            'Authorization': `Bearer ${serviceRoleKey}`
           }
         }
       );
       
       if (triggerResponse.ok) {
         console.log('SCAN-DEBUG: Edge Function triggered successfully despite error');
+      } else {
+        const errorText = await triggerResponse.text();
+        console.error('SCAN-DEBUG: Failed to trigger Edge Function despite error:', errorText);
       }
     } catch (fallbackError) {
       console.error('SCAN-DEBUG: Fallback completion also failed:', fallbackError);
