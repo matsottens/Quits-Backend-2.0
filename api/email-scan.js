@@ -119,7 +119,7 @@ const fetchEmailsFromGmail = async (gmailToken) => {
     const isValidToken = await validateGmailToken(gmailToken);
     if (!isValidToken) {
       console.error('SCAN-DEBUG: Gmail token validation failed');
-      return [];
+      throw new Error('Gmail token validation failed');
     }
     console.log('SCAN-DEBUG: Gmail token validated successfully');
     
@@ -303,7 +303,7 @@ const fetchEmailsFromGmail = async (gmailToken) => {
   } catch (error) {
     console.error('SCAN-DEBUG: Error fetching emails from Gmail:', error);
     console.error('SCAN-DEBUG: Error stack:', error.stack);
-    return [];
+    throw error; // Re-throw the error so it can be caught by the calling function
   }
 };
 
@@ -704,30 +704,56 @@ const validateGmailToken = async (token) => {
   console.log('SCAN-DEBUG: Validating Gmail token');
   if (!token) {
     console.error('SCAN-DEBUG: No Gmail token provided');
-      return false;
-    }
+    return false;
+  }
 
   try {
-    // Create OAuth2 client and set credentials
+    // Try using Google APIs library first
+    console.log('SCAN-DEBUG: Trying Google APIs library validation...');
     const oauth2Client = new google.auth.OAuth2();
     oauth2Client.setCredentials({ access_token: token });
     
-    // Initialize Gmail API with the OAuth2 client
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
     console.log('SCAN-DEBUG: Making test call to Gmail API');
     const response = await gmail.users.getProfile({ userId: 'me' });
-    console.log('SCAN-DEBUG: Gmail API response:', response.status);
-    return true;
-  } catch (error) {
-    console.error('SCAN-DEBUG: Gmail token validation failed:', error.message);
-    if (error.response) {
-      console.error('SCAN-DEBUG: Gmail API error response:', {
-        status: error.response.status,
-        statusText: error.response.statusText,
-        data: error.response.data
-      });
+    console.log('SCAN-DEBUG: Gmail API response status:', response.status);
+    console.log('SCAN-DEBUG: Gmail API response data:', response.data);
+    
+    if (response.status === 200 && response.data) {
+      console.log('SCAN-DEBUG: Gmail token validation successful (Google APIs)');
+      return true;
+    } else {
+      console.error('SCAN-DEBUG: Gmail API returned unexpected response:', response);
+      throw new Error('Unexpected response from Google APIs');
     }
-    return false;
+  } catch (googleError) {
+    console.error('SCAN-DEBUG: Google APIs validation failed:', googleError.message);
+    
+    // Fallback to direct fetch
+    console.log('SCAN-DEBUG: Trying direct fetch validation...');
+    try {
+      const fetchResponse = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      console.log('SCAN-DEBUG: Direct fetch response status:', fetchResponse.status);
+      
+      if (fetchResponse.ok) {
+        const profileData = await fetchResponse.json();
+        console.log('SCAN-DEBUG: Direct fetch validation successful:', profileData);
+        return true;
+      } else {
+        const errorText = await fetchResponse.text();
+        console.error('SCAN-DEBUG: Direct fetch validation failed:', errorText);
+        return false;
+      }
+    } catch (fetchError) {
+      console.error('SCAN-DEBUG: Direct fetch validation also failed:', fetchError.message);
+      return false;
+    }
   }
 };
 
@@ -1074,14 +1100,15 @@ export default async function handler(req, res) {
   console.log('SCAN-DEBUG: Headers:', {
     'content-type': req.headers['content-type'],
     'authorization': req.headers.authorization ? 'Present' : 'Missing',
-    'x-gmail-token': req.headers['x-gmail-token'] ? 'Present' : 'Missing'
+    'x-gmail-token': req.headers['x-gmail-token'] ? 'Present' : 'Missing',
+    'x-mock-mode': req.headers['x-mock-mode'] ? 'Present' : 'Missing'
   });
   console.log('SCAN-DEBUG: Body keys:', Object.keys(req.body || {}));
   
   // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', 'https://www.quits.cc');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token, Pragma, X-API-Key, X-Api-Version, X-Device-ID');
+  res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token, Pragma, X-API-Key, X-Api-Version, X-Device-ID, X-Mock-Mode');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Max-Age', '86400');
 
@@ -1094,6 +1121,10 @@ export default async function handler(req, res) {
     console.log('SCAN-DEBUG: Invalid method:', req.method);
     return res.status(405).json({ error: 'Method not allowed' });
   }
+
+  // Check for mock mode
+  const isMockMode = req.headers['x-mock-mode'] === 'true';
+  console.log('SCAN-DEBUG: Mock mode:', isMockMode);
 
   try {
     console.log('SCAN-DEBUG: Starting email scan processing...');
@@ -1110,23 +1141,34 @@ export default async function handler(req, res) {
       console.log('SCAN-DEBUG: Found token in request body, length:', token.length);
     }
     
-    if (!token) {
+    if (!token && !isMockMode) {
       console.log('SCAN-DEBUG: No token provided in header or body');
       return res.status(400).json({ error: 'Token is required' });
     }
 
     console.log('SCAN-DEBUG: About to verify JWT token...');
-    // Verify the JWT token first
+    // Verify the JWT token first (skip in mock mode)
     let decoded;
-    try {
-      const jwtSecret = process.env.JWT_SECRET || 'dev_secret_DO_NOT_USE_IN_PRODUCTION';
-      console.log('SCAN-DEBUG: Using JWT secret:', jwtSecret.substring(0, 3) + '...');
-      decoded = jwt.verify(token, jwtSecret);
-      console.log('SCAN-DEBUG: JWT token verified successfully');
-      console.log('SCAN-DEBUG: Decoded JWT payload keys:', Object.keys(decoded));
-    } catch (jwtError) {
-      console.log('SCAN-DEBUG: JWT verification failed:', jwtError.message);
-      return res.status(401).json({ error: 'Invalid or expired token' });
+    if (isMockMode) {
+      // Mock user data for testing
+      decoded = {
+        id: 'mock_user_id',
+        email: 'test@example.com',
+        name: 'Test User',
+        picture: null
+      };
+      console.log('SCAN-DEBUG: Using mock user data:', decoded);
+    } else {
+      try {
+        const jwtSecret = process.env.JWT_SECRET || 'dev_secret_DO_NOT_USE_IN_PRODUCTION';
+        console.log('SCAN-DEBUG: Using JWT secret:', jwtSecret.substring(0, 3) + '...');
+        decoded = jwt.verify(token, jwtSecret);
+        console.log('SCAN-DEBUG: JWT token verified successfully');
+        console.log('SCAN-DEBUG: Decoded JWT payload keys:', Object.keys(decoded));
+      } catch (jwtError) {
+        console.log('SCAN-DEBUG: JWT verification failed:', jwtError.message);
+        return res.status(401).json({ error: 'Invalid or expired token' });
+      }
     }
 
     // Get user ID from decoded token
@@ -1140,35 +1182,45 @@ export default async function handler(req, res) {
     console.log('SCAN-DEBUG: User ID from token:', userId);
 
     console.log('SCAN-DEBUG: About to extract Gmail token...');
-    // Extract Gmail token from JWT
-    let gmailToken = extractGmailToken(token);
-    if (!gmailToken) {
-      console.log('SCAN-DEBUG: Failed to extract Gmail token from JWT');
-      console.log('SCAN-DEBUG: JWT payload keys:', Object.keys(decoded));
-      
-      // Check if we have a Gmail token in the request headers as fallback
-      const headerGmailToken = req.headers['x-gmail-token'];
-      if (headerGmailToken) {
-        console.log('SCAN-DEBUG: Using Gmail token from X-Gmail-Token header');
-        gmailToken = headerGmailToken;
-      } else {
-        console.log('SCAN-DEBUG: No Gmail token found in JWT or headers');
-        return res.status(400).json({ 
-          error: 'Gmail access token not found',
-          message: 'Please re-authenticate with Gmail to scan your emails'
-        });
+    // Extract Gmail token from JWT (skip in mock mode)
+    let gmailToken = null;
+    if (!isMockMode) {
+      gmailToken = extractGmailToken(token);
+      if (!gmailToken) {
+        console.log('SCAN-DEBUG: Failed to extract Gmail token from JWT');
+        console.log('SCAN-DEBUG: JWT payload keys:', Object.keys(decoded));
+        
+        // Check if we have a Gmail token in the request headers as fallback
+        const headerGmailToken = req.headers['x-gmail-token'];
+        if (headerGmailToken) {
+          console.log('SCAN-DEBUG: Using Gmail token from X-Gmail-Token header');
+          gmailToken = headerGmailToken;
+        } else {
+          console.log('SCAN-DEBUG: No Gmail token found in JWT or headers');
+          return res.status(400).json({ 
+            error: 'Gmail access token not found',
+            message: 'Please re-authenticate with Gmail to scan your emails'
+          });
+        }
       }
+    } else {
+      gmailToken = 'mock_gmail_token';
+      console.log('SCAN-DEBUG: Using mock Gmail token');
     }
 
     console.log('SCAN-DEBUG: About to validate Gmail token...');
-    // Validate Gmail token
-    const isValidToken = await validateGmailToken(gmailToken);
-    if (!isValidToken) {
-      console.log('SCAN-DEBUG: Gmail token validation failed');
-      return res.status(401).json({ 
-        error: 'Invalid Gmail token',
-        message: 'Your Gmail access has expired. Please re-authenticate.'
-      });
+    // Validate Gmail token (skip in mock mode)
+    if (!isMockMode) {
+      const isValidToken = await validateGmailToken(gmailToken);
+      if (!isValidToken) {
+        console.log('SCAN-DEBUG: Gmail token validation failed');
+        return res.status(401).json({ 
+          error: 'Invalid Gmail token',
+          message: 'Your Gmail access has expired. Please re-authenticate.'
+        });
+      }
+    } else {
+      console.log('SCAN-DEBUG: Skipping Gmail token validation in mock mode');
     }
 
     console.log('SCAN-DEBUG: Gmail token validated successfully');
@@ -1189,15 +1241,26 @@ export default async function handler(req, res) {
 
     // Process emails asynchronously (don't await this)
     console.log('SCAN-DEBUG: Starting async email processing...');
-    processEmailsAsync(gmailToken, scanId, dbUserId).catch(error => {
+    
+    // Add timeout wrapper to prevent hanging
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => {
+        reject(new Error('Email processing timed out after 5 minutes'));
+      }, 5 * 60 * 1000); // 5 minutes timeout
+    });
+    
+    const processingPromise = processEmailsAsync(gmailToken, scanId, dbUserId, isMockMode);
+    
+    Promise.race([processingPromise, timeoutPromise]).catch(error => {
       console.error('SCAN-DEBUG: Async email processing failed:', error);
-      // Update scan status to failed
+      console.error('SCAN-DEBUG: Error stack:', error.stack);
+      // Update scan status to error
       updateScanStatus(scanId, dbUserId, {
-        status: 'failed',
-        error_message: error.message,
+        status: 'error',
+        error_message: `Async processing failed: ${error.message}`,
         updated_at: new Date().toISOString()
       }).catch(updateError => {
-        console.error('SCAN-DEBUG: Failed to update scan status to failed:', updateError);
+        console.error('SCAN-DEBUG: Failed to update scan status to error:', updateError);
       });
     });
 
@@ -1212,17 +1275,24 @@ export default async function handler(req, res) {
 }
 
 // New async function to process emails without blocking the response
-const processEmailsAsync = async (gmailToken, scanId, userId) => {
+const processEmailsAsync = async (gmailToken, scanId, userId, isMockMode = false) => {
   console.log('SCAN-DEBUG: ===== ASYNC EMAIL PROCESSING STARTED =====');
   console.log('SCAN-DEBUG: Gmail token provided:', !!gmailToken);
   console.log('SCAN-DEBUG: Scan ID provided:', scanId);
   console.log('SCAN-DEBUG: User ID provided:', userId);
+  console.log('SCAN-DEBUG: Mock mode:', isMockMode);
   
   if (!gmailToken || !scanId || !userId) {
-    throw new Error('Missing required parameters for email processing');
+    const error = new Error('Missing required parameters for email processing');
+    console.error('SCAN-DEBUG: Parameter validation failed:', error.message);
+    throw error;
   }
-            
+  
+  let processedCount = 0;
+  
   try {
+    console.log('SCAN-DEBUG: All parameters validated, starting email processing...');
+    
     // Step-based progress values
     const PROGRESS = {
       start: 5,
@@ -1237,39 +1307,69 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
     };
 
     // 1. Start
+    console.log('SCAN-DEBUG: Step 1 - Starting email processing...');
     await updateScanStatus(scanId, userId, {
       status: 'in_progress',
       progress: PROGRESS.start
     });
+    console.log('SCAN-DEBUG: Step 1 completed');
 
     // 2. Token validated
+    console.log('SCAN-DEBUG: Step 2 - Token already validated...');
     await updateScanStatus(scanId, userId, {
       progress: PROGRESS.token_validated
     });
+    console.log('SCAN-DEBUG: Step 2 completed');
 
     // 3. Fetch subscription examples
+    console.log('SCAN-DEBUG: Step 3 - Fetching subscription examples...');
     let examples = [];
     try {
       const { data, error } = await supabase
         .from('subscription_examples')
         .select('service_name, sender_pattern, subject_pattern');
       if (!error && data) examples = data;
-    } catch {}
+      console.log(`SCAN-DEBUG: Found ${examples.length} subscription examples`);
+    } catch (exampleError) {
+      console.error('SCAN-DEBUG: Error fetching subscription examples:', exampleError);
+      // Continue anyway, this is not critical
+    }
     await updateScanStatus(scanId, userId, {
       progress: PROGRESS.fetched_examples
     });
+    console.log('SCAN-DEBUG: Step 3 completed');
 
-    // 4. Search Gmail for emails
+    // 4. Search Gmail for emails (or use mock data)
+    console.log('SCAN-DEBUG: Step 4 - Searching Gmail for emails...');
     await updateScanStatus(scanId, userId, {
       progress: PROGRESS.searched_gmail
     });
-    const emails = await fetchEmailsFromGmail(gmailToken);
+    
+    let emails = [];
+    if (isMockMode) {
+      console.log('SCAN-DEBUG: Using mock email data');
+      // Create mock email data
+      emails = [
+        { id: 'mock_email_1' },
+        { id: 'mock_email_2' },
+        { id: 'mock_email_3' },
+        { id: 'mock_email_4' },
+        { id: 'mock_email_5' }
+      ];
+    } else {
+      console.log('SCAN-DEBUG: About to call fetchEmailsFromGmail...');
+      emails = await fetchEmailsFromGmail(gmailToken);
+    }
+    
+    console.log(`SCAN-DEBUG: fetchEmailsFromGmail returned ${emails.length} emails`);
+    
     await updateScanStatus(scanId, userId, {
       progress: PROGRESS.emails_fetched,
       emails_found: emails.length,
       emails_to_process: emails.length,
       emails_processed: 0
     });
+    console.log('SCAN-DEBUG: Step 4 completed');
 
     // 5. Processing emails in batches
     const totalEmails = emails.length;
@@ -1293,7 +1393,7 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
     let subscriptionsFound = 0;
     const processedMessageIds = new Set();
     const BATCH_SIZE = 3; // Process 3 emails at a time
-    const UPDATE_INTERVAL = 3; // Update progress every 3 emails
+    const UPDATE_INTERVAL = 3;
     
     // Initialize existingSubscriptionIds with current user subscriptions to prevent duplicates
     const existingSubscriptionIds = new Set();
@@ -1335,376 +1435,30 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
           // Mark this message as processed
           processedMessageIds.add(messageId);
           
-          // Fetch email content with timeout and better error handling
+          // Fetch email content with timeout and better error handling (or use mock data)
           console.log(`SCAN-DEBUG: Fetching content for email ${messageId}`);
           let emailData;
-          try {
-            emailData = await Promise.race([
-              fetchEmailContent(gmailToken, messageId),
-              new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Email fetch timeout')), 15000) // Reduced timeout
-              )
-            ]);
-          } catch (fetchError) {
-            console.error(`SCAN-DEBUG: Error fetching email ${messageId}:`, fetchError.message);
-            // Continue with next email instead of failing the entire batch
-            return { success: false, error: fetchError.message };
-          }
-          
-          if (!emailData) {
-            console.log(`SCAN-DEBUG: No email data for message ${messageId}, skipping`);
-            return { success: false, error: 'No email data' };
-          }
-          
-          // Extract email details with error handling
-          let subject, from, date, emailBody;
-          try {
-            const headers = emailData.payload?.headers || [];
-            const parsedHeaders = parseEmailHeaders(headers);
-            subject = parsedHeaders.subject;
-            from = parsedHeaders.from;
-            date = parsedHeaders.date;
-            emailBody = extractEmailBody(emailData);
-            
-            console.log(`SCAN-DEBUG: Email details - Subject: "${subject}", From: "${from}"`);
-          } catch (parseError) {
-            console.error(`SCAN-DEBUG: Error parsing email headers for ${messageId}:`, parseError.message);
-            // Use fallback values
-            subject = 'Unknown Subject';
-            from = 'Unknown Sender';
-            date = new Date().toISOString();
-            emailBody = 'Email content could not be parsed';
-          }
-          
-          // Store email data in database with error handling
-          const emailDataRecord = {
-            scan_id: scanId,
-            user_id: userId,
-            gmail_message_id: messageId,
-            subject: subject,
-            sender: from,
-            date: date,
-            content: emailBody,
-            content_preview: emailBody.substring(0, 500),
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          };
-          
-          console.log(`SCAN-DEBUG: Storing email data for message ${messageId}`);
-          
-          // Use REST API directly to ensure we get the ID back
-          let emailDataResult = null;
-          let emailDataError = null;
-          
-          try {
-            const response = await fetch(`${supabaseUrl}/rest/v1/email_data`, {
-              method: 'POST',
-              headers: {
-                'apikey': supabaseKey,
-                'Authorization': `Bearer ${supabaseKey}`,
-                'Content-Type': 'application/json',
-                'Prefer': 'return=representation'
-              },
-              body: JSON.stringify(emailDataRecord)
-            });
-            
-            if (response.ok) {
-              try {
-                const responseText = await response.text();
-                if (responseText && responseText.trim()) {
-                  const result = JSON.parse(responseText);
-                  emailDataResult = result[0];
-                  emailDataError = null;
-                  console.log(`SCAN-DEBUG: REST API successful, got ID: ${emailDataResult.id}`);
-                } else {
-                  console.log('SCAN-DEBUG: REST API successful but empty response, trying Supabase client fallback');
-                  emailDataError = new Error('Empty response from REST API');
+          if (isMockMode) {
+            // Use mock email data
+            emailData = {
+              payload: {
+                headers: [
+                  { name: 'Subject', value: `Mock Subscription Email ${emailIndex + 1}` },
+                  { name: 'From', value: 'mock@service.com' },
+                  { name: 'Date', value: new Date().toISOString() }
+                ],
+                body: {
+                  data: Buffer.from('This is a mock subscription email for testing purposes.').toString('base64')
                 }
-              } catch (parseError) {
-                console.error('SCAN-DEBUG: Error parsing REST API response:', parseError.message);
-                emailDataError = parseError;
               }
-            } else {
-              const errorText = await response.text();
-              console.error('SCAN-DEBUG: REST API failed:', errorText);
-              emailDataError = new Error(`REST API error: ${response.status} - ${errorText}`);
-            }
-          } catch (restError) {
-            console.error('SCAN-DEBUG: REST API exception:', restError);
-            emailDataError = restError;
-          }
-          
-          // If REST API fails, try Supabase client as fallback
-          if (emailDataError || !emailDataResult) {
-            console.log('SCAN-DEBUG: REST API failed, trying Supabase client fallback...');
-            try {
-              const { data, error } = await supabase
-                .from('email_data')
-                .insert(emailDataRecord)
-                .select('id')
-                .single();
-              
-              emailDataResult = data;
-              emailDataError = error;
-              if (!error && data) {
-                console.log(`SCAN-DEBUG: Supabase client fallback successful, got ID: ${data.id}`);
-              }
-            } catch (clientError) {
-              console.error('SCAN-DEBUG: Supabase client fallback error:', clientError);
-              emailDataError = clientError;
-            }
-          }
-            
-          if (emailDataError) {
-            console.error('SCAN-DEBUG: Error storing email data:', emailDataError);
-            return { success: false, error: emailDataError.message };
-          } else {
-            console.log(`SCAN-DEBUG: Successfully stored email data for message ${messageId} with ID: ${emailDataResult.id}`);
-          }
-          
-          // Validate that we have a valid email_data_id before proceeding
-          if (!emailDataResult || !emailDataResult.id) {
-            console.error('SCAN-DEBUG: emailDataResult is null or missing ID:', emailDataResult);
-            return { success: false, error: 'No email data ID' };
-          }
-          
-          console.log(`SCAN-DEBUG: Validated email_data_id: ${emailDataResult.id}`);
-          
-          // Analyze email with pattern matching
-          console.log(`SCAN-DEBUG: Analyzing email with pattern matching: "${subject}"`);
-          let analysis;
-          try {
-            analysis = await analyzeEmailWithPatternMatching(emailData);
-            console.log(`SCAN-DEBUG: Pattern matching result for email ${messageId}:`, JSON.stringify(analysis));
-          } catch (analysisError) {
-            console.error(`SCAN-DEBUG: Error analyzing email with pattern matching:`, analysisError);
-            analysis = { isSubscription: false, confidence: 0 };
-          }
-
-          // Store analysis result in database for Edge Function to process
-          if (analysis.isSubscription && analysis.confidence > 0.6) {
-            console.log(`SCAN-DEBUG: Detected potential subscription: ${analysis.serviceName} (${analysis.confidence} confidence)`);
-            
-            const analysisRecord = {
-              email_data_id: emailDataResult.id,
-              user_id: userId,
-              scan_id: scanId,
-              subscription_name: analysis.serviceName,
-              price: analysis.amount || 0,
-              currency: analysis.currency || 'USD',
-              billing_cycle: analysis.billingFrequency || 'monthly',
-              next_billing_date: analysis.nextBillingDate,
-              service_provider: analysis.serviceName,
-              confidence_score: analysis.confidence,
-              analysis_status: 'pending',
-              gemini_response: null,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
             };
-            
-            console.log(`SCAN-DEBUG: About to insert analysis record with email_data_id: ${analysisRecord.email_data_id}`);
-            
-            let analysisInsertError = null;
-            try {
-              const analysisResponse = await fetch(`${supabaseUrl}/rest/v1/subscription_analysis`, {
-                method: 'POST',
-                headers: {
-                  'apikey': supabaseKey,
-                  'Authorization': `Bearer ${supabaseKey}`,
-                  'Content-Type': 'application/json',
-                  'Prefer': 'return=representation'
-                },
-                body: JSON.stringify(analysisRecord)
-              });
-              
-              if (!analysisResponse.ok) {
-                const errorText = await analysisResponse.text();
-                analysisInsertError = new Error(`REST API error: ${analysisResponse.status} - ${errorText}`);
-              }
-            } catch (restError) {
-              analysisInsertError = restError;
-            }
-            
-            if (analysisInsertError) {
-              console.log('SCAN-DEBUG: REST API failed for analysis, trying Supabase client...');
-              try {
-                const { error } = await supabase
-                  .from('subscription_analysis')
-                  .insert(analysisRecord);
-                analysisInsertError = error;
-              } catch (clientError) {
-                analysisInsertError = clientError;
-              }
-            }
-              
-            if (analysisInsertError) {
-              console.error('SCAN-DEBUG: Error storing analysis record:', analysisInsertError);
-            } else {
-              console.log(`SCAN-DEBUG: Stored analysis record for Edge Function processing`);
-            }
-          }
-          
-          return { success: true };
-          
-        } catch (emailError) {
-          console.error(`SCAN-DEBUG: Error processing email ${emailIndex + 1}:`, emailError);
-          return { success: false, error: emailError.message };
-        }
-      });
-      
-      // Wait for batch to complete
-      const batchResults = await Promise.allSettled(batchPromises);
-      const successfulResults = batchResults.filter(result => 
-        result.status === 'fulfilled' && result.value?.success
-      );
-      
-      processedCount += successfulResults.length;
-      console.log(`SCAN-DEBUG: Batch completed: ${successfulResults.length}/${batch.length} emails processed successfully`);
-      
-      // Update progress every UPDATE_INTERVAL emails or at the end of each batch
-      if (processedCount % UPDATE_INTERVAL === 0 || i + BATCH_SIZE >= totalEmails) {
-        const emailProgress = PROGRESS.processing_emails_start + ((processedCount / totalEmails) * (PROGRESS.processing_emails_end - PROGRESS.processing_emails_start));
-        await updateScanStatus(scanId, userId, {
-          progress: Math.round(emailProgress),
-          emails_processed: processedCount
-        });
-        console.log(`SCAN-DEBUG: Updated progress to ${Math.round(emailProgress)}% (${processedCount}/${totalEmails} emails processed)`);
-      }
-      
-      // Small delay between batches to prevent overwhelming the system
-      if (i + BATCH_SIZE < totalEmails) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-    }
-
-    console.log('SCAN-DEBUG: Email processing loop completed');
-    console.log(`SCAN-DEBUG: Final processed count: ${processedCount} out of ${totalEmails} emails`);
-    
-    // Count potential subscriptions found by pattern matching
-    const { data: potentialSubscriptions, error: potentialSubsError } = await supabase
-      .from('subscription_analysis')
-      .select('id')
-      .eq('scan_id', scanId)
-      .eq('analysis_status', 'pending');
-    
-    const potentialSubscriptionCount = potentialSubscriptions?.length || 0;
-    console.log(`SCAN-DEBUG: Potential subscriptions found by pattern matching: ${potentialSubscriptionCount}`);
-    
-    // Update final status to ready_for_analysis so Edge Function can process with Gemini
-    console.log('SCAN-DEBUG: Setting scan status to ready_for_analysis');
-    await updateScanStatus(scanId, userId, {
-      status: 'ready_for_analysis',
-      progress: PROGRESS.ready_for_analysis,
-      emails_processed: processedCount,
-      subscriptions_found: potentialSubscriptionCount,
-      completed_at: new Date().toISOString()
-    });
-    
-    // Manually trigger the Gemini Edge Function to ensure it gets called
-    console.log('SCAN-DEBUG: Manually triggering Gemini Edge Function');
-    try {
-      const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
-      console.log('SCAN-DEBUG: Using service role key for Edge Function trigger:', !!serviceRoleKey);
-      
-      const triggerResponse = await fetch(
-        "https://dstsluflwxzkwouxcjkh.supabase.co/functions/v1/gemini-scan",
-        { 
-          method: "POST",
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${serviceRoleKey}`
-          }
-        }
-      );
-      
-      console.log('SCAN-DEBUG: Edge Function trigger response status:', triggerResponse.status);
-      
-      if (triggerResponse.ok) {
-        try {
-          const responseText = await triggerResponse.text();
-          if (responseText && responseText.trim()) {
-            const triggerData = JSON.parse(responseText);
-            console.log('SCAN-DEBUG: Gemini Edge Function triggered successfully:', triggerData);
           } else {
-            console.log('SCAN-DEBUG: Gemini Edge Function triggered successfully (empty response)');
-          }
-        } catch (parseError) {
-          console.log('SCAN-DEBUG: Gemini Edge Function triggered successfully (could not parse response):', parseError.message);
-        }
-      } else {
-        const errorText = await triggerResponse.text();
-        console.error('SCAN-DEBUG: Failed to trigger Gemini Edge Function:', triggerResponse.status, errorText);
-        
-        // Try alternative trigger method
-        console.log('SCAN-DEBUG: Trying alternative trigger method...');
-        const altTriggerResponse = await fetch(
-          "https://dstsluflwxzkwouxcjkh.supabase.co/functions/v1/gemini-scan",
-          { 
-            method: "POST",
-            headers: {
-              'Content-Type': 'application/json',
-              'apikey': serviceRoleKey,
-              'Authorization': `Bearer ${serviceRoleKey}`
-            }
-          }
-        );
-        
-        if (altTriggerResponse.ok) {
-          try {
-            const responseText = await altTriggerResponse.text();
-            if (responseText && responseText.trim()) {
-              const altTriggerData = JSON.parse(responseText);
-              console.log('SCAN-DEBUG: Alternative trigger successful:', altTriggerData);
-            } else {
-              console.log('SCAN-DEBUG: Alternative trigger successful (empty response)');
-            }
-          } catch (parseError) {
-            console.log('SCAN-DEBUG: Alternative trigger successful (could not parse response):', parseError.message);
-          }
-        } else {
-          const altErrorText = await altTriggerResponse.text();
-          console.error('SCAN-DEBUG: Alternative trigger also failed:', altErrorText);
-        }
-      }
-    } catch (triggerError) {
-      console.error('SCAN-DEBUG: Error triggering Gemini Edge Function:', triggerError);
-    }
-            
-    console.log(`SCAN-DEBUG: Async email processing completed for scan ${scanId}`);
-    console.log(`SCAN-DEBUG: Total emails processed: ${processedCount}`);
-    console.log(`SCAN-DEBUG: Potential subscriptions found: ${potentialSubscriptionCount}`);
-    console.log(`SCAN-DEBUG: Scan status set to 'ready_for_analysis' - Edge Function will process with Gemini AI`);
-
-  } catch (error) {
-    console.error('SCAN-DEBUG: Error in async processEmails:', error);
-    console.error('SCAN-DEBUG: Error stack:', error.stack);
-    
-    // Update scan status to error but don't fail completely
-    try {
-      await updateScanStatus(scanId, userId, {
-        status: 'error',
-        error_message: `Email processing error: ${error.message}`,
-        updated_at: new Date().toISOString()
-      });
-    } catch (updateError) {
-      console.error('SCAN-DEBUG: Error updating scan status after failure:', updateError);
-    }
-    
-    // Even if there's an error, try to complete the scan if we processed any emails
-    if (processedCount > 0) {
-      console.log(`SCAN-DEBUG: Attempting to complete scan despite errors. Processed ${processedCount} emails.`);
-      try {
-        await updateScanStatus(scanId, userId, {
-          status: 'ready_for_analysis',
-          progress: PROGRESS.ready_for_analysis,
-          emails_processed: processedCount,
-          subscriptions_found: 0,
-          completed_at: new Date().toISOString()
-        });
-        console.log('SCAN-DEBUG: Scan completed despite errors');
-      } catch (completionError) {
-        console.error('SCAN-DEBUG: Error completing scan:', completionError);
-      }
-    }
-  }
-};
+            try {
+              emailData = await Promise.race([
+                fetchEmailContent(gmailToken, messageId),
+                new Promise((_, reject) => 
+                  setTimeout(() => reject(new Error('Email fetch timeout')), 15000) // Reduced timeout
+                )
+              ]);
+            } catch (fetchError) {
+              console.error(`
