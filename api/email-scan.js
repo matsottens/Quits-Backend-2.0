@@ -217,30 +217,47 @@ const fetchEmailsFromGmail = async (gmailToken) => {
       const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodedQuery}&maxResults=50`;
       
       console.log(`SCAN-DEBUG: Making Gmail API request to: ${url}`);
-      const response = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${gmailToken}`,
-          'Content-Type': 'application/json',
-        },
-      });
       
-      console.log(`SCAN-DEBUG: Gmail API response status: ${response.status}`);
+      // Add timeout to prevent hanging requests
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
       
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`SCAN-DEBUG: Gmail API error: ${response.status} ${errorText}`);
-        throw new Error(`Gmail API error: ${response.status} ${errorText}`);
+      try {
+        const response = await fetch(url, {
+          headers: {
+            Authorization: `Bearer ${gmailToken}`,
+            'Content-Type': 'application/json',
+          },
+          signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        
+        console.log(`SCAN-DEBUG: Gmail API response status: ${response.status}`);
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(`SCAN-DEBUG: Gmail API error: ${response.status} ${errorText}`);
+          throw new Error(`Gmail API error: ${response.status} ${errorText}`);
+        }
+        
+        const data = await response.json();
+        const messages = data.messages || [];
+        
+        console.log(`SCAN-DEBUG: Found ${messages.length} messages for query: ${query}`);
+        
+        // Add messages to the unique set
+        messages.forEach(message => uniqueMessageIds.add(message.id));
+        
+        return messages.length;
+      } catch (error) {
+        clearTimeout(timeoutId);
+        if (error.name === 'AbortError') {
+          console.error(`SCAN-DEBUG: Gmail API request timed out for query: ${query}`);
+          throw new Error(`Gmail API request timed out for query: ${query}`);
+        }
+        throw error;
       }
-      
-      const data = await response.json();
-      const messages = data.messages || [];
-      
-      console.log(`SCAN-DEBUG: Found ${messages.length} messages for query: ${query}`);
-      
-      // Add messages to the unique set
-      messages.forEach(message => uniqueMessageIds.add(message.id));
-      
-      return messages.length;
     };
     
     console.log('SCAN-DEBUG: Starting to execute queries');
@@ -1321,13 +1338,25 @@ const processEmails = async (gmailToken, scanId, userId) => {
 
     // Check for existing subscriptions to avoid duplicates
     console.log('SCAN-DEBUG: Checking for existing subscriptions to avoid duplicates');
-    const { data: existingSubscriptions, error: existingSubsError } = await supabase
-      .from('subscriptions')
-      .select('name, provider, email_id')
-      .eq('user_id', userId);
+    let existingSubscriptions = null;
+    let existingSubsError = null;
+    
+    try {
+      const result = await supabase
+        .from('subscriptions')
+        .select('name, provider, email_id')
+        .eq('user_id', userId);
+      
+      existingSubscriptions = result.data;
+      existingSubsError = result.error;
+    } catch (supabaseError) {
+      console.error('SCAN-DEBUG: Exception during existing subscriptions query:', supabaseError);
+      existingSubsError = supabaseError;
+    }
     
     if (existingSubsError) {
       console.error('SCAN-DEBUG: Error fetching existing subscriptions:', existingSubsError);
+      // Continue anyway, we'll just not have duplicate checking
     } else {
       console.log(`SCAN-DEBUG: Found ${existingSubscriptions?.length || 0} existing subscriptions`);
     }
@@ -1345,9 +1374,13 @@ const processEmails = async (gmailToken, scanId, userId) => {
     }
     
     console.log('SCAN-DEBUG: About to fetch emails from Gmail');
+    console.log('SCAN-DEBUG: Gmail token available for fetchEmailsFromGmail:', !!gmailToken);
+    console.log('SCAN-DEBUG: Gmail token length:', gmailToken?.length || 0);
+    
     // Fetch emails from Gmail
     const emails = await fetchEmailsFromGmail(gmailToken);
     console.log(`SCAN-DEBUG: Fetched ${emails.length} emails from Gmail`);
+    console.log('SCAN-DEBUG: Email fetching completed successfully');
     
     if (emails.length === 0) {
       console.log('SCAN-DEBUG: No emails found, setting scan to ready_for_analysis');
