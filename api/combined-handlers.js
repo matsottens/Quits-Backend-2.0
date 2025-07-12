@@ -29,7 +29,8 @@ const routeMap = {
   '/api/health': () => import('./health.js').then(m => m.default || m),
   // New Gemini analysis endpoints
   '/api/analyze-emails': () => import('./analyze-emails.js').then(m => m.default || m),
-  '/api/analyzed-subscriptions': () => import('./analyzed-subscriptions.js').then(m => m.default || m)
+  '/api/analyzed-subscriptions': () => import('./analyzed-subscriptions.js').then(m => m.default || m),
+  '/api/trigger-gemini-scan': () => import('./trigger-gemini-scan.js').then(m => m.default || m)
 };
 
 // Cache for loaded handlers

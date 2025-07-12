@@ -2,6 +2,10 @@ import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 
 export default async function handler(req, res) {
+  console.log('SCAN-STATUS-DEBUG: Handler called');
+  console.log('SCAN-STATUS-DEBUG: Method:', req.method);
+  console.log('SCAN-STATUS-DEBUG: URL:', req.url);
+  
   // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', 'https://www.quits.cc');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
@@ -10,6 +14,7 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Max-Age', '86400');
 
   if (req.method === 'OPTIONS') {
+    console.log('SCAN-STATUS-DEBUG: Handling OPTIONS request');
     return res.status(204).end();
   }
 
@@ -40,6 +45,11 @@ export default async function handler(req, res) {
     const scanIdFromPath = pathParts[pathParts.length - 1];
     const queryParams = new URLSearchParams(req.url.split('?')[1] || '');
     const scanId = scanIdFromPath !== 'scan-status' ? scanIdFromPath : (queryParams.get('scanId') || 'latest');
+
+    console.log('SCAN-STATUS-DEBUG: URL:', req.url);
+    console.log('SCAN-STATUS-DEBUG: Path parts:', pathParts);
+    console.log('SCAN-STATUS-DEBUG: Scan ID from path:', scanIdFromPath);
+    console.log('SCAN-STATUS-DEBUG: Final scan ID:', scanId);
 
     let scan;
     let error;
