@@ -1149,10 +1149,11 @@ const searchEmails = async (gmail, query) => {
 // New async function to process emails without blocking the response
 const processEmailsAsync = async (gmailToken, scanId, userId, isMockMode = false) => {
   console.log('SCAN-DEBUG: ===== ASYNC EMAIL PROCESSING STARTED =====');
-  console.log('SCAN-DEBUG: Gmail token provided:', !!gmailToken);
-  console.log('SCAN-DEBUG: Scan ID provided:', scanId);
-  console.log('SCAN-DEBUG: User ID provided:', userId);
-  console.log('SCAN-DEBUG: Mock mode:', isMockMode);
+  console.log('SCAN-DEBUG: Parameters received:');
+  console.log('SCAN-DEBUG: - gmailToken length:', gmailToken ? gmailToken.length : 'null');
+  console.log('SCAN-DEBUG: - scanId:', scanId);
+  console.log('SCAN-DEBUG: - userId:', userId);
+  console.log('SCAN-DEBUG: - isMockMode:', isMockMode);
   
   console.log('SCAN-DEBUG: About to validate parameters...');
   if (!gmailToken || !scanId || !userId) {
@@ -1903,21 +1904,49 @@ export default async function handler(req, res) {
     
     console.log('SCAN-DEBUG: About to call processEmailsAsync...');
     console.log('SCAN-DEBUG: processEmailsAsync function exists:', typeof processEmailsAsync);
-    const processingPromise = processEmailsAsync(gmailToken, scanId, dbUserId, isMockMode);
-    console.log('SCAN-DEBUG: processEmailsAsync called, setting up race condition...');
     
-    Promise.race([processingPromise, timeoutPromise]).catch(error => {
-      console.error('SCAN-DEBUG: Async email processing failed:', error);
-      console.error('SCAN-DEBUG: Error stack:', error.stack);
-      // Update scan status to error
+    // Test if function is callable
+    if (typeof processEmailsAsync !== 'function') {
+      console.error('SCAN-DEBUG: processEmailsAsync is not a function!');
       updateScanStatus(scanId, dbUserId, {
         status: 'error',
-        error_message: `Async processing failed: ${error.message}`,
+        error_message: 'processEmailsAsync is not defined as a function',
         updated_at: new Date().toISOString()
       }).catch(updateError => {
         console.error('SCAN-DEBUG: Failed to update scan status to error:', updateError);
       });
-    });
+      return;
+    }
+    
+    // Add immediate error handling
+    try {
+      const processingPromise = processEmailsAsync(gmailToken, scanId, dbUserId, isMockMode);
+      console.log('SCAN-DEBUG: processEmailsAsync called, setting up race condition...');
+      
+      Promise.race([processingPromise, timeoutPromise]).catch(error => {
+        console.error('SCAN-DEBUG: Async email processing failed:', error);
+        console.error('SCAN-DEBUG: Error stack:', error.stack);
+        // Update scan status to error
+        updateScanStatus(scanId, dbUserId, {
+          status: 'error',
+          error_message: `Async processing failed: ${error.message}`,
+          updated_at: new Date().toISOString()
+        }).catch(updateError => {
+          console.error('SCAN-DEBUG: Failed to update scan status to error:', updateError);
+        });
+      });
+    } catch (syncError) {
+      console.error('SCAN-DEBUG: Synchronous error calling processEmailsAsync:', syncError);
+      console.error('SCAN-DEBUG: Sync error stack:', syncError.stack);
+      // Update scan status to error
+      updateScanStatus(scanId, dbUserId, {
+        status: 'error',
+        error_message: `Sync error calling async processing: ${syncError.message}`,
+        updated_at: new Date().toISOString()
+      }).catch(updateError => {
+        console.error('SCAN-DEBUG: Failed to update scan status to error:', updateError);
+      });
+    }
 
   } catch (error) {
     console.error('SCAN-DEBUG: Error in email scan handler:', error);
