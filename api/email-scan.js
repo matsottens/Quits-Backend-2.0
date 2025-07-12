@@ -91,6 +91,7 @@ const fetchEmailsFromGmail = async (gmailToken) => {
   
   try {
     // First validate the token
+    console.log('SCAN-DEBUG: About to validate Gmail token');
     const isValidToken = await validateGmailToken(gmailToken);
     if (!isValidToken) {
       console.error('SCAN-DEBUG: Gmail token validation failed');
@@ -99,6 +100,7 @@ const fetchEmailsFromGmail = async (gmailToken) => {
     console.log('SCAN-DEBUG: Gmail token validated successfully');
     
     // Fetch subscription examples from the database for targeted search
+    console.log('SCAN-DEBUG: About to fetch subscription examples from database');
     const supabaseUrl = process.env.SUPABASE_URL;
     const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
@@ -193,12 +195,15 @@ const fetchEmailsFromGmail = async (gmailToken) => {
       const encodedQuery = encodeURIComponent(query);
       const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodedQuery}&maxResults=50`;
       
+      console.log(`SCAN-DEBUG: Making Gmail API request to: ${url}`);
       const response = await fetch(url, {
         headers: {
           Authorization: `Bearer ${gmailToken}`,
           'Content-Type': 'application/json',
         },
       });
+      
+      console.log(`SCAN-DEBUG: Gmail API response status: ${response.status}`);
       
       if (!response.ok) {
         const errorText = await response.text();
@@ -217,6 +222,7 @@ const fetchEmailsFromGmail = async (gmailToken) => {
       return messages.length;
     };
     
+    console.log('SCAN-DEBUG: Starting to execute queries');
     // Execute queries until we have enough messages or run out of queries
     for (const query of uniqueQueries) {
       // Skip if we already have enough messages
@@ -225,7 +231,13 @@ const fetchEmailsFromGmail = async (gmailToken) => {
         break;
       }
       
-      await executeQuery(query);
+      try {
+        await executeQuery(query);
+      } catch (error) {
+        console.error(`SCAN-DEBUG: Error executing query "${query}":`, error.message);
+        // Continue with next query instead of failing completely
+        continue;
+      }
     }
     
     // If we didn't find any messages, try a broader search
@@ -233,7 +245,11 @@ const fetchEmailsFromGmail = async (gmailToken) => {
       console.log('SCAN-DEBUG: No messages found with targeted queries, trying broader search');
       
       const broadQuery = 'category:primary';
-      await executeQuery(broadQuery);
+      try {
+        await executeQuery(broadQuery);
+      } catch (error) {
+        console.error(`SCAN-DEBUG: Error executing broad query:`, error.message);
+      }
     }
     
     // Convert the Set to an Array
@@ -248,6 +264,7 @@ const fetchEmailsFromGmail = async (gmailToken) => {
     return messageIds;
   } catch (error) {
     console.error('SCAN-DEBUG: Error fetching emails from Gmail:', error);
+    console.error('SCAN-DEBUG: Error stack:', error.stack);
     return [];
   }
 };
@@ -943,9 +960,12 @@ const updateScanStatus = async (scanId, dbUserId, updates) => {
       last_update: timestamp
     };
 
-    // Ensure we always have email stats
-    if (!fullUpdates.emails_found || !fullUpdates.emails_to_process || !fullUpdates.emails_processed) {
-      console.log('SCAN-DEBUG: No email stats provided, fetching current scan status');
+    // Only fetch current scan status if email stats are completely missing (undefined/null)
+    // Don't override explicit 0 values
+    if (fullUpdates.emails_found === undefined || fullUpdates.emails_found === null ||
+        fullUpdates.emails_to_process === undefined || fullUpdates.emails_to_process === null ||
+        fullUpdates.emails_processed === undefined || fullUpdates.emails_processed === null) {
+      console.log('SCAN-DEBUG: Some email stats missing, fetching current scan status');
       const currentScan = await fetch(`${supabaseUrl}/rest/v1/scan_history?scan_id=eq.${scanId}`, {
         headers: {
           'apikey': supabaseKey,
@@ -958,10 +978,16 @@ const updateScanStatus = async (scanId, dbUserId, updates) => {
         const currentData = await currentScan.json();
         if (currentData && currentData.length > 0) {
           const current = currentData[0];
-          fullUpdates.emails_found = current.emails_found || 250;
-          fullUpdates.emails_to_process = current.emails_to_process || 250;
-          fullUpdates.emails_processed = current.emails_processed || 
-            Math.floor((current.progress || 0) * (current.emails_to_process || 250) / 100);
+          // Only use defaults if the values are undefined/null, not if they're explicitly 0
+          if (fullUpdates.emails_found === undefined || fullUpdates.emails_found === null) {
+            fullUpdates.emails_found = current.emails_found || 0;
+          }
+          if (fullUpdates.emails_to_process === undefined || fullUpdates.emails_to_process === null) {
+            fullUpdates.emails_to_process = current.emails_to_process || 0;
+          }
+          if (fullUpdates.emails_processed === undefined || fullUpdates.emails_processed === null) {
+            fullUpdates.emails_processed = current.emails_processed || 0;
+          }
         }
       }
     }
@@ -1030,6 +1056,10 @@ const searchEmails = async (gmail, query) => {
 
 const processEmails = async (gmailToken, scanId, userId) => {
   console.log('SCAN-DEBUG: Starting processEmails');
+  console.log('SCAN-DEBUG: Gmail token provided:', !!gmailToken);
+  console.log('SCAN-DEBUG: Scan ID provided:', scanId);
+  console.log('SCAN-DEBUG: User ID provided:', userId);
+  
   if (!gmailToken) {
     console.error('SCAN-DEBUG: No Gmail token provided to processEmails');
             return;
@@ -1044,6 +1074,7 @@ const processEmails = async (gmailToken, scanId, userId) => {
             }
             
   try {
+    console.log('SCAN-DEBUG: About to update initial scan status');
     // Update initial scan status
     await updateScanStatus(scanId, userId, {
                   status: 'in_progress',
@@ -1053,13 +1084,16 @@ const processEmails = async (gmailToken, scanId, userId) => {
       emails_processed: 0,
       subscriptions_found: 0
     });
+    console.log('SCAN-DEBUG: Initial scan status updated successfully');
             
             // Fetch emails from Gmail
-            console.log('SCAN-DEBUG: Fetching emails from Gmail');
+            console.log('SCAN-DEBUG: About to call fetchEmailsFromGmail');
             const messages = await fetchEmailsFromGmail(gmailToken);
-    console.log(`SCAN-DEBUG: Found ${messages.length} emails to process`);
+    console.log(`SCAN-DEBUG: fetchEmailsFromGmail completed, found ${messages.length} emails to process`);
+    console.log(`SCAN-DEBUG: First few message IDs: ${messages.slice(0, 3).map(m => m.id || m).join(', ')}`);
 
     // Update scan status with total emails found
+    console.log('SCAN-DEBUG: About to update scan status with email count');
     await updateScanStatus(scanId, userId, {
               status: 'in_progress',
       progress: 10,
@@ -1068,11 +1102,13 @@ const processEmails = async (gmailToken, scanId, userId) => {
       emails_processed: 0,
       subscriptions_found: 0
             });
+    console.log('SCAN-DEBUG: Scan status updated with email count');
             
             let processedCount = 0;
     let subscriptionsFound = 0;
     let potentialSubscriptions = [];
             
+    console.log('SCAN-DEBUG: Starting to process emails in loop');
     // Process emails in batches
             for (let i = 0; i < messages.length; i++) {
               const message = messages[i];
@@ -1092,9 +1128,10 @@ const processEmails = async (gmailToken, scanId, userId) => {
               }
               
       // Get email content
-              const emailData = await fetchEmailContent(gmailToken, message.id);
+      console.log(`SCAN-DEBUG: Fetching content for email ${i + 1}/${messages.length} (ID: ${message.id || message})`);
+              const emailData = await fetchEmailContent(gmailToken, message.id || message);
               if (!emailData) {
-        console.log(`SCAN-DEBUG: Skipping email ${message.id} - failed to fetch content`);
+        console.log(`SCAN-DEBUG: Skipping email ${message.id || message} - failed to fetch content`);
                 continue;
               }
       // Log the email subject and sender
@@ -1103,14 +1140,14 @@ const processEmails = async (gmailToken, scanId, userId) => {
       console.log(`SCAN-DEBUG: Analyzing email ${i + 1}/${messages.length} - Subject: ${subject}, From: ${from}`);
       // Analyze email with Gemini
                 const analysis = await analyzeEmailWithGemini(emailData);
-      console.log(`SCAN-DEBUG: Gemini analysis result for email ${message.id}:`, JSON.stringify(analysis));
+      console.log(`SCAN-DEBUG: Gemini analysis result for email ${message.id || message}:`, JSON.stringify(analysis));
 
       // Save potential subscription email
       if (analysis.isSubscription || analysis.confidence > 0.3) {
         const potentialSubscription = {
           user_id: userId,
           scan_id: scanId,
-          email_id: message.id,
+          email_id: message.id || message,
           sender: emailData.from,
           subject: emailData.subject,
           received_date: emailData.date,
@@ -1139,6 +1176,7 @@ const processEmails = async (gmailToken, scanId, userId) => {
       }
     }
 
+    console.log('SCAN-DEBUG: Email processing loop completed');
     // Update final status
     await updateScanStatus(scanId, userId, {
               status: 'completed',
@@ -1156,6 +1194,7 @@ const processEmails = async (gmailToken, scanId, userId) => {
 
   } catch (error) {
     console.error('SCAN-DEBUG: Error in processEmails:', error);
+    console.error('SCAN-DEBUG: Error stack:', error.stack);
     await updateScanStatus(scanId, userId, {
                 status: 'error',
       error: error.message,
