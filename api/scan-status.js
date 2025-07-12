@@ -158,9 +158,30 @@ export default async function handler(req, res) {
             // Use the latest scan data
             scan = fullScan;
             error = null;
+            
+            // Add a warning in the response that we're returning a different scan
+            const responseData = {
+              status: scan.status, 
+              scan_id: scan.scan_id, 
+              created_at: scan.created_at,
+              progress: calculateProgress(scan),
+              stats: {
+                emails_found: scan.emails_found || 0,
+                emails_to_process: scan.emails_to_process || 0,
+                emails_processed: scan.emails_processed || 0,
+                subscriptions_found: scan.subscriptions_found || 0
+              },
+              warning: `Requested scan ID '${scanId}' not found. Returning latest scan '${scan.scan_id}' instead.`
+            };
+            
+            return res.status(200).json(responseData);
           } else {
             // No scans found at all
-            return res.status(404).json({ error: 'No scans found for user' });
+            return res.status(404).json({ 
+              error: 'No scans found for user',
+              requested_scan_id: scanId,
+              user_id: userId
+            });
           }
         }
       } else {
@@ -174,14 +195,7 @@ export default async function handler(req, res) {
     }
 
     // Calculate progress based on status
-    let progress = 0;
-    if (scan.status === 'in_progress') {
-      progress = Math.min(50, scan.progress || 0); // Reading phase: 0-50%
-    } else if (scan.status === 'ready_for_analysis' || scan.status === 'analyzing') {
-      progress = 50 + (scan.progress || 0) / 2; // Analysis phase: 50-100%
-    } else if (scan.status === 'completed') {
-      progress = 100;
-    }
+    let progress = calculateProgress(scan);
 
     // Get stats for the scan
     const stats = {
@@ -203,3 +217,16 @@ export default async function handler(req, res) {
     res.status(500).json({ error: 'Internal server error' });
   }
 } 
+
+// Helper function to calculate progress
+const calculateProgress = (scan) => {
+  let progress = 0;
+  if (scan.status === 'in_progress') {
+    progress = Math.min(50, scan.progress || 0); // Reading phase: 0-50%
+  } else if (scan.status === 'ready_for_analysis' || scan.status === 'analyzing') {
+    progress = 50 + (scan.progress || 0) / 2; // Analysis phase: 50-100%
+  } else if (scan.status === 'completed') {
+    progress = 100;
+  }
+  return progress;
+}; 

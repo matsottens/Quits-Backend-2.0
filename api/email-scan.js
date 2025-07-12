@@ -1583,6 +1583,7 @@ export default async function handler(req, res) {
     const { scanId, dbUserId } = await createScanRecord(userId, decoded);
     console.log('SCAN-DEBUG: Created scan record with ID:', scanId);
     console.log('SCAN-DEBUG: Using database user ID:', dbUserId);
+    console.log('SCAN-DEBUG: About to return scanId to frontend:', scanId);
 
     // Start email processing in background
     console.log('SCAN-DEBUG: About to start processEmails and await completion');
@@ -1593,6 +1594,8 @@ export default async function handler(req, res) {
     try {
       await processEmails(gmailToken, scanId, dbUserId);
       console.log('SCAN-DEBUG: processEmails completed successfully');
+      console.log('SCAN-DEBUG: Returning scanId to frontend:', scanId);
+      console.log('SCAN-DEBUG: Response object being sent:', { success: true, scanId: scanId });
       res.status(202).json({ success: true, scanId: scanId });
     } catch (error) {
       console.error('SCAN-DEBUG: Error in processEmails:', error);
