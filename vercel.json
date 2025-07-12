@@ -55,6 +55,7 @@
     { "source": "/api/debug", "destination": "/api/debug.js" },
     { "source": "/api/debug-env", "destination": "/api/debug-env.js" },
     { "source": "/api/debug-supabase", "destination": "/api/debug-supabase.js" },
+    { "source": "/api/debug-scan-status", "destination": "/api/debug-scan-status.js" },
     { "source": "/api/google-proxy", "destination": "/api/google-proxy.js" },
     { "source": "/api/health", "destination": "/api/health.js" },
     { "source": "/api/auth/google/callback", "destination": "/api/auth/google/callback.js" },

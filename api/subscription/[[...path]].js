@@ -333,6 +333,7 @@ export default async function handler(req, res) {
               for (const analysis of analysisSubscriptions) {
                 const alreadyExists = subscriptions.some(sub => sub.name === analysis.subscription_name);
                 if (!alreadyExists) {
+                  console.log(`[PATH] Adding analysis subscription: ${analysis.subscription_name} (price: ${analysis.price}, billing: ${analysis.billing_cycle})`);
                   allSubscriptions.push({
                     id: `analysis_${analysis.id}`,
                     name: analysis.subscription_name,
@@ -347,6 +348,8 @@ export default async function handler(req, res) {
                     created_at: analysis.created_at,
                     updated_at: analysis.updated_at
                   });
+                } else {
+                  console.log(`[PATH] Skipping analysis subscription (already exists): ${analysis.subscription_name}`);
                 }
               }
               

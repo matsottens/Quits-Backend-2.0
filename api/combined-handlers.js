@@ -55,7 +55,9 @@ const routeMap = {
   // New Gemini analysis endpoints
   '/api/analyze-emails': () => import('./analyze-emails.js').then(m => m.default || m),
   '/api/analyzed-subscriptions': () => import('./analyzed-subscriptions.js').then(m => m.default || m),
-  '/api/trigger-gemini-scan': () => import('./trigger-gemini-scan.js').then(m => m.default || m)
+  '/api/trigger-gemini-scan': () => import('./trigger-gemini-scan.js').then(m => m.default || m),
+  // Debug endpoints
+  '/api/debug-scan-status': () => import('./debug-scan-status.js').then(m => m.default || m)
 };
 
 // Cache for loaded handlers
