@@ -1,20 +1,73 @@
 import { createClient } from '@supabase/supabase-js';
+import jwt from 'jsonwebtoken';
 
 export default async function handler(req, res) {
+  // Set CORS headers
+  res.setHeader('Access-Control-Allow-Origin', 'https://www.quits.cc');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token, Pragma, X-API-Key, X-Api-Version, X-Device-ID');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Max-Age', '86400');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+
+  if (req.method !== 'GET') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
   
-  // Get user ID from query or auth (for demo, from query)
-  const user_id = req.query.user_id;
-  if (!user_id) return res.status(400).json({ error: 'Missing user_id' });
-
   try {
-    const { data: scan, error } = await supabase
-      .from('scan_history')
-      .select('*')
-      .eq('user_id', user_id)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
+    // Extract and verify authorization token
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Missing or invalid authorization header' });
+    }
+
+    const token = authHeader.substring(7);
+    const jwtSecret = process.env.JWT_SECRET || 'dev_secret_DO_NOT_USE_IN_PRODUCTION';
+    const decoded = jwt.verify(token, jwtSecret);
+    const userId = decoded.id || decoded.sub;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Invalid user ID in token' });
+    }
+
+    // Get scanId from path or query parameters
+    const pathParts = req.url.split('/');
+    const scanIdFromPath = pathParts[pathParts.length - 1];
+    const queryParams = new URLSearchParams(req.url.split('?')[1] || '');
+    const scanId = scanIdFromPath !== 'scan-status' ? scanIdFromPath : (queryParams.get('scanId') || 'latest');
+
+    let scan;
+    let error;
+
+    if (scanId && scanId !== 'latest') {
+      // Query by specific scan ID
+      const { data, error: scanError } = await supabase
+        .from('scan_history')
+        .select('*')
+        .eq('scan_id', scanId)
+        .eq('user_id', userId)
+        .single();
+      
+      scan = data;
+      error = scanError;
+    } else {
+      // Query latest scan for user
+      const { data, error: scanError } = await supabase
+        .from('scan_history')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+      
+      scan = data;
+      error = scanError;
+    }
 
     if (error) {
       console.error('Error fetching scan:', error);
@@ -40,8 +93,7 @@ export default async function handler(req, res) {
       emails_found: scan.emails_found || 0,
       emails_to_process: scan.emails_to_process || 0,
       emails_processed: scan.emails_processed || 0,
-      subscriptions_found: scan.subscriptions_found || 0,
-      potential_subscriptions: scan.potential_subscriptions || 0
+      subscriptions_found: scan.subscriptions_found || 0
     };
 
     res.status(200).json({ 

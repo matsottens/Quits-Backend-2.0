@@ -1107,7 +1107,6 @@ const processEmails = async (gmailToken, scanId, userId) => {
             
             let processedCount = 0;
     let subscriptionsFound = 0;
-    let potentialSubscriptions = [];
             
     console.log('SCAN-DEBUG: Starting to process emails in loop');
     // Process emails in batches
@@ -1130,44 +1129,48 @@ const processEmails = async (gmailToken, scanId, userId) => {
               
       // Get email content
       console.log(`SCAN-DEBUG: Fetching content for email ${i + 1}/${messages.length} (ID: ${message.id || message})`);
-              const emailData = await fetchEmailContent(gmailToken, message.id || message);
-              if (!emailData) {
+      const emailData = await fetchEmailContent(gmailToken, message.id || message);
+      if (!emailData) {
         console.log(`SCAN-DEBUG: Skipping email ${message.id || message} - failed to fetch content`);
-                continue;
-              }
-      // Log the email subject and sender
-              const headers = emailData.payload?.headers || [];
-              const { subject, from } = parseEmailHeaders(headers);
-      console.log(`SCAN-DEBUG: Analyzing email ${i + 1}/${messages.length} - Subject: ${subject}, From: ${from}`);
-      // Analyze email with Gemini
-                const analysis = await analyzeEmailWithGemini(emailData);
-      console.log(`SCAN-DEBUG: Gemini analysis result for email ${message.id || message}:`, JSON.stringify(analysis));
-
-      // Save potential subscription email
-      if (analysis.isSubscription || analysis.confidence > 0.3) {
-        const potentialSubscription = {
-          user_id: userId,
-          scan_id: scanId,
-          email_id: message.id || message,
-          sender: emailData.from,
-          subject: emailData.subject,
-          received_date: emailData.date,
-          analysis_result: analysis,
-          confidence: analysis.confidence,
-          is_confirmed: analysis.isSubscription && analysis.confidence > 0.6
-        };
-        
-        // Save to potential_subscriptions table
-        const { error: saveError } = await supabase
-          .from('potential_subscriptions')
-          .insert(potentialSubscription);
-          
-        if (saveError) {
-          console.error('SCAN-DEBUG: Error saving potential subscription:', saveError);
-        } else {
-          potentialSubscriptions.push(potentialSubscription);
-        }
+        continue;
       }
+      
+      // Log the email subject and sender
+      const headers = emailData.payload?.headers || [];
+      const { subject, from, date } = parseEmailHeaders(headers);
+      console.log(`SCAN-DEBUG: Analyzing email ${i + 1}/${messages.length} - Subject: ${subject}, From: ${from}`);
+      
+      // Extract email body content
+      const emailBody = extractEmailBody(emailData);
+      
+      // Store email data in email_data table for Gemini Edge Function
+      console.log(`SCAN-DEBUG: Storing email data for Gemini analysis`);
+      const emailDataRecord = {
+        scan_id: scanId,
+        user_id: userId,
+        gmail_message_id: message.id || message,
+        subject: subject,
+        sender: from,
+        date: date,
+        content: emailBody,
+        content_preview: emailBody.substring(0, 500),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      
+      const { error: emailDataError } = await supabase
+        .from('email_data')
+        .insert(emailDataRecord);
+        
+      if (emailDataError) {
+        console.error('SCAN-DEBUG: Error storing email data:', emailDataError);
+      } else {
+        console.log(`SCAN-DEBUG: Successfully stored email data for message ${message.id || message}`);
+      }
+      
+      // Analyze email with Gemini
+      const analysis = await analyzeEmailWithGemini(emailData);
+      console.log(`SCAN-DEBUG: Gemini analysis result for email ${message.id || message}:`, JSON.stringify(analysis));
 
       // If subscription detected with good confidence, save it
       if (analysis.isSubscription && analysis.confidence > 0.6) {
@@ -1178,20 +1181,19 @@ const processEmails = async (gmailToken, scanId, userId) => {
     }
 
     console.log('SCAN-DEBUG: Email processing loop completed');
-    // Update final status
+    // Update final status to ready_for_analysis so Gemini can process it
     await updateScanStatus(scanId, userId, {
-              status: 'completed',
+              status: 'ready_for_analysis',
               progress: 100,
               emails_processed: processedCount,
       subscriptions_found: subscriptionsFound,
-      potential_subscriptions: potentialSubscriptions.length,
               completed_at: new Date().toISOString()
             });
             
     console.log(`SCAN-DEBUG: Email processing completed for scan ${scanId}`);
     console.log(`SCAN-DEBUG: Total emails processed: ${processedCount}`);
     console.log(`SCAN-DEBUG: Subscriptions found: ${subscriptionsFound}`);
-    console.log(`SCAN-DEBUG: Potential subscriptions found: ${potentialSubscriptions.length}`);
+    console.log(`SCAN-DEBUG: Scan status set to 'ready_for_analysis' - Gemini Edge Function will process this scan`);
 
   } catch (error) {
     console.error('SCAN-DEBUG: Error in processEmails:', error);
