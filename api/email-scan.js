@@ -936,124 +936,177 @@ const createScanRecord = async (userId, decoded) => {
 
 // Function to update scan status
 const updateScanStatus = async (scanId, dbUserId, updates) => {
-  try {
-    console.log(`SCAN-DEBUG: updateScanStatus called for scan ${scanId}, user ${dbUserId}`);
-    console.log(`SCAN-DEBUG: Updates to apply:`, JSON.stringify(updates, null, 2));
-    
-    const timestamp = new Date().toISOString();
-    
-    // Filter out any fields that might not exist in the scan_history table
-    const allowedFields = [
-      'status', 'progress', 'emails_found', 'emails_to_process', 
-      'emails_processed', 'subscriptions_found', 'error_message', 
-      'completed_at', 'updated_at'
-    ];
-    
-    const filteredUpdates = {};
-    Object.keys(updates).forEach(key => {
-      if (allowedFields.includes(key)) {
-        filteredUpdates[key] = updates[key];
-      } else {
-        console.log(`SCAN-DEBUG: Skipping field '${key}' as it may not exist in scan_history table`);
-      }
-    });
-    
-    // Always include updated_at timestamp
-    filteredUpdates.updated_at = timestamp;
-
-    // Ensure email stats are properly initialized
-    if (filteredUpdates.emails_found === undefined && filteredUpdates.emails_to_process === undefined && filteredUpdates.emails_processed === undefined) {
-      // Only fetch current scan status if ALL email stats are missing AND we're not just updating status/progress
-      const isStatusOnlyUpdate = Object.keys(filteredUpdates).every(key => 
-        ['status', 'progress', 'updated_at'].includes(key)
-      );
+  const maxRetries = 3;
+  let lastError = null;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`SCAN-DEBUG: updateScanStatus called for scan ${scanId}, user ${dbUserId} (attempt ${attempt}/${maxRetries})`);
+      console.log(`SCAN-DEBUG: Updates to apply:`, JSON.stringify(updates, null, 2));
       
-      if (!isStatusOnlyUpdate) {
-        console.log('SCAN-DEBUG: All email stats missing and not a status-only update, fetching current scan status');
-        const currentScan = await fetch(`${supabaseUrl}/rest/v1/scan_history?scan_id=eq.${scanId}`, {
-          headers: {
-            'apikey': supabaseKey,
-            'Authorization': `Bearer ${supabaseKey}`,
-            'Content-Type': 'application/json'
-          }
-        });
+      const timestamp = new Date().toISOString();
+      
+      // Filter out any fields that might not exist in the scan_history table
+      const allowedFields = [
+        'status', 'progress', 'emails_found', 'emails_to_process', 
+        'emails_processed', 'subscriptions_found', 'error_message', 
+        'completed_at', 'updated_at'
+      ];
+      
+      const filteredUpdates = {};
+      Object.keys(updates).forEach(key => {
+        if (allowedFields.includes(key)) {
+          filteredUpdates[key] = updates[key];
+        } else {
+          console.log(`SCAN-DEBUG: Skipping field '${key}' as it may not exist in scan_history table`);
+        }
+      });
+      
+      // Always include updated_at timestamp
+      filteredUpdates.updated_at = timestamp;
 
-        if (currentScan.ok) {
+      // Ensure email stats are properly initialized
+      if (filteredUpdates.emails_found === undefined && filteredUpdates.emails_to_process === undefined && filteredUpdates.emails_processed === undefined) {
+        // Only fetch current scan status if ALL email stats are missing AND we're not just updating status/progress
+        const isStatusOnlyUpdate = Object.keys(filteredUpdates).every(key => 
+          ['status', 'progress', 'updated_at'].includes(key)
+        );
+        
+        if (!isStatusOnlyUpdate) {
+          console.log('SCAN-DEBUG: All email stats missing and not a status-only update, fetching current scan status');
+          
+          // Add timeout to prevent hanging
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+          
           try {
-            const responseText = await currentScan.text();
-            if (responseText && responseText.trim()) {
-              const currentData = JSON.parse(responseText);
-              if (currentData && currentData.length > 0) {
-                const current = currentData[0];
-                // Use existing values or sensible defaults
-                filteredUpdates.emails_found = current.emails_found || 0;
-                filteredUpdates.emails_to_process = current.emails_to_process || 0;
-                filteredUpdates.emails_processed = current.emails_processed || 0;
-                console.log('SCAN-DEBUG: Initialized email stats from current scan:', {
-                  emails_found: filteredUpdates.emails_found,
-                  emails_to_process: filteredUpdates.emails_to_process,
-                  emails_processed: filteredUpdates.emails_processed
-                });
+            const currentScan = await fetch(`${supabaseUrl}/rest/v1/scan_history?scan_id=eq.${scanId}`, {
+              headers: {
+                'apikey': supabaseKey,
+                'Authorization': `Bearer ${supabaseKey}`,
+                'Content-Type': 'application/json'
+              },
+              signal: controller.signal
+            });
+            
+            clearTimeout(timeoutId);
+
+            if (currentScan.ok) {
+              try {
+                const responseText = await currentScan.text();
+                if (responseText && responseText.trim()) {
+                  const currentData = JSON.parse(responseText);
+                  if (currentData && currentData.length > 0) {
+                    const current = currentData[0];
+                    // Use existing values or sensible defaults
+                    filteredUpdates.emails_found = current.emails_found || 0;
+                    filteredUpdates.emails_to_process = current.emails_to_process || 0;
+                    filteredUpdates.emails_processed = current.emails_processed || 0;
+                    console.log('SCAN-DEBUG: Initialized email stats from current scan:', {
+                      emails_found: filteredUpdates.emails_found,
+                      emails_to_process: filteredUpdates.emails_to_process,
+                      emails_processed: filteredUpdates.emails_processed
+                    });
+                  }
+                } else {
+                  console.log('SCAN-DEBUG: Empty response from current scan fetch, using defaults');
+                }
+              } catch (parseError) {
+                console.log('SCAN-DEBUG: Error parsing current scan response, using defaults:', parseError.message);
               }
-            } else {
-              console.log('SCAN-DEBUG: Empty response from current scan fetch, using defaults');
             }
-          } catch (parseError) {
-            console.log('SCAN-DEBUG: Error parsing current scan response, using defaults:', parseError.message);
+          } catch (fetchError) {
+            clearTimeout(timeoutId);
+            if (fetchError.name === 'AbortError') {
+              console.log('SCAN-DEBUG: Current scan fetch timed out, using defaults');
+            } else {
+              console.log('SCAN-DEBUG: Error fetching current scan, using defaults:', fetchError.message);
+            }
           }
+        } else {
+          console.log('SCAN-DEBUG: Status-only update, skipping email stats fetch');
         }
       } else {
-        console.log('SCAN-DEBUG: Status-only update, skipping email stats fetch');
+        // Ensure we have at least default values for missing stats
+        if (filteredUpdates.emails_found === undefined) {
+          filteredUpdates.emails_found = 0;
+        }
+        if (filteredUpdates.emails_to_process === undefined) {
+          filteredUpdates.emails_to_process = 0;
+        }
+        if (filteredUpdates.emails_processed === undefined) {
+          filteredUpdates.emails_processed = 0;
+        }
       }
-    } else {
-      // Ensure we have at least default values for missing stats
-      if (filteredUpdates.emails_found === undefined) {
-        filteredUpdates.emails_found = 0;
+
+      console.log('SCAN-DEBUG: Final update data:', JSON.stringify(filteredUpdates, null, 2));
+
+      // Add timeout to prevent hanging
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+      
+      const response = await fetch(`${supabaseUrl}/rest/v1/scan_history?scan_id=eq.${scanId}`, {
+        method: 'PATCH',
+        headers: {
+          'apikey': supabaseKey,
+          'Authorization': `Bearer ${supabaseKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(filteredUpdates),
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('SCAN-DEBUG: Failed to update scan status:', errorText);
+        console.error('SCAN-DEBUG: Response status:', response.status);
+        console.error('SCAN-DEBUG: Response headers:', Object.fromEntries(response.headers.entries()));
+        throw new Error(`Failed to update scan status: ${errorText}`);
       }
-      if (filteredUpdates.emails_to_process === undefined) {
-        filteredUpdates.emails_to_process = 0;
+
+      // Handle the response more carefully
+      try {
+        const responseText = await response.text();
+        if (responseText && responseText.trim()) {
+          const responseData = JSON.parse(responseText);
+          console.log('SCAN-DEBUG: Successfully updated scan status. Response:', JSON.stringify(responseData, null, 2));
+        } else {
+          console.log('SCAN-DEBUG: Successfully updated scan status. Empty response (this is normal for PATCH operations).');
+        }
+      } catch (parseError) {
+        console.log('SCAN-DEBUG: Successfully updated scan status. Could not parse response (this is normal for PATCH operations):', parseError.message);
       }
-      if (filteredUpdates.emails_processed === undefined) {
-        filteredUpdates.emails_processed = 0;
-      }
-    }
-
-    console.log('SCAN-DEBUG: Final update data:', JSON.stringify(filteredUpdates, null, 2));
-
-    const response = await fetch(`${supabaseUrl}/rest/v1/scan_history?scan_id=eq.${scanId}`, {
-      method: 'PATCH',
-      headers: {
-        'apikey': supabaseKey,
-        'Authorization': `Bearer ${supabaseKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(filteredUpdates)
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('SCAN-DEBUG: Failed to update scan status:', errorText);
-      console.error('SCAN-DEBUG: Response status:', response.status);
-      console.error('SCAN-DEBUG: Response headers:', Object.fromEntries(response.headers.entries()));
-      throw new Error(`Failed to update scan status: ${errorText}`);
-    }
-
-    // Handle the response more carefully
-    try {
-      const responseText = await response.text();
-      if (responseText && responseText.trim()) {
-        const responseData = JSON.parse(responseText);
-        console.log('SCAN-DEBUG: Successfully updated scan status. Response:', JSON.stringify(responseData, null, 2));
+      
+      // If we get here, the update was successful
+      return;
+      
+    } catch (error) {
+      lastError = error;
+      console.error(`SCAN-DEBUG: Error updating scan status (attempt ${attempt}/${maxRetries}):`, error);
+      
+      // Check if this is a retryable error
+      const isRetryableError = error.message.includes('EPIPE') || 
+                              error.message.includes('ECONNRESET') || 
+                              error.message.includes('socket hang up') ||
+                              error.message.includes('network') ||
+                              error.message.includes('timeout') ||
+                              error.name === 'AbortError';
+      
+      if (attempt < maxRetries && isRetryableError) {
+        const delay = Math.pow(2, attempt) * 1000; // Exponential backoff: 2s, 4s, 8s
+        console.log(`SCAN-DEBUG: Retrying in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
       } else {
-        console.log('SCAN-DEBUG: Successfully updated scan status. Empty response (this is normal for PATCH operations).');
+        console.error('SCAN-DEBUG: Max retries reached or non-retryable error, giving up');
+        throw error;
       }
-    } catch (parseError) {
-      console.log('SCAN-DEBUG: Successfully updated scan status. Could not parse response (this is normal for PATCH operations):', parseError.message);
     }
-  } catch (error) {
-    console.error('SCAN-DEBUG: Error updating scan status:', error);
-    throw error;
   }
+  
+  // If we get here, all retries failed
+  throw lastError;
 };
 
 const searchEmails = async (gmail, query) => {
@@ -1461,4 +1514,371 @@ const processEmailsAsync = async (gmailToken, scanId, userId, isMockMode = false
                 )
               ]);
             } catch (fetchError) {
-              console.error(`
+              console.error(`SCAN-DEBUG: Error fetching email ${messageId}:`, fetchError.message);
+              // Continue with next email instead of failing the entire batch
+              return { success: false, error: fetchError.message };
+            }
+          }
+          
+          if (!emailData) {
+            console.log(`SCAN-DEBUG: No email data for message ${messageId}, skipping`);
+            return { success: false, error: 'No email data' };
+          }
+          
+          // Extract email details with error handling
+          let subject, from, date, emailBody;
+          try {
+            const headers = emailData.payload?.headers || [];
+            const parsedHeaders = parseEmailHeaders(headers);
+            subject = parsedHeaders.subject;
+            from = parsedHeaders.from;
+            date = parsedHeaders.date;
+            emailBody = extractEmailBody(emailData);
+            
+            console.log(`SCAN-DEBUG: Email details - Subject: "${subject}", From: "${from}"`);
+          } catch (parseError) {
+            console.error(`SCAN-DEBUG: Error parsing email headers for ${messageId}:`, parseError.message);
+            // Use fallback values
+            subject = 'Unknown Subject';
+            from = 'Unknown Sender';
+            date = new Date().toISOString();
+            emailBody = 'Email content could not be parsed';
+          }
+          
+          // Store email data in database with error handling
+          const emailDataRecord = {
+            scan_id: scanId,
+            user_id: userId,
+            gmail_message_id: messageId,
+            subject: subject,
+            sender: from,
+            date: date,
+            content: emailBody,
+            content_preview: emailBody.substring(0, 500),
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          };
+          
+          console.log(`SCAN-DEBUG: Storing email data for message ${messageId}`);
+          
+          // Use REST API directly to ensure we get the ID back
+          let emailDataResult = null;
+          let emailDataError = null;
+          
+          try {
+            const response = await fetch(`${supabaseUrl}/rest/v1/email_data`, {
+              method: 'POST',
+              headers: {
+                'apikey': supabaseKey,
+                'Authorization': `Bearer ${supabaseKey}`,
+                'Content-Type': 'application/json',
+                'Prefer': 'return=representation'
+              },
+              body: JSON.stringify(emailDataRecord)
+            });
+            
+            if (response.ok) {
+              try {
+                const responseText = await response.text();
+                if (responseText && responseText.trim()) {
+                  const result = JSON.parse(responseText);
+                  emailDataResult = result[0];
+                  emailDataError = null;
+                  console.log(`SCAN-DEBUG: REST API successful, got ID: ${emailDataResult.id}`);
+                } else {
+                  console.log('SCAN-DEBUG: REST API successful but empty response, trying Supabase client fallback');
+                  emailDataError = new Error('Empty response from REST API');
+                }
+              } catch (parseError) {
+                console.error('SCAN-DEBUG: Error parsing REST API response:', parseError.message);
+                emailDataError = parseError;
+              }
+            } else {
+              const errorText = await response.text();
+              console.error('SCAN-DEBUG: REST API failed:', errorText);
+              emailDataError = new Error(`REST API error: ${response.status} - ${errorText}`);
+            }
+          } catch (restError) {
+            console.error('SCAN-DEBUG: REST API exception:', restError);
+            emailDataError = restError;
+          }
+          
+          // If REST API fails, try Supabase client as fallback
+          if (emailDataError || !emailDataResult) {
+            console.log('SCAN-DEBUG: REST API failed, trying Supabase client fallback...');
+            try {
+              const { data, error } = await supabase
+                .from('email_data')
+                .insert(emailDataRecord)
+                .select('id')
+                .single();
+              
+              emailDataResult = data;
+              emailDataError = error;
+              if (!error && data) {
+                console.log(`SCAN-DEBUG: Supabase client fallback successful, got ID: ${data.id}`);
+              }
+            } catch (clientError) {
+              console.error('SCAN-DEBUG: Supabase client fallback error:', clientError);
+              emailDataError = clientError;
+            }
+          }
+            
+          if (emailDataError) {
+            console.error('SCAN-DEBUG: Error storing email data:', emailDataError);
+            return { success: false, error: emailDataError.message };
+          } else {
+            console.log(`SCAN-DEBUG: Successfully stored email data for message ${messageId} with ID: ${emailDataResult.id}`);
+          }
+          
+          // Validate that we have a valid email_data_id before proceeding
+          if (!emailDataResult || !emailDataResult.id) {
+            console.error('SCAN-DEBUG: emailDataResult is null or missing ID:', emailDataResult);
+            return { success: false, error: 'No email data ID' };
+          }
+          
+          console.log(`SCAN-DEBUG: Validated email_data_id: ${emailDataResult.id}`);
+          
+          // Analyze email with pattern matching
+          console.log(`SCAN-DEBUG: Analyzing email with pattern matching: "${subject}"`);
+          let analysis;
+          try {
+            analysis = await analyzeEmailWithPatternMatching(emailData);
+            console.log(`SCAN-DEBUG: Pattern matching result for email ${messageId}:`, JSON.stringify(analysis));
+          } catch (analysisError) {
+            console.error(`SCAN-DEBUG: Error analyzing email with pattern matching:`, analysisError);
+            analysis = { isSubscription: false, confidence: 0 };
+          }
+
+          // Store analysis result in database for Edge Function to process
+          if (analysis.isSubscription && analysis.confidence > 0.6) {
+            console.log(`SCAN-DEBUG: Detected potential subscription: ${analysis.serviceName} (${analysis.confidence} confidence)`);
+            
+            const analysisRecord = {
+              email_data_id: emailDataResult.id,
+              user_id: userId,
+              scan_id: scanId,
+              subscription_name: analysis.serviceName,
+              price: analysis.amount || 0,
+              currency: analysis.currency || 'USD',
+              billing_cycle: analysis.billingFrequency || 'monthly',
+              next_billing_date: analysis.nextBillingDate,
+              service_provider: analysis.serviceName,
+              confidence_score: analysis.confidence,
+              analysis_status: 'pending',
+              gemini_response: null,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            };
+            
+            console.log(`SCAN-DEBUG: About to insert analysis record with email_data_id: ${analysisRecord.email_data_id}`);
+            
+            let analysisInsertError = null;
+            try {
+              const analysisResponse = await fetch(`${supabaseUrl}/rest/v1/subscription_analysis`, {
+                method: 'POST',
+                headers: {
+                  'apikey': supabaseKey,
+                  'Authorization': `Bearer ${supabaseKey}`,
+                  'Content-Type': 'application/json',
+                  'Prefer': 'return=representation'
+                },
+                body: JSON.stringify(analysisRecord)
+              });
+              
+              if (!analysisResponse.ok) {
+                const errorText = await analysisResponse.text();
+                analysisInsertError = new Error(`REST API error: ${analysisResponse.status} - ${errorText}`);
+              }
+            } catch (restError) {
+              analysisInsertError = restError;
+            }
+            
+            if (analysisInsertError) {
+              console.log('SCAN-DEBUG: REST API failed for analysis, trying Supabase client...');
+              try {
+                const { error } = await supabase
+                  .from('subscription_analysis')
+                  .insert(analysisRecord);
+                analysisInsertError = error;
+              } catch (clientError) {
+                analysisInsertError = clientError;
+              }
+            }
+              
+            if (analysisInsertError) {
+              console.error('SCAN-DEBUG: Error storing analysis record:', analysisInsertError);
+            } else {
+              console.log(`SCAN-DEBUG: Stored analysis record for Edge Function processing`);
+            }
+          }
+          
+          return { success: true };
+          
+        } catch (emailError) {
+          console.error(`SCAN-DEBUG: Error processing email ${emailIndex + 1}:`, emailError);
+          return { success: false, error: emailError.message };
+        }
+      });
+      
+      // Wait for batch to complete
+      const batchResults = await Promise.allSettled(batchPromises);
+      const successfulResults = batchResults.filter(result => 
+        result.status === 'fulfilled' && result.value?.success
+      );
+      
+      processedCount += successfulResults.length;
+      console.log(`SCAN-DEBUG: Batch completed: ${successfulResults.length}/${batch.length} emails processed successfully`);
+      
+      // Update progress every UPDATE_INTERVAL emails or at the end of each batch
+      if (processedCount % UPDATE_INTERVAL === 0 || i + BATCH_SIZE >= totalEmails) {
+        const emailProgress = PROGRESS.processing_emails_start + ((processedCount / totalEmails) * (PROGRESS.processing_emails_end - PROGRESS.processing_emails_start));
+        await updateScanStatus(scanId, userId, {
+          progress: Math.round(emailProgress),
+          emails_processed: processedCount
+        });
+        console.log(`SCAN-DEBUG: Updated progress to ${Math.round(emailProgress)}% (${processedCount}/${totalEmails} emails processed)`);
+      }
+      
+      // Small delay between batches to prevent overwhelming the system
+      if (i + BATCH_SIZE < totalEmails) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
+
+    console.log('SCAN-DEBUG: Email processing loop completed');
+    console.log(`SCAN-DEBUG: Final processed count: ${processedCount} out of ${totalEmails} emails`);
+    
+    // Count potential subscriptions found by pattern matching
+    const { data: potentialSubscriptions, error: potentialSubsError } = await supabase
+      .from('subscription_analysis')
+      .select('id')
+      .eq('scan_id', scanId)
+      .eq('analysis_status', 'pending');
+    
+    const potentialSubscriptionCount = potentialSubscriptions?.length || 0;
+    console.log(`SCAN-DEBUG: Potential subscriptions found by pattern matching: ${potentialSubscriptionCount}`);
+    
+    // Update final status to ready_for_analysis so Edge Function can process with Gemini
+    console.log('SCAN-DEBUG: Setting scan status to ready_for_analysis');
+    await updateScanStatus(scanId, userId, {
+      status: 'ready_for_analysis',
+      progress: PROGRESS.ready_for_analysis,
+      emails_processed: processedCount,
+      subscriptions_found: potentialSubscriptionCount,
+      completed_at: new Date().toISOString()
+    });
+    
+    // Manually trigger the Gemini Edge Function to ensure it gets called
+    console.log('SCAN-DEBUG: Manually triggering Gemini Edge Function');
+    try {
+      const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
+      console.log('SCAN-DEBUG: Using service role key for Edge Function trigger:', !!serviceRoleKey);
+      
+      const triggerResponse = await fetch(
+        "https://dstsluflwxzkwouxcjkh.supabase.co/functions/v1/gemini-scan",
+        { 
+          method: "POST",
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${serviceRoleKey}`
+          }
+        }
+      );
+      
+      console.log('SCAN-DEBUG: Edge Function trigger response status:', triggerResponse.status);
+      
+      if (triggerResponse.ok) {
+        try {
+          const responseText = await triggerResponse.text();
+          if (responseText && responseText.trim()) {
+            const triggerData = JSON.parse(responseText);
+            console.log('SCAN-DEBUG: Edge Function trigger successful:', triggerData);
+          } else {
+            console.log('SCAN-DEBUG: Edge Function trigger successful (empty response)');
+          }
+        } catch (parseError) {
+          console.log('SCAN-DEBUG: Edge Function trigger successful (could not parse response):', parseError.message);
+        }
+      } else {
+        const errorText = await triggerResponse.text();
+        console.error('SCAN-DEBUG: Edge Function trigger failed:', errorText);
+        
+        // Try alternative trigger method
+        console.log('SCAN-DEBUG: Trying alternative trigger method...');
+        const altTriggerResponse = await fetch(
+          "https://dstsluflwxzkwouxcjkh.supabase.co/functions/v1/gemini-scan",
+          { 
+            method: "POST",
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${serviceRoleKey}`,
+              'X-API-Key': serviceRoleKey
+            },
+            body: JSON.stringify({
+              scan_id: scanId,
+              user_id: userId,
+              action: 'process_pending'
+            })
+          }
+        );
+        
+        if (altTriggerResponse.ok) {
+          try {
+            const responseText = await altTriggerResponse.text();
+            if (responseText && responseText.trim()) {
+              const altTriggerData = JSON.parse(responseText);
+              console.log('SCAN-DEBUG: Alternative trigger successful:', altTriggerData);
+            } else {
+              console.log('SCAN-DEBUG: Alternative trigger successful (empty response)');
+            }
+          } catch (parseError) {
+            console.log('SCAN-DEBUG: Alternative trigger successful (could not parse response):', parseError.message);
+          }
+        } else {
+          const altErrorText = await altTriggerResponse.text();
+          console.error('SCAN-DEBUG: Alternative trigger also failed:', altErrorText);
+        }
+      }
+    } catch (triggerError) {
+      console.error('SCAN-DEBUG: Error triggering Gemini Edge Function:', triggerError);
+    }
+            
+    console.log(`SCAN-DEBUG: Async email processing completed for scan ${scanId}`);
+    console.log(`SCAN-DEBUG: Total emails processed: ${processedCount}`);
+    console.log(`SCAN-DEBUG: Potential subscriptions found: ${potentialSubscriptionCount}`);
+    console.log(`SCAN-DEBUG: Scan status set to 'ready_for_analysis' - Edge Function will process with Gemini AI`);
+
+  } catch (error) {
+    console.error('SCAN-DEBUG: Error in async processEmails:', error);
+    console.error('SCAN-DEBUG: Error stack:', error.stack);
+    
+    // Update scan status to error but don't fail completely
+    try {
+      await updateScanStatus(scanId, userId, {
+        status: 'error',
+        error_message: `Email processing error: ${error.message}`,
+        updated_at: new Date().toISOString()
+      });
+    } catch (updateError) {
+      console.error('SCAN-DEBUG: Error updating scan status after failure:', updateError);
+    }
+    
+    // Even if there's an error, try to complete the scan if we processed any emails
+    if (processedCount > 0) {
+      console.log(`SCAN-DEBUG: Attempting to complete scan despite errors. Processed ${processedCount} emails.`);
+      try {
+        await updateScanStatus(scanId, userId, {
+          status: 'ready_for_analysis',
+          progress: PROGRESS.ready_for_analysis,
+          emails_processed: processedCount,
+          subscriptions_found: 0,
+          completed_at: new Date().toISOString()
+        });
+        console.log('SCAN-DEBUG: Scan completed despite errors');
+      } catch (completionError) {
+        console.error('SCAN-DEBUG: Error completing scan:', completionError);
+      }
+    }
+  }
+};
