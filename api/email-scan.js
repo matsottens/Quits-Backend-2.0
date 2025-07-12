@@ -953,18 +953,27 @@ const updateScanStatus = async (scanId, dbUserId, updates) => {
         });
 
         if (currentScan.ok) {
-          const currentData = await currentScan.json();
-          if (currentData && currentData.length > 0) {
-            const current = currentData[0];
-            // Use existing values or sensible defaults
-            filteredUpdates.emails_found = current.emails_found || 0;
-            filteredUpdates.emails_to_process = current.emails_to_process || 0;
-            filteredUpdates.emails_processed = current.emails_processed || 0;
-            console.log('SCAN-DEBUG: Initialized email stats from current scan:', {
-              emails_found: filteredUpdates.emails_found,
-              emails_to_process: filteredUpdates.emails_to_process,
-              emails_processed: filteredUpdates.emails_processed
-            });
+          try {
+            const responseText = await currentScan.text();
+            if (responseText && responseText.trim()) {
+              const currentData = JSON.parse(responseText);
+              if (currentData && currentData.length > 0) {
+                const current = currentData[0];
+                // Use existing values or sensible defaults
+                filteredUpdates.emails_found = current.emails_found || 0;
+                filteredUpdates.emails_to_process = current.emails_to_process || 0;
+                filteredUpdates.emails_processed = current.emails_processed || 0;
+                console.log('SCAN-DEBUG: Initialized email stats from current scan:', {
+                  emails_found: filteredUpdates.emails_found,
+                  emails_to_process: filteredUpdates.emails_to_process,
+                  emails_processed: filteredUpdates.emails_processed
+                });
+              }
+            } else {
+              console.log('SCAN-DEBUG: Empty response from current scan fetch, using defaults');
+            }
+          } catch (parseError) {
+            console.log('SCAN-DEBUG: Error parsing current scan response, using defaults:', parseError.message);
           }
         }
       } else {
@@ -1003,8 +1012,18 @@ const updateScanStatus = async (scanId, dbUserId, updates) => {
       throw new Error(`Failed to update scan status: ${errorText}`);
     }
 
-    const responseData = await response.json();
-    console.log('SCAN-DEBUG: Successfully updated scan status. Response:', JSON.stringify(responseData, null, 2));
+    // Handle the response more carefully
+    try {
+      const responseText = await response.text();
+      if (responseText && responseText.trim()) {
+        const responseData = JSON.parse(responseText);
+        console.log('SCAN-DEBUG: Successfully updated scan status. Response:', JSON.stringify(responseData, null, 2));
+      } else {
+        console.log('SCAN-DEBUG: Successfully updated scan status. Empty response (this is normal for PATCH operations).');
+      }
+    } catch (parseError) {
+      console.log('SCAN-DEBUG: Successfully updated scan status. Could not parse response (this is normal for PATCH operations):', parseError.message);
+    }
   } catch (error) {
     console.error('SCAN-DEBUG: Error updating scan status:', error);
     throw error;
@@ -1390,10 +1409,21 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
             });
             
             if (response.ok) {
-              const result = await response.json();
-              emailDataResult = result[0];
-              emailDataError = null;
-              console.log(`SCAN-DEBUG: REST API successful, got ID: ${emailDataResult.id}`);
+              try {
+                const responseText = await response.text();
+                if (responseText && responseText.trim()) {
+                  const result = JSON.parse(responseText);
+                  emailDataResult = result[0];
+                  emailDataError = null;
+                  console.log(`SCAN-DEBUG: REST API successful, got ID: ${emailDataResult.id}`);
+                } else {
+                  console.log('SCAN-DEBUG: REST API successful but empty response, trying Supabase client fallback');
+                  emailDataError = new Error('Empty response from REST API');
+                }
+              } catch (parseError) {
+                console.error('SCAN-DEBUG: Error parsing REST API response:', parseError.message);
+                emailDataError = parseError;
+              }
             } else {
               const errorText = await response.text();
               console.error('SCAN-DEBUG: REST API failed:', errorText);
@@ -1590,8 +1620,17 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
       console.log('SCAN-DEBUG: Edge Function trigger response status:', triggerResponse.status);
       
       if (triggerResponse.ok) {
-        const triggerData = await triggerResponse.json();
-        console.log('SCAN-DEBUG: Gemini Edge Function triggered successfully:', triggerData);
+        try {
+          const responseText = await triggerResponse.text();
+          if (responseText && responseText.trim()) {
+            const triggerData = JSON.parse(responseText);
+            console.log('SCAN-DEBUG: Gemini Edge Function triggered successfully:', triggerData);
+          } else {
+            console.log('SCAN-DEBUG: Gemini Edge Function triggered successfully (empty response)');
+          }
+        } catch (parseError) {
+          console.log('SCAN-DEBUG: Gemini Edge Function triggered successfully (could not parse response):', parseError.message);
+        }
       } else {
         const errorText = await triggerResponse.text();
         console.error('SCAN-DEBUG: Failed to trigger Gemini Edge Function:', triggerResponse.status, errorText);
@@ -1611,8 +1650,17 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
         );
         
         if (altTriggerResponse.ok) {
-          const altTriggerData = await altTriggerResponse.json();
-          console.log('SCAN-DEBUG: Alternative trigger successful:', altTriggerData);
+          try {
+            const responseText = await altTriggerResponse.text();
+            if (responseText && responseText.trim()) {
+              const altTriggerData = JSON.parse(responseText);
+              console.log('SCAN-DEBUG: Alternative trigger successful:', altTriggerData);
+            } else {
+              console.log('SCAN-DEBUG: Alternative trigger successful (empty response)');
+            }
+          } catch (parseError) {
+            console.log('SCAN-DEBUG: Alternative trigger successful (could not parse response):', parseError.message);
+          }
         } else {
           const altErrorText = await altTriggerResponse.text();
           console.error('SCAN-DEBUG: Alternative trigger also failed:', altErrorText);
