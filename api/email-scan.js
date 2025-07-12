@@ -1585,23 +1585,24 @@ export default async function handler(req, res) {
     console.log('SCAN-DEBUG: Using database user ID:', dbUserId);
     console.log('SCAN-DEBUG: About to return scanId to frontend:', scanId);
 
-    // Start email processing in background
-    console.log('SCAN-DEBUG: About to start processEmails and await completion');
+    // Start email processing in background (don't await - return immediately)
+    console.log('SCAN-DEBUG: About to start processEmails in background');
     console.log('SCAN-DEBUG: Gmail token available:', !!gmailToken);
     console.log('SCAN-DEBUG: Scan ID:', scanId);
     console.log('SCAN-DEBUG: Database User ID:', dbUserId);
-    console.log('SCAN-DEBUG: Starting processEmails...');
-    try {
-      await processEmails(gmailToken, scanId, dbUserId);
-      console.log('SCAN-DEBUG: processEmails completed successfully');
-      console.log('SCAN-DEBUG: Returning scanId to frontend:', scanId);
-      console.log('SCAN-DEBUG: Response object being sent:', { success: true, scanId: scanId });
-      res.status(202).json({ success: true, scanId: scanId });
-    } catch (error) {
-      console.error('SCAN-DEBUG: Error in processEmails:', error);
+    console.log('SCAN-DEBUG: Starting processEmails in background...');
+    
+    // Process emails in background without awaiting completion
+    processEmails(gmailToken, scanId, dbUserId).catch(error => {
+      console.error('SCAN-DEBUG: Background processEmails error:', error);
       console.error('SCAN-DEBUG: Error stack:', error.stack);
-      res.status(500).json({ error: 'Failed to process emails', details: error.message });
-    }
+      // Don't throw here since we're not awaiting
+    });
+    
+    console.log('SCAN-DEBUG: processEmails started in background');
+    console.log('SCAN-DEBUG: Returning scanId to frontend immediately:', scanId);
+    console.log('SCAN-DEBUG: Response object being sent:', { success: true, scanId: scanId });
+    res.status(202).json({ success: true, scanId: scanId });
 
   } catch (error) {
     console.error('SCAN-DEBUG: Error in email scan handler:', error);
