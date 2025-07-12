@@ -15,11 +15,17 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
+  const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
+  const supabaseKey = supabaseServiceRoleKey || supabaseServiceKey;
+  
+  const supabase = createClient(process.env.SUPABASE_URL, supabaseKey);
   
   // Debug Supabase connection
   console.log('SCAN-STATUS-DEBUG: SUPABASE_URL:', process.env.SUPABASE_URL ? 'Set' : 'Not set');
+  console.log('SCAN-STATUS-DEBUG: SUPABASE_SERVICE_ROLE_KEY:', process.env.SUPABASE_SERVICE_ROLE_KEY ? 'Set' : 'Not set');
   console.log('SCAN-STATUS-DEBUG: SUPABASE_SERVICE_KEY:', process.env.SUPABASE_SERVICE_KEY ? 'Set' : 'Not set');
+  console.log('SCAN-STATUS-DEBUG: Final supabaseKey:', supabaseKey ? 'Set' : 'Not set');
   
   try {
     // Extract and verify authorization token
