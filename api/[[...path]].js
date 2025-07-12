@@ -137,11 +137,11 @@ export default async function handler(req, res) {
         }
 
         // Return mock scan response
-        const scanId = 'scan_' + Math.random().toString(36).substring(2, 15);
+        const mockScanId = 'scan_' + Math.random().toString(36).substring(2, 15);
         return res.status(202).json({
           success: true,
           message: 'Email scan initiated successfully',
-          scanId: scanId,
+          scanId: mockScanId,
           estimatedTime: '30 seconds',
           user: {
             email: decoded.email

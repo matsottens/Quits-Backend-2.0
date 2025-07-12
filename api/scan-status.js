@@ -43,6 +43,17 @@ export default async function handler(req, res) {
       return res.status(401).json({ error: 'Invalid user ID in token' });
     }
 
+    // Get scanId from path or query parameters early
+    const pathParts = req.url.split('/');
+    const scanIdFromPath = pathParts[pathParts.length - 1];
+    const queryParams = new URLSearchParams(req.url.split('?')[1] || '');
+    const scanId = scanIdFromPath !== 'scan-status' ? scanIdFromPath : (queryParams.get('scanId') || 'latest');
+
+    console.log('SCAN-STATUS-DEBUG: URL:', req.url);
+    console.log('SCAN-STATUS-DEBUG: Path parts:', pathParts);
+    console.log('SCAN-STATUS-DEBUG: Scan ID from path:', scanIdFromPath);
+    console.log('SCAN-STATUS-DEBUG: Final scan ID:', scanId);
+
     // Look up the user in the database to get the UUID
     const { data: user, error: userError } = await supabase
       .from('users')
@@ -77,17 +88,6 @@ export default async function handler(req, res) {
     const userId = user.id; // This is the UUID
     console.log('SCAN-STATUS-DEBUG: Google ID:', googleId);
     console.log('SCAN-STATUS-DEBUG: Database User ID (UUID):', userId);
-
-    // Get scanId from path or query parameters
-    const pathParts = req.url.split('/');
-    const scanIdFromPath = pathParts[pathParts.length - 1];
-    const queryParams = new URLSearchParams(req.url.split('?')[1] || '');
-    const scanId = scanIdFromPath !== 'scan-status' ? scanIdFromPath : (queryParams.get('scanId') || 'latest');
-
-    console.log('SCAN-STATUS-DEBUG: URL:', req.url);
-    console.log('SCAN-STATUS-DEBUG: Path parts:', pathParts);
-    console.log('SCAN-STATUS-DEBUG: Scan ID from path:', scanIdFromPath);
-    console.log('SCAN-STATUS-DEBUG: Final scan ID:', scanId);
 
     let scan;
     let error;
