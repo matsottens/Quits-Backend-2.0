@@ -1144,9 +1144,20 @@ const processEmails = async (gmailToken, scanId, userId) => {
           emails_processed: processedCount
         });
         
-        // Fetch email content
+        // Fetch email content with timeout
         console.log(`SCAN-DEBUG: Fetching content for email ${messageId}`);
-        const emailData = await fetchEmailContent(gmailToken, messageId);
+        let emailData;
+        try {
+          emailData = await Promise.race([
+            fetchEmailContent(gmailToken, messageId),
+            new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('Email fetch timeout')), 30000)
+            )
+          ]);
+        } catch (fetchError) {
+          console.error(`SCAN-DEBUG: Error fetching email ${messageId}:`, fetchError);
+          continue;
+        }
         
         if (!emailData) {
           console.log(`SCAN-DEBUG: No email data for message ${messageId}, skipping`);
@@ -1175,11 +1186,59 @@ const processEmails = async (gmailToken, scanId, userId) => {
         };
         
         console.log(`SCAN-DEBUG: Storing email data for message ${messageId}`);
-        const { data: emailDataResult, error: emailDataError } = await supabase
-          .from('email_data')
-          .insert(emailDataRecord)
-          .select('id')
-          .single();
+        
+        // Use REST API directly to ensure we get the ID back
+        let emailDataResult = null;
+        let emailDataError = null;
+        
+        try {
+          console.log('SCAN-DEBUG: Using REST API to store email data...');
+          const response = await fetch(`${supabaseUrl}/rest/v1/email_data`, {
+            method: 'POST',
+            headers: {
+              'apikey': supabaseKey,
+              'Authorization': `Bearer ${supabaseKey}`,
+              'Content-Type': 'application/json',
+              'Prefer': 'return=representation'
+            },
+            body: JSON.stringify(emailDataRecord)
+          });
+          
+          if (response.ok) {
+            const result = await response.json();
+            emailDataResult = result[0]; // REST API returns array
+            emailDataError = null;
+            console.log(`SCAN-DEBUG: REST API successful, got ID: ${emailDataResult.id}`);
+          } else {
+            const errorText = await response.text();
+            console.error('SCAN-DEBUG: REST API failed:', errorText);
+            emailDataError = new Error(`REST API error: ${response.status} - ${errorText}`);
+          }
+        } catch (restError) {
+          console.error('SCAN-DEBUG: REST API exception:', restError);
+          emailDataError = restError;
+        }
+        
+        // If REST API fails, try Supabase client as fallback
+        if (emailDataError || !emailDataResult) {
+          console.log('SCAN-DEBUG: REST API failed, trying Supabase client fallback...');
+          try {
+            const { data, error } = await supabase
+              .from('email_data')
+              .insert(emailDataRecord)
+              .select('id')
+              .single();
+            
+            emailDataResult = data;
+            emailDataError = error;
+            if (!error && data) {
+              console.log(`SCAN-DEBUG: Supabase client fallback successful, got ID: ${data.id}`);
+            }
+          } catch (clientError) {
+            console.error('SCAN-DEBUG: Supabase client fallback error:', clientError);
+            emailDataError = clientError;
+          }
+        }
           
         if (emailDataError) {
           console.error('SCAN-DEBUG: Error storing email data:', emailDataError);
@@ -1187,6 +1246,14 @@ const processEmails = async (gmailToken, scanId, userId) => {
         } else {
           console.log(`SCAN-DEBUG: Successfully stored email data for message ${messageId} with ID: ${emailDataResult.id}`);
         }
+        
+        // Validate that we have a valid email_data_id before proceeding
+        if (!emailDataResult || !emailDataResult.id) {
+          console.error('SCAN-DEBUG: emailDataResult is null or missing ID:', emailDataResult);
+          continue; // Skip this email if we don't have a valid ID
+        }
+        
+        console.log(`SCAN-DEBUG: Validated email_data_id: ${emailDataResult.id}`);
         
         // Analyze email with pattern matching (NO Gemini API calls)
         console.log(`SCAN-DEBUG: Analyzing email with pattern matching: "${subject}"`);
@@ -1223,13 +1290,47 @@ const processEmails = async (gmailToken, scanId, userId) => {
             updated_at: new Date().toISOString()
           };
           
-          // Insert the analysis record into the database
-          const { error: analysisInsertError } = await supabase
-            .from('subscription_analysis')
-            .insert(analysisRecord);
+          console.log(`SCAN-DEBUG: About to insert analysis record with email_data_id: ${analysisRecord.email_data_id}`);
+          console.log(`SCAN-DEBUG: Analysis record keys:`, Object.keys(analysisRecord));
+          
+          // Insert the analysis record into the database using REST API
+          let analysisInsertError = null;
+          try {
+            const analysisResponse = await fetch(`${supabaseUrl}/rest/v1/subscription_analysis`, {
+              method: 'POST',
+              headers: {
+                'apikey': supabaseKey,
+                'Authorization': `Bearer ${supabaseKey}`,
+                'Content-Type': 'application/json',
+                'Prefer': 'return=representation'
+              },
+              body: JSON.stringify(analysisRecord)
+            });
+            
+            if (!analysisResponse.ok) {
+              const errorText = await analysisResponse.text();
+              analysisInsertError = new Error(`REST API error: ${analysisResponse.status} - ${errorText}`);
+            }
+          } catch (restError) {
+            analysisInsertError = restError;
+          }
+          
+          // If REST API fails, try Supabase client as fallback
+          if (analysisInsertError) {
+            console.log('SCAN-DEBUG: REST API failed for analysis, trying Supabase client...');
+            try {
+              const { error } = await supabase
+                .from('subscription_analysis')
+                .insert(analysisRecord);
+              analysisInsertError = error;
+            } catch (clientError) {
+              analysisInsertError = clientError;
+            }
+          }
             
           if (analysisInsertError) {
             console.error('SCAN-DEBUG: Error storing analysis record:', analysisInsertError);
+            console.error('SCAN-DEBUG: Analysis record that failed:', JSON.stringify(analysisRecord, null, 2));
           } else {
             console.log(`SCAN-DEBUG: Stored analysis record for Edge Function processing`);
           }
@@ -1247,6 +1348,10 @@ const processEmails = async (gmailToken, scanId, userId) => {
     }
 
     console.log('SCAN-DEBUG: Email processing loop completed');
+    console.log(`SCAN-DEBUG: Final processed count: ${processedCount} out of ${totalEmails} emails`);
+    
+    // Ensure we always reach the completion logic
+    console.log('SCAN-DEBUG: Starting scan completion logic...');
     
     // Count potential subscriptions found by pattern matching
     const { data: potentialSubscriptions, error: potentialSubsError } = await supabase
@@ -1277,7 +1382,7 @@ const processEmails = async (gmailToken, scanId, userId) => {
           method: "POST",
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${supabaseKey}`
+            'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
           }
         }
       );
@@ -1301,10 +1406,37 @@ const processEmails = async (gmailToken, scanId, userId) => {
   } catch (error) {
     console.error('SCAN-DEBUG: Error in processEmails:', error);
     console.error('SCAN-DEBUG: Error stack:', error.stack);
-    await updateScanStatus(scanId, userId, {
-      status: 'error',
-      progress: 0
-    });
+    
+    // Even if there's an error, try to complete the scan
+    try {
+      console.log('SCAN-DEBUG: Attempting to complete scan despite error...');
+      await updateScanStatus(scanId, userId, {
+        status: 'ready_for_analysis',
+        progress: PROGRESS.ready_for_analysis,
+        error_message: error.message,
+        completed_at: new Date().toISOString()
+      });
+      
+      // Still try to trigger the Edge Function
+      console.log('SCAN-DEBUG: Attempting to trigger Edge Function despite error...');
+      const triggerResponse = await fetch(
+        "https://dstsluflwxzkwouxcjkh.supabase.co/functions/v1/gemini-scan",
+        { 
+          method: "POST",
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
+          }
+        }
+      );
+      
+      if (triggerResponse.ok) {
+        console.log('SCAN-DEBUG: Edge Function triggered successfully despite error');
+      }
+    } catch (fallbackError) {
+      console.error('SCAN-DEBUG: Fallback completion also failed:', fallbackError);
+    }
+    
     throw error;
   }
 };
