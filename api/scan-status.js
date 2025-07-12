@@ -100,6 +100,26 @@ export default async function handler(req, res) {
 
     if (error) {
       console.error('Error fetching scan:', error);
+      
+      // If no scan found, let's see what scans exist for this user
+      if (error.code === 'PGRST116') {
+        console.log('SCAN-STATUS-DEBUG: No scan found with ID:', scanId);
+        console.log('SCAN-STATUS-DEBUG: Looking for scans for user ID:', userId);
+        
+        const { data: allScans, error: allScansError } = await supabase
+          .from('scan_history')
+          .select('scan_id, status, created_at')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(5);
+        
+        if (allScansError) {
+          console.error('SCAN-STATUS-DEBUG: Error fetching all scans:', allScansError);
+        } else {
+          console.log('SCAN-STATUS-DEBUG: Found scans for user:', allScans);
+        }
+      }
+      
       return res.status(500).json({ error: error.message });
     }
     
