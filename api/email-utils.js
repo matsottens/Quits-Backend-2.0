@@ -134,16 +134,25 @@ function extractTextFromNestedStructure(part) {
 }
 
 /**
- * Analyzes an email to detect if it's a subscription or receipt
- * This is a fallback method when the Gemini API is not available or fails
- * @param {Object} emailData - The email data including headers and body
+ * Analyze email content for subscription-related information using pattern matching
+ * @param {Object} emailData - Object containing body, subject, and from fields
  * @returns {Object} Analysis result with subscription details
  */
 function analyzeEmailForSubscriptions(emailData) {
   console.log('SCAN-DEBUG: analyzeEmailForSubscriptions called');
-  console.log("SCAN-DEBUG: Analyzing email for subscriptions using pattern matching...");
+  console.log('SCAN-DEBUG: Analyzing email for subscriptions using pattern matching...');
   
-  const { subject, from, body } = emailData;
+  // Extract the email data
+  const { body, subject, from } = emailData;
+  
+  if (!body) {
+    console.log('SCAN-DEBUG: No email body provided');
+    return {
+      isSubscription: false,
+      confidence: 0
+    };
+  }
+
   let confidence = 0;
   let isSubscription = false;
   let serviceName = null;

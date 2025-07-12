@@ -808,7 +808,7 @@ JSON Output:
 `;
     
     // Call Gemini API
-    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent', {
+    const response = await fetch('https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -869,7 +869,23 @@ JSON Output:
     console.error('Error analyzing email with Gemini:', error);
     // Fallback to pattern matching if Gemini API fails
     console.log('Falling back to pattern matching for subscription detection');
-    return analyzeEmailForSubscriptions(emailContent);
+    try {
+      const body = extractEmailBody(emailContent);
+      const headers = emailContent.payload.headers || [];
+      const { subject, from } = parseEmailHeaders(headers);
+      
+      return analyzeEmailForSubscriptions({
+        body,
+        subject,
+        from
+      });
+    } catch (fallbackError) {
+      console.error('Error in fallback pattern analysis:', fallbackError);
+      return {
+        isSubscription: false,
+        confidence: 0.5
+      };
+    }
   }
 };
 
