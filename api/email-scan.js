@@ -1175,14 +1175,17 @@ const processEmails = async (gmailToken, scanId, userId) => {
         };
         
         console.log(`SCAN-DEBUG: Storing email data for message ${messageId}`);
-        const { error: emailDataError } = await supabase
+        const { data: emailDataResult, error: emailDataError } = await supabase
           .from('email_data')
-          .insert(emailDataRecord);
+          .insert(emailDataRecord)
+          .select('id')
+          .single();
           
         if (emailDataError) {
           console.error('SCAN-DEBUG: Error storing email data:', emailDataError);
+          continue; // Skip this email if we can't store the data
         } else {
-          console.log(`SCAN-DEBUG: Successfully stored email data for message ${messageId}`);
+          console.log(`SCAN-DEBUG: Successfully stored email data for message ${messageId} with ID: ${emailDataResult.id}`);
         }
         
         // Analyze email with pattern matching (NO Gemini API calls)
@@ -1204,7 +1207,7 @@ const processEmails = async (gmailToken, scanId, userId) => {
           
           // Store the analysis result for the Edge Function to process with Gemini
           const analysisRecord = {
-            email_data_id: emailDataRecord.id, // This will be the ID from the email_data insert
+            email_data_id: emailDataResult.id, // Use the actual ID from the email_data insert
             user_id: userId,
             scan_id: scanId,
             subscription_name: analysis.serviceName,

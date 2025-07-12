@@ -280,6 +280,8 @@ serve(async (_req) => {
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
   try {
+    console.log("Edge Function: Starting Gemini scan processing");
+    
     // 1. Find all scans ready for analysis
     const { data: scans, error: scanError } = await supabase
       .from("scan_history")
@@ -287,18 +289,19 @@ serve(async (_req) => {
       .eq("status", "ready_for_analysis");
 
     if (scanError) {
-      console.error("Failed to fetch scans:", scanError);
+      console.error("Edge Function: Failed to fetch scans:", scanError);
       return new Response(JSON.stringify({ error: "Failed to fetch scans", details: scanError }), { status: 500 });
     }
 
     if (!scans || scans.length === 0) {
+      console.log("Edge Function: No scans ready for analysis");
       return new Response(JSON.stringify({ success: true, message: "No scans ready for analysis" }), { status: 200 });
     }
 
-    console.log(`Processing ${scans.length} scans ready for analysis`);
+    console.log(`Edge Function: Processing ${scans.length} scans ready for analysis`);
 
     for (const scan of scans) {
-      console.log(`Processing scan ${scan.scan_id} for user ${scan.user_id}`);
+      console.log(`Edge Function: Processing scan ${scan.scan_id} for user ${scan.user_id}`);
       
       // 2. Get pre-identified potential subscriptions for this scan
       const { data: potentialSubscriptions, error: subscriptionError } = await supabase
@@ -308,7 +311,7 @@ serve(async (_req) => {
         .eq("analysis_status", "pending");
 
       if (subscriptionError) {
-        console.error(`Failed to fetch potential subscriptions for scan ${scan.scan_id}:`, subscriptionError);
+        console.error(`Edge Function: Failed to fetch potential subscriptions for scan ${scan.scan_id}:`, subscriptionError);
         await supabase.from("scan_history").update({ 
           status: "error", 
           error_message: subscriptionError.message 
@@ -317,7 +320,7 @@ serve(async (_req) => {
       }
 
       if (!potentialSubscriptions || potentialSubscriptions.length === 0) {
-        console.log(`No potential subscriptions found for scan ${scan.scan_id}`);
+        console.log(`Edge Function: No potential subscriptions found for scan ${scan.scan_id}`);
         await supabase.from("scan_history").update({ 
           status: "completed", 
           completed_at: new Date().toISOString() 
@@ -325,127 +328,145 @@ serve(async (_req) => {
         continue;
       }
 
-      console.log(`Analyzing ${potentialSubscriptions.length} potential subscriptions with Gemini for scan ${scan.scan_id}`);
+      console.log(`Edge Function: Analyzing ${potentialSubscriptions.length} potential subscriptions with Gemini for scan ${scan.scan_id}`);
 
       // 3. Analyze each potential subscription with Gemini
       let processedCount = 0;
+      let errorCount = 0;
+      
       for (const analysis of potentialSubscriptions) {
-        console.log(`Analyzing potential subscription: ${analysis.subscription_name} for email ${analysis.email_data_id}`);
-        
-        // Get the email content for Gemini analysis
-        const { data: emailData, error: emailError } = await supabase
-          .from("email_data")
-          .select("content, subject, sender, gmail_message_id")
-          .eq("id", analysis.email_data_id)
-          .single();
+        try {
+          console.log(`Edge Function: Analyzing potential subscription: ${analysis.subscription_name} for email ${analysis.email_data_id}`);
+          
+          // Get the email content for Gemini analysis
+          const { data: emailData, error: emailError } = await supabase
+            .from("email_data")
+            .select("content, subject, sender, gmail_message_id")
+            .eq("id", analysis.email_data_id)
+            .single();
 
-        if (emailError || !emailData) {
-          console.error(`Failed to fetch email data for analysis ${analysis.id}:`, emailError);
-          continue;
-        }
+          if (emailError || !emailData) {
+            console.error(`Edge Function: Failed to fetch email data for analysis ${analysis.id}:`, emailError);
+            errorCount++;
+            continue;
+          }
 
-        // Prepare email content for Gemini
-        const emailContent = `
+          // Prepare email content for Gemini
+          const emailContent = `
 Subject: ${emailData.subject}
 From: ${emailData.sender}
 Content: ${emailData.content}
-        `.trim();
-        
-        // Add a delay to prevent rate limiting
-        await new Promise(resolve => setTimeout(resolve, 3000)); // 3 second delay between calls
-        
-        const geminiResult = await analyzeEmailWithGemini(emailContent);
-        
-        console.log(`Gemini result for analysis ${analysis.id}:`, {
-          is_subscription: geminiResult.is_subscription,
-          subscription_name: geminiResult.subscription_name,
-          price: geminiResult.price,
-          error: geminiResult.error
-        });
+          `.trim();
+          
+          // Add a delay to prevent rate limiting
+          await new Promise(resolve => setTimeout(resolve, 3000)); // 3 second delay between calls
+          
+          const geminiResult = await analyzeEmailWithGemini(emailContent);
+          
+          console.log(`Edge Function: Gemini result for analysis ${analysis.id}:`, {
+            is_subscription: geminiResult.is_subscription,
+            subscription_name: geminiResult.subscription_name,
+            price: geminiResult.price,
+            error: geminiResult.error
+          });
 
-        // Check for errors in Gemini analysis
-        if (geminiResult.error) {
-          console.error(`Gemini analysis error for analysis ${analysis.id}:`, geminiResult.error);
+          // Check for errors in Gemini analysis
+          if (geminiResult.error) {
+            console.error(`Edge Function: Gemini analysis error for analysis ${analysis.id}:`, geminiResult.error);
+            // Update analysis status to failed
+            await supabase.from("subscription_analysis").update({
+              analysis_status: 'failed',
+              gemini_response: JSON.stringify({ error: geminiResult.error }),
+              updated_at: new Date().toISOString()
+            }).eq("id", analysis.id);
+            errorCount++;
+            continue;
+          }
+
+          // Update the analysis record with Gemini results
+          const { error: updateError } = await supabase.from("subscription_analysis").update({
+            subscription_name: geminiResult.subscription_name || analysis.subscription_name,
+            price: geminiResult.price || analysis.price,
+            currency: geminiResult.currency || analysis.currency,
+            billing_cycle: geminiResult.billing_cycle || analysis.billing_cycle,
+            next_billing_date: geminiResult.next_billing_date,
+            service_provider: geminiResult.service_provider || analysis.service_provider,
+            confidence_score: geminiResult.confidence_score || analysis.confidence_score,
+            analysis_status: 'completed',
+            gemini_response: JSON.stringify(geminiResult),
+            updated_at: new Date().toISOString()
+          }).eq("id", analysis.id);
+
+          if (updateError) {
+            console.error(`Edge Function: Failed to update analysis record ${analysis.id}:`, updateError);
+            errorCount++;
+            continue;
+          }
+
+          // Only create subscription if Gemini confirms it's a subscription
+          if (geminiResult && geminiResult.is_subscription && geminiResult.subscription_name) {
+            console.log(`Edge Function: Gemini confirmed subscription: ${geminiResult.subscription_name}`);
+            
+            // Check for duplicates before creating subscription
+            const normalizedServiceName = normalizeServiceName(geminiResult.subscription_name);
+            console.log(`Edge Function: Normalized service name: "${geminiResult.subscription_name}" -> "${normalizedServiceName}"`);
+            
+            // Check if subscription already exists
+            const { data: existingSubscriptions, error: checkError } = await supabase
+              .from("subscriptions")
+              .select("name")
+              .eq("user_id", scan.user_id)
+              .ilike("name", `%${normalizedServiceName}%`);
+            
+            if (checkError) {
+              console.error(`Edge Function: Error checking for existing subscriptions:`, checkError);
+            } else if (existingSubscriptions && existingSubscriptions.length > 0) {
+              console.log(`Edge Function: Subscription "${geminiResult.subscription_name}" (normalized: "${normalizedServiceName}") already exists, skipping`);
+              console.log(`Edge Function: Existing subscriptions found:`, existingSubscriptions.map(s => s.name));
+              continue;
+            }
+            
+            // Create subscription record
+            const { error: subscriptionError } = await supabase.from("subscriptions").insert({
+              user_id: scan.user_id,
+              name: geminiResult.subscription_name,
+              price: geminiResult.price || 0,
+              currency: geminiResult.currency || 'USD',
+              billing_cycle: geminiResult.billing_cycle || 'monthly',
+              next_billing_date: geminiResult.next_billing_date,
+              provider: geminiResult.service_provider,
+              category: 'auto-detected',
+              email_id: emailData.gmail_message_id,
+              is_manual: false,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            });
+
+            if (subscriptionError) {
+              console.error(`Edge Function: Failed to insert subscription for analysis ${analysis.id}:`, subscriptionError);
+              errorCount++;
+              continue;
+            }
+
+            console.log(`Edge Function: Successfully created subscription: ${geminiResult.subscription_name}`);
+            processedCount++;
+          } else {
+            console.log(`Edge Function: Gemini determined this is not a subscription: ${analysis.subscription_name}`);
+            // Update analysis status to indicate it's not a subscription
+            await supabase.from("subscription_analysis").update({
+              analysis_status: 'not_subscription',
+              gemini_response: JSON.stringify(geminiResult),
+              updated_at: new Date().toISOString()
+            }).eq("id", analysis.id);
+          }
+        } catch (analysisError) {
+          console.error(`Edge Function: Unexpected error processing analysis ${analysis.id}:`, analysisError);
+          errorCount++;
+          
           // Update analysis status to failed
           await supabase.from("subscription_analysis").update({
             analysis_status: 'failed',
-            gemini_response: JSON.stringify({ error: geminiResult.error }),
-            updated_at: new Date().toISOString()
-          }).eq("id", analysis.id);
-          continue;
-        }
-
-        // Update the analysis record with Gemini results
-        const { error: updateError } = await supabase.from("subscription_analysis").update({
-          subscription_name: geminiResult.subscription_name || analysis.subscription_name,
-          price: geminiResult.price || analysis.price,
-          currency: geminiResult.currency || analysis.currency,
-          billing_cycle: geminiResult.billing_cycle || analysis.billing_cycle,
-          next_billing_date: geminiResult.next_billing_date,
-          service_provider: geminiResult.service_provider || analysis.service_provider,
-          confidence_score: geminiResult.confidence_score || analysis.confidence_score,
-          analysis_status: 'completed',
-          gemini_response: JSON.stringify(geminiResult),
-          updated_at: new Date().toISOString()
-        }).eq("id", analysis.id);
-
-        if (updateError) {
-          console.error(`Failed to update analysis record ${analysis.id}:`, updateError);
-          continue;
-        }
-
-        // Only create subscription if Gemini confirms it's a subscription
-        if (geminiResult && geminiResult.is_subscription && geminiResult.subscription_name) {
-          console.log(`Gemini confirmed subscription: ${geminiResult.subscription_name}`);
-          
-          // Check for duplicates before creating subscription
-          const normalizedServiceName = normalizeServiceName(geminiResult.subscription_name);
-          console.log(`Normalized service name: "${geminiResult.subscription_name}" -> "${normalizedServiceName}"`);
-          
-          // Check if subscription already exists
-          const { data: existingSubscriptions, error: checkError } = await supabase
-            .from("subscriptions")
-            .select("name")
-            .eq("user_id", scan.user_id)
-            .ilike("name", `%${normalizedServiceName}%`);
-          
-          if (checkError) {
-            console.error(`Error checking for existing subscriptions:`, checkError);
-          } else if (existingSubscriptions && existingSubscriptions.length > 0) {
-            console.log(`Subscription "${geminiResult.subscription_name}" (normalized: "${normalizedServiceName}") already exists, skipping`);
-            console.log(`Existing subscriptions found:`, existingSubscriptions.map(s => s.name));
-            continue;
-          }
-          
-          // Create subscription record
-          const { error: subscriptionError } = await supabase.from("subscriptions").insert({
-            user_id: scan.user_id,
-            name: geminiResult.subscription_name,
-            price: geminiResult.price || 0,
-            currency: geminiResult.currency || 'USD',
-            billing_cycle: geminiResult.billing_cycle || 'monthly',
-            next_billing_date: geminiResult.next_billing_date,
-            provider: geminiResult.service_provider,
-            category: 'auto-detected',
-            email_id: emailData.gmail_message_id,
-            is_manual: false,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          });
-
-          if (subscriptionError) {
-            console.error(`Failed to insert subscription for analysis ${analysis.id}:`, subscriptionError);
-            continue;
-          }
-
-          console.log(`Successfully created subscription: ${geminiResult.subscription_name}`);
-          processedCount++;
-        } else {
-          console.log(`Gemini determined this is not a subscription: ${analysis.subscription_name}`);
-          // Update analysis status to indicate it's not a subscription
-          await supabase.from("subscription_analysis").update({
-            analysis_status: 'not_subscription',
-            gemini_response: JSON.stringify(geminiResult),
+            gemini_response: JSON.stringify({ error: analysisError.message }),
             updated_at: new Date().toISOString()
           }).eq("id", analysis.id);
         }
@@ -457,7 +478,7 @@ Content: ${emailData.content}
         completed_at: new Date().toISOString() 
       }).eq("id", scan.id);
       
-      console.log(`Completed processing scan ${scan.scan_id} - Created ${processedCount} subscriptions`);
+      console.log(`Edge Function: Completed processing scan ${scan.scan_id} - Created ${processedCount} subscriptions, ${errorCount} errors`);
     }
 
     return new Response(JSON.stringify({ 
@@ -466,7 +487,7 @@ Content: ${emailData.content}
     }), { status: 200 });
     
   } catch (error) {
-    console.error("Unexpected error in Gemini scan:", error);
+    console.error("Edge Function: Unexpected error in Gemini scan:", error);
     return new Response(JSON.stringify({ 
       error: "Unexpected error", 
       details: error.message 
