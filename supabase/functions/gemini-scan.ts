@@ -114,6 +114,17 @@ ${emailText}
         
         // If we hit rate limits, implement exponential backoff
         if (response.status === 429) {
+          // Check if it's quota exhaustion
+          try {
+            const errorData = await response.json();
+            if (errorData.error && errorData.error.status === 'RESOURCE_EXHAUSTED') {
+              console.log('Edge Function: Gemini API quota exhausted, stopping retries');
+              return { error: `Quota exhausted after ${attempt} attempts`, is_subscription: false };
+            }
+          } catch (parseError) {
+            // If we can't parse the error, assume it's a rate limit
+          }
+          
           lastError = new Error(`Gemini API rate limit hit (attempt ${attempt})`);
           
           if (attempt < maxRetries) {

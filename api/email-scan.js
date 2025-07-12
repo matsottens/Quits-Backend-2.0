@@ -487,8 +487,9 @@ JSON Output:
 `;
 
     // Implement retry logic with exponential backoff for rate limiting
-    const maxRetries = 3;
+    const maxRetries = 2; // Reduced from 3 to 2 to save quota
     let lastError = null;
+    let quotaExhausted = false;
     
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
@@ -518,12 +519,19 @@ JSON Output:
           const errorData = await response.json();
           console.error(`SCAN-DEBUG: Gemini API error (attempt ${attempt}):`, errorData);
           
-          // If we hit rate limits, implement exponential backoff
+          // Check if it's a quota exhaustion error
+          if (response.status === 429 && errorData.error && errorData.error.status === 'RESOURCE_EXHAUSTED') {
+            console.log('SCAN-DEBUG: Gemini API quota exhausted, switching to enhanced fallback analysis');
+            quotaExhausted = true;
+            break; // Don't retry if quota is exhausted
+          }
+          
+          // If we hit rate limits (but not quota exhaustion), implement exponential backoff
           if (response.status === 429) {
             lastError = new Error(`Gemini API rate limit hit (attempt ${attempt})`);
             
             if (attempt < maxRetries) {
-              const backoffDelay = Math.pow(2, attempt) * 1000; // 2s, 4s, 8s
+              const backoffDelay = Math.pow(2, attempt) * 1000; // 2s, 4s
               console.log(`SCAN-DEBUG: Rate limit hit, backing off for ${backoffDelay}ms before retry`);
               await new Promise(resolve => setTimeout(resolve, backoffDelay));
               continue; // Try again
@@ -599,10 +607,15 @@ JSON Output:
       }
     }
     
-    // If we get here, all retries failed
-    console.log('SCAN-DEBUG: All Gemini API attempts failed, using fallback analysis');
-    console.log('SCAN-DEBUG: Last error:', lastError?.message);
-    return await performFallbackAnalysis(emailContent);
+    // If we get here, all retries failed or quota was exhausted
+    if (quotaExhausted) {
+      console.log('SCAN-DEBUG: Gemini API quota exhausted, using enhanced fallback analysis');
+      return await performEnhancedFallbackAnalysis(emailContent);
+    } else {
+      console.log('SCAN-DEBUG: All Gemini API attempts failed, using fallback analysis');
+      console.log('SCAN-DEBUG: Last error:', lastError?.message);
+      return await performFallbackAnalysis(emailContent);
+    }
     
   } catch (error) {
     console.error('SCAN-DEBUG: Error analyzing email with Gemini:', error);
@@ -1012,6 +1025,337 @@ const performFallbackAnalysis = async (emailContent) => {
     };
   } catch (fallbackError) {
     console.error('SCAN-DEBUG: Error in fallback pattern analysis:', fallbackError);
+    return {
+      isSubscription: false,
+      confidence: 0.5
+    };
+  }
+};
+
+// Helper function for enhanced fallback analysis when quota is exhausted
+const performEnhancedFallbackAnalysis = async (emailContent) => {
+  try {
+    // Extract headers for pattern analysis
+    const headers = emailContent.payload.headers || [];
+    const { subject, from } = parseEmailHeaders(headers);
+    
+    const fromLower = from ? from.toLowerCase() : '';
+    const subjectLower = subject ? subject.toLowerCase() : '';
+    
+    console.log(`SCAN-DEBUG: Enhanced fallback analysis - Subject: "${subject}", From: "${from}"`);
+    
+    // Enhanced service detection patterns for quota exhaustion scenarios
+    const enhancedServices = [
+      // Streaming services
+      { pattern: /netflix|nflx/i, name: 'Netflix', amount: 15.99, confidence: 0.9 },
+      { pattern: /spotify/i, name: 'Spotify', amount: 9.99, confidence: 0.9 },
+      { pattern: /amazon prime|prime video/i, name: 'Amazon Prime', amount: 14.99, confidence: 0.9 },
+      { pattern: /disney\+/i, name: 'Disney+', amount: 7.99, confidence: 0.9 },
+      { pattern: /hbo|max/i, name: 'HBO Max', amount: 14.99, confidence: 0.9 },
+      { pattern: /youtube|yt premium/i, name: 'YouTube Premium', amount: 11.99, confidence: 0.9 },
+      { pattern: /apple/i, name: 'Apple Services', amount: 9.99, confidence: 0.8 },
+      { pattern: /hulu/i, name: 'Hulu', amount: 7.99, confidence: 0.9 },
+      { pattern: /paramount\+/i, name: 'Paramount+', amount: 9.99, confidence: 0.9 },
+      { pattern: /peacock/i, name: 'Peacock', amount: 5.99, confidence: 0.9 },
+      
+      // Software and tools
+      { pattern: /adobe/i, name: 'Adobe Creative Cloud', amount: 54.99, confidence: 0.9 },
+      { pattern: /microsoft|office 365/i, name: 'Microsoft 365', amount: 6.99, confidence: 0.9 },
+      { pattern: /google one|drive storage/i, name: 'Google One', amount: 1.99, confidence: 0.9 },
+      { pattern: /dropbox/i, name: 'Dropbox', amount: 11.99, confidence: 0.9 },
+      { pattern: /notion/i, name: 'Notion', amount: 8.00, confidence: 0.9 },
+      { pattern: /canva/i, name: 'Canva', amount: 12.99, confidence: 0.9 },
+      { pattern: /grammarly/i, name: 'Grammarly', amount: 12.00, confidence: 0.9 },
+      
+      // Sports and entertainment
+      { pattern: /nba|league pass/i, name: 'NBA League Pass', amount: 14.99, confidence: 0.9 },
+      { pattern: /peloton/i, name: 'Peloton', amount: 44.00, confidence: 0.9 },
+      
+      // Education and learning
+      { pattern: /babbel/i, name: 'Babbel', amount: 6.95, confidence: 0.9 },
+      { pattern: /chegg/i, name: 'Chegg', amount: 14.95, confidence: 0.9 },
+      { pattern: /duolingo/i, name: 'Duolingo', amount: 6.99, confidence: 0.9 },
+      
+      // Security and utilities
+      { pattern: /nordvpn|vpn/i, name: 'NordVPN', amount: 11.95, confidence: 0.9 },
+      
+      // News and media
+      { pattern: /nytimes|ny times/i, name: 'New York Times', amount: 17.00, confidence: 0.9 },
+      
+      // Development and hosting
+      { pattern: /vercel/i, name: 'Vercel', amount: 20.00, confidence: 0.9 },
+      { pattern: /ahrefs/i, name: 'Ahrefs', amount: 27.00, confidence: 0.9 },
+      
+      // Email and communication
+      { pattern: /hotmail|outlook/i, name: 'Microsoft 365', amount: 6.99, confidence: 0.7 },
+      { pattern: /gmail|google workspace/i, name: 'Google Workspace', amount: 6.00, confidence: 0.8 },
+      
+      // Cloud storage
+      { pattern: /icloud/i, name: 'iCloud', amount: 0.99, confidence: 0.9 },
+      { pattern: /onedrive/i, name: 'OneDrive', amount: 1.99, confidence: 0.8 },
+    ];
+    
+    // Check for exact service matches first (highest confidence)
+    for (const service of enhancedServices) {
+      if (service.pattern.test(fromLower) || service.pattern.test(subjectLower)) {
+        console.log(`SCAN-DEBUG: Enhanced detection - Found ${service.name} subscription`);
+        
+        try {
+          const body = extractEmailBody(emailContent);
+          const bodyLower = body ? body.toLowerCase() : '';
+          
+          // Enhanced price extraction
+          let amount = service.amount;
+          let currency = 'USD';
+          let foundPrice = false;
+          
+          // Look for currency symbols followed by numbers
+          const currencyPatterns = [
+            /\$(\d+\.?\d*)/g,  // $19.99 or $20
+            /€(\d+\.?\d*)/g,  // €19.99 or €20
+            /£(\d+\.?\d*)/g,  // £19.99 or £20
+            /¥(\d+\.?\d*)/g,  // ¥1999 or ¥2000
+          ];
+          
+          for (const pattern of currencyPatterns) {
+            const matches = bodyLower.match(pattern);
+            if (matches && matches.length > 0) {
+              for (const match of matches) {
+                const price = parseFloat(match.replace(/[^\d.]/g, ''));
+                if (price > 0 && price < 1000) {
+                  amount = price;
+                  foundPrice = true;
+                  if (match.includes('€')) currency = 'EUR';
+                  else if (match.includes('£')) currency = 'GBP';
+                  else if (match.includes('¥')) currency = 'JPY';
+                  else currency = 'USD';
+                  break;
+                }
+              }
+              if (foundPrice) break;
+            }
+          }
+          
+          // Enhanced frequency detection
+          let frequency = 'monthly';
+          const frequencyPatterns = [
+            { pattern: /month(ly)?|per\s*month/i, value: 'monthly' },
+            { pattern: /year(ly)?|annual|per\s*year/i, value: 'yearly' },
+            { pattern: /week(ly)?|per\s*week/i, value: 'weekly' },
+            { pattern: /quarter(ly)?|per\s*quarter/i, value: 'quarterly' },
+            { pattern: /bi.?month(ly)?|every\s*2\s*months/i, value: 'bimonthly' },
+            { pattern: /semi.?annual|every\s*6\s*months/i, value: 'semiannual' },
+          ];
+          
+          for (const freqPattern of frequencyPatterns) {
+            if (freqPattern.pattern.test(bodyLower) || freqPattern.pattern.test(subjectLower)) {
+              frequency = freqPattern.value;
+              break;
+            }
+          }
+          
+          // Generate next billing date
+          const nextBillingDate = new Date();
+          if (frequency === 'monthly') nextBillingDate.setMonth(nextBillingDate.getMonth() + 1);
+          else if (frequency === 'yearly') nextBillingDate.setFullYear(nextBillingDate.getFullYear() + 1);
+          else if (frequency === 'weekly') nextBillingDate.setDate(nextBillingDate.getDate() + 7);
+          else if (frequency === 'quarterly') nextBillingDate.setMonth(nextBillingDate.getMonth() + 3);
+          else if (frequency === 'bimonthly') nextBillingDate.setMonth(nextBillingDate.getMonth() + 2);
+          else if (frequency === 'semiannual') nextBillingDate.setMonth(nextBillingDate.getMonth() + 6);
+          
+          console.log(`SCAN-DEBUG: Enhanced detection - Extracted: ${amount} ${currency} ${frequency}`);
+          
+          return {
+            isSubscription: true,
+            serviceName: service.name,
+            amount: amount,
+            currency: currency,
+            billingFrequency: frequency,
+            nextBillingDate: nextBillingDate.toISOString().split('T')[0],
+            confidence: foundPrice ? service.confidence : service.confidence * 0.8
+          };
+        } catch (error) {
+          console.error(`SCAN-DEBUG: Error in enhanced price extraction for ${service.name}:`, error);
+          return {
+            isSubscription: true,
+            serviceName: service.name,
+            amount: service.amount,
+            currency: 'USD',
+            billingFrequency: 'monthly',
+            nextBillingDate: new Date(new Date().setMonth(new Date().getMonth() + 1)).toISOString().split('T')[0],
+            confidence: service.confidence * 0.7
+          };
+        }
+      }
+    }
+    
+    // Enhanced keyword-based detection for quota exhaustion
+    const enhancedKeywords = [
+      { pattern: /subscri(be|ption)/i, weight: 0.8 },
+      { pattern: /renew(al|ed)/i, weight: 0.9 },
+      { pattern: /bill(ing|ed)/i, weight: 0.7 },
+      { pattern: /payment/i, weight: 0.6 },
+      { pattern: /invoice/i, weight: 0.8 },
+      { pattern: /receipt/i, weight: 0.7 },
+      { pattern: /charge/i, weight: 0.6 },
+      { pattern: /plan/i, weight: 0.5 },
+      { pattern: /membership/i, weight: 0.8 },
+      { pattern: /monthly/i, weight: 0.9 },
+      { pattern: /yearly/i, weight: 0.9 },
+      { pattern: /trial/i, weight: 0.6 },
+      { pattern: /confirmation/i, weight: 0.7 },
+      { pattern: /successful/i, weight: 0.6 },
+      { pattern: /automatically renews/i, weight: 0.9 },
+      { pattern: /recurring/i, weight: 0.8 }
+    ];
+    
+    let totalWeight = 0;
+    let keywordCount = 0;
+    
+    for (const keyword of enhancedKeywords) {
+      if (keyword.pattern.test(subjectLower)) {
+        totalWeight += keyword.weight;
+        keywordCount++;
+      }
+    }
+    
+    // Check email body for additional keywords
+    const body = extractEmailBody(emailContent);
+    const bodyLower = body ? body.toLowerCase() : '';
+    
+    for (const keyword of enhancedKeywords) {
+      if (keyword.pattern.test(bodyLower)) {
+        totalWeight += keyword.weight * 0.5; // Body keywords have less weight
+        keywordCount++;
+      }
+    }
+    
+    // If we have strong keyword indicators, proceed with enhanced service extraction
+    if (totalWeight >= 1.0 && keywordCount >= 2) {
+      console.log(`SCAN-DEBUG: Enhanced keyword detection - Weight: ${totalWeight}, Keywords: ${keywordCount}`);
+      
+      try {
+        // Enhanced service name extraction
+        let serviceName = 'Unknown Service';
+        
+        // Try to extract from sender domain
+        if (from) {
+          const domainMatch = from.match(/@([^>]+)/) || from.match(/([^<\s]+)$/);
+          if (domainMatch) {
+            const domain = domainMatch[1].replace(/\.[^.]+$/, '');
+            serviceName = domain.charAt(0).toUpperCase() + domain.slice(1);
+          }
+        }
+        
+        // Enhanced service name extraction from subject and body
+        const servicePatterns = [
+          /([A-Z][A-Za-z\s]+)\s+(?:Subscription|Confirmation|Receipt|Payment|Billing)/i,
+          /(?:Subscription|Confirmation|Receipt|Payment|Billing)\s+for\s+([A-Z][A-Za-z\s]+)/i,
+          /([A-Z][A-Za-z\s]+)\s+(?:Plan|Service|Account)/i,
+          /(?:Plan|Service|Account)\s+for\s+([A-Z][A-Za-z\s]+)/i
+        ];
+        
+        for (const pattern of servicePatterns) {
+          const match = subject.match(pattern) || body.match(pattern);
+          if (match && match[1]) {
+            const extractedName = match[1].trim();
+            if (!/^(subscription|confirmation|receipt|payment|billing|plan|service|account|your|the|a|an)$/i.test(extractedName)) {
+              serviceName = extractedName;
+              console.log(`SCAN-DEBUG: Enhanced service name extraction: "${serviceName}"`);
+              break;
+            }
+          }
+        }
+        
+        // Enhanced price extraction
+        let amount = 9.99;
+        let currency = 'USD';
+        let foundPrice = false;
+        
+        const currencyPatterns = [
+          /\$(\d+\.?\d*)/g,
+          /€(\d+\.?\d*)/g,
+          /£(\d+\.?\d*)/g,
+          /¥(\d+\.?\d*)/g,
+        ];
+        
+        for (const pattern of currencyPatterns) {
+          const matches = bodyLower.match(pattern);
+          if (matches && matches.length > 0) {
+            for (const match of matches) {
+              const price = parseFloat(match.replace(/[^\d.]/g, ''));
+              if (price > 0 && price < 1000) {
+                amount = price;
+                foundPrice = true;
+                if (match.includes('€')) currency = 'EUR';
+                else if (match.includes('£')) currency = 'GBP';
+                else if (match.includes('¥')) currency = 'JPY';
+                else currency = 'USD';
+                break;
+              }
+            }
+            if (foundPrice) break;
+          }
+        }
+        
+        // Enhanced frequency detection
+        let frequency = 'monthly';
+        const frequencyPatterns = [
+          { pattern: /month(ly)?|per\s*month/i, value: 'monthly' },
+          { pattern: /year(ly)?|annual|per\s*year/i, value: 'yearly' },
+          { pattern: /week(ly)?|per\s*week/i, value: 'weekly' },
+          { pattern: /quarter(ly)?|per\s*quarter/i, value: 'quarterly' },
+          { pattern: /bi.?month(ly)?|every\s*2\s*months/i, value: 'bimonthly' },
+          { pattern: /semi.?annual|every\s*6\s*months/i, value: 'semiannual' },
+        ];
+        
+        for (const freqPattern of frequencyPatterns) {
+          if (freqPattern.pattern.test(bodyLower) || freqPattern.pattern.test(subjectLower)) {
+            frequency = freqPattern.value;
+            break;
+          }
+        }
+        
+        // Generate next billing date
+        const nextBillingDate = new Date();
+        if (frequency === 'monthly') nextBillingDate.setMonth(nextBillingDate.getMonth() + 1);
+        else if (frequency === 'yearly') nextBillingDate.setFullYear(nextBillingDate.getFullYear() + 1);
+        else if (frequency === 'weekly') nextBillingDate.setDate(nextBillingDate.getDate() + 7);
+        else if (frequency === 'quarterly') nextBillingDate.setMonth(nextBillingDate.getMonth() + 3);
+        else if (frequency === 'bimonthly') nextBillingDate.setMonth(nextBillingDate.getMonth() + 2);
+        else if (frequency === 'semiannual') nextBillingDate.setMonth(nextBillingDate.getMonth() + 6);
+        
+        console.log(`SCAN-DEBUG: Enhanced keyword detection - Extracted: ${amount} ${currency} ${frequency}`);
+        
+        return {
+          isSubscription: true,
+          serviceName: serviceName,
+          amount: amount,
+          currency: currency,
+          billingFrequency: frequency,
+          nextBillingDate: nextBillingDate.toISOString().split('T')[0],
+          confidence: foundPrice ? Math.min(0.8, totalWeight / 3) : Math.min(0.6, totalWeight / 4)
+        };
+      } catch (error) {
+        console.error(`SCAN-DEBUG: Error in enhanced keyword extraction:`, error);
+        return {
+          isSubscription: true,
+          serviceName: 'Unknown Service',
+          amount: 9.99,
+          currency: 'USD',
+          billingFrequency: 'monthly',
+          nextBillingDate: new Date(new Date().setMonth(new Date().getMonth() + 1)).toISOString().split('T')[0],
+          confidence: Math.min(0.5, totalWeight / 5)
+        };
+      }
+    }
+    
+    return {
+      isSubscription: false,
+      confidence: 0.7
+    };
+  } catch (error) {
+    console.error('SCAN-DEBUG: Error in enhanced fallback analysis:', error);
     return {
       isSubscription: false,
       confidence: 0.5
