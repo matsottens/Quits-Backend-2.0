@@ -1943,57 +1943,147 @@ export default async function handler(req, res) {
     console.log('SCAN-DEBUG: Created scan record with ID:', scanId);
     console.log('SCAN-DEBUG: Using database user ID:', dbUserId);
 
-    // Start async processing BEFORE sending response
-    console.log('SCAN-DEBUG: Starting async email processing BEFORE sending response...');
-    console.log('SCAN-DEBUG: About to call processEmailsAsync with parameters:');
-    console.log('SCAN-DEBUG: - gmailToken length:', gmailToken ? gmailToken.length : 'null');
-    console.log('SCAN-DEBUG: - scanId:', scanId);
-    console.log('SCAN-DEBUG: - dbUserId:', dbUserId);
+    // Process emails SYNCHRONOUSLY before sending response (this will work in serverless)
+    console.log('SCAN-DEBUG: Starting SYNCHRONOUS email processing...');
+    console.log('SCAN-DEBUG: This approach will work in serverless environments');
     
-    // Start the async processing but don't await it
-    let processingStarted = false;
     try {
-      console.log('SCAN-DEBUG: About to call processEmailsAsync function...');
-      console.log('SCAN-DEBUG: Current timestamp before function call:', new Date().toISOString());
-      console.log('SCAN-DEBUG: About to execute: processEmailsAsync(gmailToken, scanId, dbUserId)');
+      // Update scan status to indicate we're starting
+      console.log('SCAN-DEBUG: About to update scan status to in_progress...');
+      await updateScanStatus(scanId, dbUserId, {
+        status: 'in_progress',
+        progress: 10,
+        updated_at: new Date().toISOString()
+      });
+      console.log('SCAN-DEBUG: Successfully updated scan status to in_progress');
       
-      // Start the processing
-      processEmailsAsync(gmailToken, scanId, dbUserId).catch(error => {
-        console.error('SCAN-DEBUG: Async email processing failed:', error);
-        console.error('SCAN-DEBUG: Error stack:', error.stack);
-        // Update scan status to error
-        updateScanStatus(scanId, dbUserId, {
-          status: 'error',
-          error_message: `Async processing failed: ${error.message}`,
-          updated_at: new Date().toISOString()
-        }).catch(updateError => {
-          console.error('SCAN-DEBUG: Failed to update scan status to error:', updateError);
+      console.log('SCAN-DEBUG: About to fetch subscription examples...');
+      // Fetch subscription examples for pattern matching
+      const subscriptionExamples = await fetchSubscriptionExamples();
+      console.log('SCAN-DEBUG: Fetched subscription examples:', subscriptionExamples.length);
+      
+      // Update progress
+      console.log('SCAN-DEBUG: About to update progress to 15...');
+      await updateScanStatus(scanId, dbUserId, {
+        progress: 15,
+        updated_at: new Date().toISOString()
+      });
+      console.log('SCAN-DEBUG: Successfully updated progress to 15');
+      
+      console.log('SCAN-DEBUG: About to fetch emails from Gmail...');
+      console.log('SCAN-DEBUG: Calling fetchEmailsFromGmail function...');
+      // Fetch emails from Gmail using the comprehensive search function
+      const emails = await fetchEmailsFromGmail(gmailToken);
+      console.log('SCAN-DEBUG: Fetched emails from Gmail:', emails.length);
+      console.log('SCAN-DEBUG: Email IDs sample:', emails.slice(0, 3));
+      
+      // Update scan status with email count
+      console.log('SCAN-DEBUG: About to update scan status with email count...');
+      await updateScanStatus(scanId, dbUserId, {
+        progress: 20,
+        emails_found: emails.length,
+        emails_to_process: emails.length,
+        updated_at: new Date().toISOString()
+      });
+      console.log('SCAN-DEBUG: Successfully updated scan status with email count');
+      
+      if (emails.length === 0) {
+        console.log('SCAN-DEBUG: No emails found, completing scan');
+        await updateScanStatus(scanId, dbUserId, {
+          status: 'completed',
+          progress: 100,
+          completed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          error_message: 'No subscription-related emails found in your Gmail account. This could mean you don\'t have any active subscriptions, or your emails are organized differently.'
         });
+        
+        // Return scan ID immediately to prevent timeout
+        console.log('SCAN-DEBUG: Returning scanId immediately to prevent timeout:', scanId);
+        res.status(200).json({ 
+          success: true, 
+          scanId: scanId,
+          message: 'Scan completed. No subscription emails found.',
+          processingCompleted: true
+        });
+        return;
+      }
+      
+      console.log('SCAN-DEBUG: About to process emails for subscriptions...');
+      // Process emails to find subscriptions (this now includes storing data and creating analysis records)
+      const { subscriptionEmails, processedCount } = await processEmailsForSubscriptions(
+        emails, 
+        subscriptionExamples, 
+        gmailToken, 
+        scanId, 
+        dbUserId
+      );
+      
+      console.log('SCAN-DEBUG: Processed emails for subscriptions:', processedCount);
+      console.log('SCAN-DEBUG: Found subscription emails:', subscriptionEmails.length);
+      
+      // Update scan status with processing results
+      await updateScanStatus(scanId, dbUserId, {
+        progress: 90,
+        emails_processed: processedCount,
+        emails_scanned: processedCount,
+        subscriptions_found: subscriptionEmails.length,
+        updated_at: new Date().toISOString()
       });
       
-      processingStarted = true;
-      console.log('SCAN-DEBUG: Async email processing started successfully');
-    } catch (syncError) {
-      console.error('SCAN-DEBUG: Synchronous error calling processEmailsAsync:', syncError);
-      console.error('SCAN-DEBUG: Sync error stack:', syncError.stack);
+      if (subscriptionEmails.length === 0) {
+        console.log('SCAN-DEBUG: No subscriptions found, completing scan');
+        await updateScanStatus(scanId, dbUserId, {
+          status: 'completed',
+          progress: 100,
+          completed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        });
+      } else {
+        console.log('SCAN-DEBUG: Email processing completed successfully');
+        
+        // Update scan status to completed
+        await updateScanStatus(scanId, dbUserId, {
+          status: 'completed',
+          progress: 100,
+          completed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        });
+      }
+      
+      // Return scan ID with completion status
+      console.log('SCAN-DEBUG: Returning scanId with completion status:', scanId);
+      res.status(200).json({ 
+        success: true, 
+        scanId: scanId,
+        message: 'Scan completed successfully.',
+        processingCompleted: true,
+        emailsFound: emails.length,
+        subscriptionsFound: subscriptionEmails.length
+      });
+      
+    } catch (processingError) {
+      console.error('SCAN-DEBUG: Error in synchronous email processing:', processingError);
+      console.error('SCAN-DEBUG: Error stack:', processingError.stack);
+      
       // Update scan status to error
-      updateScanStatus(scanId, dbUserId, {
-        status: 'error',
-        error_message: `Sync error calling async processing: ${syncError.message}`,
-        updated_at: new Date().toISOString()
-      }).catch(updateError => {
+      try {
+        await updateScanStatus(scanId, dbUserId, {
+          status: 'error',
+          error_message: processingError.message,
+          updated_at: new Date().toISOString()
+        });
+        console.log('SCAN-DEBUG: Successfully updated scan status to error');
+      } catch (updateError) {
         console.error('SCAN-DEBUG: Failed to update scan status to error:', updateError);
+      }
+      
+      // Return error response
+      res.status(500).json({ 
+        error: 'Email processing failed',
+        message: processingError.message,
+        scanId: scanId
       });
     }
-
-    // Return scan ID immediately to prevent timeout
-    console.log('SCAN-DEBUG: Returning scanId immediately to prevent timeout:', scanId);
-    res.status(200).json({ 
-      success: true, 
-      scanId: scanId,
-      message: 'Scan started successfully. Use the scan ID to check progress.',
-      processingStarted: processingStarted
-    });
 
   } catch (error) {
     console.error('SCAN-DEBUG: Error in email scan handler:', error);
