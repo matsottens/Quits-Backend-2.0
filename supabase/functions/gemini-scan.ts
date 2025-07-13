@@ -317,6 +317,10 @@ serve(async (_req) => {
   try {
     console.log("Edge Function: Starting Gemini scan processing");
     
+    // Add timeout mechanism to prevent hanging
+    const startTime = Date.now();
+    const maxExecutionTime = 8 * 60 * 1000; // 8 minutes max execution time
+    
     // 1. Find all scans ready for analysis
     const { data: scans, error: scanError } = await supabase
       .from("scan_history")
@@ -336,6 +340,16 @@ serve(async (_req) => {
     console.log(`Edge Function: Processing ${scans.length} scans ready for analysis`);
 
     for (const scan of scans) {
+      // Check timeout before processing each scan
+      if (Date.now() - startTime > maxExecutionTime) {
+        console.log(`Edge Function: Timeout reached, stopping processing. Processed ${scans.indexOf(scan)} scans.`);
+        return new Response(JSON.stringify({ 
+          success: true, 
+          message: `Processed ${scans.indexOf(scan)} scans before timeout`,
+          timeout: true
+        }), { status: 200 });
+      }
+      
       console.log(`Edge Function: Processing scan ${scan.scan_id} for user ${scan.user_id}`);
       
       // 2. Get pre-identified potential subscriptions for this scan
@@ -393,8 +407,8 @@ From: ${emailData.sender}
 Content: ${emailData.content}
           `.trim();
           
-          // Add a delay to prevent rate limiting - increased from 3s to 15s
-          await new Promise(resolve => setTimeout(resolve, 15000)); // 15 second delay between calls
+          // Reduced delay to prevent timeouts - from 15s to 3s
+          await new Promise(resolve => setTimeout(resolve, 3000)); // 3 second delay between calls
           
           const geminiResult = await analyzeEmailWithGemini(emailContent);
           
