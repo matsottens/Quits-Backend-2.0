@@ -40,12 +40,13 @@ export default async function handler(req, res) {
       process.env.SUPABASE_SERVICE_ROLE_KEY
     );
 
-    // Check for scans that are ready for analysis
+    // Check for scans that are ready for analysis (exclude completed scans)
     console.log('TRIGGER-DEBUG: Checking for scans ready for analysis...');
     let { data: readyScans, error: scanError } = await supabase
       .from('scan_history')
       .select('scan_id, user_id, created_at, emails_processed, subscriptions_found, status')
       .eq('status', 'ready_for_analysis')
+      .not('status', 'eq', 'completed') // Exclude completed scans
       .order('created_at', { ascending: true })
       .limit(5); // Process up to 5 scans at a time
 

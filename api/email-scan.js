@@ -2100,106 +2100,10 @@ export default async function handler(req, res) {
           updated_at: new Date().toISOString()
         });
         
-        console.log('SCAN-DEBUG: Scan status set to ready_for_analysis - Edge Function will process analysis');
+        console.log('SCAN-DEBUG: Scan status set to ready_for_analysis - cron job will trigger Edge Function analysis');
         
-        // Trigger the Edge Function immediately with retry logic
-        console.log('SCAN-DEBUG: Triggering Edge Function immediately...');
-        let edgeFunctionSuccess = false;
-        let retryCount = 0;
-        const maxRetries = 3;
-        
-        while (!edgeFunctionSuccess && retryCount < maxRetries) {
-          try {
-            console.log(`SCAN-DEBUG: Edge Function attempt ${retryCount + 1}/${maxRetries}`);
-            
-            const triggerResponse = await fetch('https://api.quits.cc/api/trigger-gemini-scan', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json'
-              }
-            });
-            
-            console.log('SCAN-DEBUG: Edge Function trigger response status:', triggerResponse.status);
-            
-            if (triggerResponse.ok) {
-              const triggerData = await triggerResponse.json();
-              console.log('SCAN-DEBUG: Edge Function trigger response:', triggerData);
-              
-              if (triggerData.success && triggerData.scans_processed > 0) {
-                console.log('SCAN-DEBUG: ✅ Edge Function triggered successfully!');
-                edgeFunctionSuccess = true;
-                
-                // Wait a moment for the Edge Function to start processing
-                console.log('SCAN-DEBUG: Waiting for Edge Function to start processing...');
-                await new Promise(resolve => setTimeout(resolve, 5000));
-                
-                // Check if the scan status changed to 'analyzing'
-                try {
-                  const statusCheckResponse = await fetch(
-                    `${supabaseUrl}/rest/v1/scan_history?scan_id=eq.${scanId}&select=status`,
-                    {
-                      method: 'GET',
-                      headers: {
-                        'apikey': supabaseKey,
-                        'Authorization': `Bearer ${supabaseKey}`,
-                        'Content-Type': 'application/json'
-                      }
-                    }
-                  );
-                  
-                  if (statusCheckResponse.ok) {
-                    const statusData = await statusCheckResponse.json();
-                    if (statusData.length > 0) {
-                      const currentStatus = statusData[0].status;
-                      console.log('SCAN-DEBUG: Current scan status after Edge Function trigger:', currentStatus);
-                      
-                      if (currentStatus === 'analyzing') {
-                        console.log('SCAN-DEBUG: ✅ Edge Function is processing the scan!');
-                      } else if (currentStatus === 'completed') {
-                        console.log('SCAN-DEBUG: ✅ Edge Function completed the scan!');
-                      } else {
-                        console.log('SCAN-DEBUG: ⚠️ Scan status is:', currentStatus);
-                      }
-                    }
-                  }
-                } catch (statusError) {
-                  console.error('SCAN-DEBUG: Error checking scan status:', statusError);
-                }
-              } else {
-                console.log('SCAN-DEBUG: Edge Function trigger returned no scans processed');
-                retryCount++;
-                if (retryCount < maxRetries) {
-                  console.log('SCAN-DEBUG: Retrying Edge Function trigger in 10 seconds...');
-                  await new Promise(resolve => setTimeout(resolve, 10000));
-                }
-              }
-            } else {
-              const errorText = await triggerResponse.text();
-              console.error('SCAN-DEBUG: Edge Function trigger failed:', errorText);
-              retryCount++;
-              if (retryCount < maxRetries) {
-                console.log('SCAN-DEBUG: Retrying Edge Function trigger in 10 seconds...');
-                await new Promise(resolve => setTimeout(resolve, 10000));
-              }
-            }
-          } catch (triggerError) {
-            console.error('SCAN-DEBUG: Error triggering Edge Function:', triggerError);
-            retryCount++;
-            if (retryCount < maxRetries) {
-              console.log('SCAN-DEBUG: Retrying Edge Function trigger in 10 seconds...');
-              await new Promise(resolve => setTimeout(resolve, 10000));
-            }
-          }
-        }
-        
-        if (!edgeFunctionSuccess) {
-          console.log('SCAN-DEBUG: ⚠️ Edge Function trigger failed after all retries');
-          console.log('SCAN-DEBUG: However, pattern matching detected subscriptions successfully');
-          console.log('SCAN-DEBUG: The scan is functionally complete with basic subscription detection');
-        }
-        
-        // NO FALLBACK MECHANISM - Scans will only be completed when Edge Function succeeds
-        console.log('SCAN-DEBUG: No fallback mechanism - scan will remain in ready_for_analysis until Edge Function completes');
+        // Let the cron job handle Edge Function triggering
+        console.log('SCAN-DEBUG: Cron job runs every minute and will automatically trigger analysis for scans in ready_for_analysis status');
       }
       
       // Return scan ID with completion status
