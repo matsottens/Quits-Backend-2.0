@@ -196,24 +196,35 @@ async function analyzeEmailWithGemini(emailText: string) {
   return { error: "All attempts failed", is_subscription: false };
 }
 
-serve(async (_req) => {
+serve(async (req) => {
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
   try {
     const startTime = Date.now();
     const maxExecutionTime = 7 * 60 * 1000;
     
+    // Get scan IDs and user IDs from the request body
+    const { scan_ids, user_ids } = await req.json();
+    
+    if (!scan_ids || !user_ids || scan_ids.length === 0) {
+      return new Response(JSON.stringify({ 
+        success: true, 
+        message: "No scan IDs provided" 
+      }), { status: 200 });
+    }
+    
+    // Get the specific scans that were passed from the trigger
     const { data: scans, error: scanError } = await supabase
       .from("scan_history")
       .select("*")
-      .eq("status", "ready_for_analysis");
+      .in("scan_id", scan_ids);
 
     if (scanError) {
       return new Response(JSON.stringify({ error: "Failed to fetch scans", details: scanError }), { status: 500 });
     }
 
     if (!scans || scans.length === 0) {
-      return new Response(JSON.stringify({ success: true, message: "No scans ready for analysis" }), { status: 200 });
+      return new Response(JSON.stringify({ success: true, message: "No scans found" }), { status: 200 });
     }
 
     let totalProcessed = 0;
@@ -228,16 +239,9 @@ serve(async (_req) => {
         }), { status: 200 });
       }
       
-      const { error: statusUpdateError } = await supabase
-        .from("scan_history")
-        .update({ 
-          status: "analyzing",
-          updated_at: new Date().toISOString()
-        })
-        .eq("id", scan.id);
-
-      if (statusUpdateError) {
-        totalErrors++;
+      // Skip if scan is not in analyzing status (should be set by trigger)
+      if (scan.status !== "analyzing") {
+        console.log(`Skipping scan ${scan.scan_id} - status is ${scan.status}, expected analyzing`);
         continue;
       }
       
