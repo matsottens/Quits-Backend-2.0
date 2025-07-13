@@ -151,8 +151,8 @@ Return ONLY the JSON array, no other text:`;
         }
         if (jsonText.endsWith('```')) {
           jsonText = jsonText.substring(0, jsonText.length - 3);
-        }
-        
+      }
+
         // Find JSON array
         const jsonMatch = jsonText.match(/\[[\s\S]*\]/);
         if (!jsonMatch) {
@@ -196,61 +196,61 @@ Return ONLY the JSON array, no other text:`;
           if (typeof result.is_subscription !== 'boolean') {
             console.log(`Result ${index + 1}: Invalid is_subscription type, defaulting to false`);
             result.is_subscription = false;
-          }
-          
-          if (result.is_subscription) {
+        }
+        
+        if (result.is_subscription) {
             // Validate subscription fields
-            if (!result.subscription_name || typeof result.subscription_name !== 'string') {
+          if (!result.subscription_name || typeof result.subscription_name !== 'string') {
               console.log(`Result ${index + 1}: Missing subscription_name, attempting to extract from email`);
               const emailLower = emails[index].content.toLowerCase();
-              let extractedName: string | null = null;
-              
+            let extractedName: string | null = null;
+            
               // Enhanced service name extraction
-              if (emailLower.includes('netflix') || emailLower.includes('nflx')) extractedName = 'Netflix';
-              else if (emailLower.includes('spotify')) extractedName = 'Spotify';
-              else if (emailLower.includes('amazon') || emailLower.includes('prime')) extractedName = 'Amazon Prime';
-              else if (emailLower.includes('disney') || emailLower.includes('disney+')) extractedName = 'Disney+';
-              else if (emailLower.includes('hbo') || emailLower.includes('max')) extractedName = 'HBO Max';
-              else if (emailLower.includes('youtube') || emailLower.includes('yt premium')) extractedName = 'YouTube Premium';
-              else if (emailLower.includes('apple')) extractedName = 'Apple Services';
-              else if (emailLower.includes('hulu')) extractedName = 'Hulu';
-              else if (emailLower.includes('paramount') || emailLower.includes('paramount+')) extractedName = 'Paramount+';
-              else if (emailLower.includes('peacock')) extractedName = 'Peacock';
-              else if (emailLower.includes('adobe')) extractedName = 'Adobe Creative Cloud';
-              else if (emailLower.includes('microsoft') || emailLower.includes('office 365')) extractedName = 'Microsoft 365';
-              else if (emailLower.includes('google one') || emailLower.includes('drive storage')) extractedName = 'Google One';
-              else if (emailLower.includes('dropbox')) extractedName = 'Dropbox';
-              else if (emailLower.includes('nba') || emailLower.includes('league pass')) extractedName = 'NBA League Pass';
-              else if (emailLower.includes('babbel')) extractedName = 'Babbel';
-              else if (emailLower.includes('chegg')) extractedName = 'Chegg';
-              else if (emailLower.includes('grammarly')) extractedName = 'Grammarly';
-              else if (emailLower.includes('nordvpn') || emailLower.includes('vpn')) extractedName = 'NordVPN';
-              else if (emailLower.includes('peloton')) extractedName = 'Peloton';
-              else if (emailLower.includes('duolingo')) extractedName = 'Duolingo';
-              else if (emailLower.includes('notion')) extractedName = 'Notion';
-              else if (emailLower.includes('canva')) extractedName = 'Canva';
-              else if (emailLower.includes('nytimes') || emailLower.includes('ny times')) extractedName = 'New York Times';
-              else if (emailLower.includes('vercel')) extractedName = 'Vercel';
+            if (emailLower.includes('netflix') || emailLower.includes('nflx')) extractedName = 'Netflix';
+            else if (emailLower.includes('spotify')) extractedName = 'Spotify';
+            else if (emailLower.includes('amazon') || emailLower.includes('prime')) extractedName = 'Amazon Prime';
+            else if (emailLower.includes('disney') || emailLower.includes('disney+')) extractedName = 'Disney+';
+            else if (emailLower.includes('hbo') || emailLower.includes('max')) extractedName = 'HBO Max';
+            else if (emailLower.includes('youtube') || emailLower.includes('yt premium')) extractedName = 'YouTube Premium';
+            else if (emailLower.includes('apple')) extractedName = 'Apple Services';
+            else if (emailLower.includes('hulu')) extractedName = 'Hulu';
+            else if (emailLower.includes('paramount') || emailLower.includes('paramount+')) extractedName = 'Paramount+';
+            else if (emailLower.includes('peacock')) extractedName = 'Peacock';
+            else if (emailLower.includes('adobe')) extractedName = 'Adobe Creative Cloud';
+            else if (emailLower.includes('microsoft') || emailLower.includes('office 365')) extractedName = 'Microsoft 365';
+            else if (emailLower.includes('google one') || emailLower.includes('drive storage')) extractedName = 'Google One';
+            else if (emailLower.includes('dropbox')) extractedName = 'Dropbox';
+            else if (emailLower.includes('nba') || emailLower.includes('league pass')) extractedName = 'NBA League Pass';
+            else if (emailLower.includes('babbel')) extractedName = 'Babbel';
+            else if (emailLower.includes('chegg')) extractedName = 'Chegg';
+            else if (emailLower.includes('grammarly')) extractedName = 'Grammarly';
+            else if (emailLower.includes('nordvpn') || emailLower.includes('vpn')) extractedName = 'NordVPN';
+            else if (emailLower.includes('peloton')) extractedName = 'Peloton';
+            else if (emailLower.includes('duolingo')) extractedName = 'Duolingo';
+            else if (emailLower.includes('notion')) extractedName = 'Notion';
+            else if (emailLower.includes('canva')) extractedName = 'Canva';
+            else if (emailLower.includes('nytimes') || emailLower.includes('ny times')) extractedName = 'New York Times';
+            else if (emailLower.includes('vercel')) extractedName = 'Vercel';
               else if (emailLower.includes('ahrefs')) extractedName = 'Ahrefs';
-              
-              if (extractedName) {
-                result.subscription_name = extractedName;
+            
+            if (extractedName) {
+              result.subscription_name = extractedName;
                 console.log(`Result ${index + 1}: Extracted service name: ${extractedName}`);
-              } else {
-                result.subscription_name = 'Unknown Service';
+            } else {
+              result.subscription_name = 'Unknown Service';
                 console.log(`Result ${index + 1}: Could not extract service name, using 'Unknown Service'`);
-              }
             }
-            
+          }
+          
             // Validate price
-            if (result.price !== undefined && typeof result.price !== 'number') {
-              result.price = parseFloat(result.price) || 0;
-            }
-            
+          if (result.price !== undefined && typeof result.price !== 'number') {
+            result.price = parseFloat(result.price) || 0;
+          }
+          
             // Validate confidence score
-            if (result.confidence_score !== undefined && typeof result.confidence_score !== 'number') {
-              result.confidence_score = parseFloat(result.confidence_score) || 0.8;
-            }
+          if (result.confidence_score !== undefined && typeof result.confidence_score !== 'number') {
+            result.confidence_score = parseFloat(result.confidence_score) || 0.8;
+          }
             
             // Set defaults for missing fields
             if (!result.currency) result.currency = 'USD';
@@ -264,9 +264,9 @@ Return ONLY the JSON array, no other text:`;
               result.confidence_score = 0.95;
             }
             console.log(`Result ${index + 1}: Not a subscription (confidence: ${result.confidence_score})`);
-          }
-          
-          return result;
+        }
+        
+        return result;
         });
         
         console.log(`Successfully processed batch with ${processedResults.length} results`);
@@ -394,17 +394,17 @@ serve(async (req) => {
       
       // First, fetch all email data for the pending analyses
       const emailDataPromises = potentialSubscriptions.map(async (analysis) => {
-        const { data: emailData, error: emailError } = await supabase
-          .from("email_data")
-          .select("content, subject, sender, gmail_message_id")
-          .eq("id", analysis.email_data_id)
-          .single();
-        
-        if (emailError || !emailData) {
+          const { data: emailData, error: emailError } = await supabase
+            .from("email_data")
+            .select("content, subject, sender, gmail_message_id")
+            .eq("id", analysis.email_data_id)
+            .single();
+
+          if (emailError || !emailData) {
           console.error(`Failed to fetch email data for analysis ${analysis.id}:`, emailError);
           return { analysis, emailData: null, error: emailError };
-        }
-        
+          }
+
         return { analysis, emailData, error: null };
       });
       
@@ -453,15 +453,15 @@ serve(async (req) => {
         
         if (batchError) {
           if (typeof batchError === 'object' && batchError.quota_exhausted) {
-            quotaExhausted = true;
+              quotaExhausted = true;
             console.log(`Quota exhausted for scan ${scan.scan_id}`);
-            
-            await supabase.from("scan_history").update({
-              status: "quota_exhausted",
-              error_message: "Gemini API quota exhausted. Analysis will resume when quota resets.",
-              updated_at: new Date().toISOString()
-            }).eq("id", scan.id);
-            
+              
+              await supabase.from("scan_history").update({
+                status: "quota_exhausted",
+                error_message: "Gemini API quota exhausted. Analysis will resume when quota resets.",
+                updated_at: new Date().toISOString()
+              }).eq("id", scan.id);
+              
             // Mark all remaining analyses as pending for quota exhaustion
             for (const email of batch) {
               await supabase.from("subscription_analysis").update({
@@ -470,10 +470,10 @@ serve(async (req) => {
                 updated_at: new Date().toISOString()
               }).eq("id", email.analysisId);
             }
+              
+              break;
+            }
             
-            break;
-          }
-          
           // Handle other batch errors
           console.error(`Batch error for scan ${scan.scan_id}:`, batchError);
           for (const email of batch) {
@@ -540,7 +540,7 @@ serve(async (req) => {
           }
 
           console.log(`Processing result for email ${email.analysisId}:`, geminiResult);
-          
+
           if (geminiResult && geminiResult.is_subscription && geminiResult.subscription_name) {
             console.log(`Found subscription: ${geminiResult.subscription_name} with price ${geminiResult.price} ${geminiResult.currency}`);
             
