@@ -81,19 +81,37 @@ const extractGmailToken = (token) => {
 const fetchSubscriptionExamples = async () => {
   console.log('SCAN-DEBUG: Fetching subscription examples...');
   try {
-    const { data, error } = await supabase
-      .from('subscription_examples')
-      .select('service_name, sender_pattern, subject_pattern');
+    // Add timeout to prevent hanging
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
     
-    if (error) {
-      console.error('SCAN-DEBUG: Error fetching subscription examples:', error);
+    // Use direct fetch instead of Supabase client to avoid hanging
+    const response = await fetch(`${supabaseUrl}/rest/v1/subscription_examples?select=service_name,sender_pattern,subject_pattern`, {
+      method: 'GET',
+      headers: {
+        'apikey': supabaseKey,
+        'Authorization': `Bearer ${supabaseKey}`,
+        'Content-Type': 'application/json'
+      },
+      signal: controller.signal
+    });
+    
+    clearTimeout(timeoutId);
+    
+    if (!response.ok) {
+      console.error('SCAN-DEBUG: Error fetching subscription examples:', response.status, response.statusText);
       return [];
     }
     
+    const data = await response.json();
     console.log(`SCAN-DEBUG: Found ${data.length} subscription examples`);
     return data || [];
   } catch (error) {
-    console.error('SCAN-DEBUG: Exception fetching subscription examples:', error);
+    if (error.name === 'AbortError') {
+      console.error('SCAN-DEBUG: Subscription examples fetch timed out');
+    } else {
+      console.error('SCAN-DEBUG: Exception fetching subscription examples:', error);
+    }
     return [];
   }
 };
@@ -102,9 +120,27 @@ const fetchSubscriptionExamples = async () => {
 const fetchGmailEmails = async (gmailToken) => {
   console.log('SCAN-DEBUG: Fetching emails from Gmail...');
   try {
-    const emails = await fetchEmailsFromGmail(gmailToken);
-    console.log(`SCAN-DEBUG: Fetched ${emails.length} emails from Gmail`);
-    return emails;
+    // Use a simple query to get recent emails
+    const query = 'subject:(subscription OR receipt OR invoice OR payment OR billing OR renewal)';
+    const encodedQuery = encodeURIComponent(query);
+    const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodedQuery}&maxResults=50`;
+    
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${gmailToken}`,
+        'Content-Type': 'application/json',
+      }
+    });
+    
+    if (!response.ok) {
+      console.error('SCAN-DEBUG: Gmail API error:', response.status, response.statusText);
+      return [];
+    }
+    
+    const data = await response.json();
+    const messages = data.messages || [];
+    console.log(`SCAN-DEBUG: Fetched ${messages.length} emails from Gmail`);
+    return messages;
   } catch (error) {
     console.error('SCAN-DEBUG: Error fetching emails from Gmail:', error);
     return [];
@@ -194,17 +230,23 @@ const storeEmailData = async (subscriptionEmails, scanId, userId) => {
         updated_at: new Date().toISOString()
       };
       
-      const { data, error } = await supabase
-        .from('email_data')
-        .insert(emailDataRecord)
-        .select('id')
-        .single();
+      const response = await fetch(`${supabaseUrl}/rest/v1/email_data`, {
+        method: 'POST',
+        headers: {
+          'apikey': supabaseKey,
+          'Authorization': `Bearer ${supabaseKey}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation'
+        },
+        body: JSON.stringify(emailDataRecord)
+      });
       
-      if (error) {
-        console.error('SCAN-DEBUG: Error storing email data:', error);
+      if (!response.ok) {
+        console.error('SCAN-DEBUG: Error storing email data:', response.status, response.statusText);
       } else {
-        console.log(`SCAN-DEBUG: Stored email data with ID: ${data.id}`);
-        email.emailDataId = data.id; // Store for analysis record
+        const data = await response.json();
+        console.log(`SCAN-DEBUG: Stored email data with ID: ${data[0].id}`);
+        email.emailDataId = data[0].id; // Store for analysis record
       }
     } catch (error) {
       console.error('SCAN-DEBUG: Exception storing email data:', error);
@@ -240,12 +282,18 @@ const createSubscriptionAnalysisRecords = async (subscriptionEmails, scanId, use
         updated_at: new Date().toISOString()
       };
       
-      const { error } = await supabase
-        .from('subscription_analysis')
-        .insert(analysisRecord);
+      const response = await fetch(`${supabaseUrl}/rest/v1/subscription_analysis`, {
+        method: 'POST',
+        headers: {
+          'apikey': supabaseKey,
+          'Authorization': `Bearer ${supabaseKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(analysisRecord)
+      });
       
-      if (error) {
-        console.error('SCAN-DEBUG: Error creating analysis record:', error);
+      if (!response.ok) {
+        console.error('SCAN-DEBUG: Error creating analysis record:', response.status, response.statusText);
       } else {
         console.log(`SCAN-DEBUG: Created analysis record for ${email.analysis.serviceName}`);
       }
