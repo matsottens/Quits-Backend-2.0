@@ -38,6 +38,197 @@ function checkQuota(): boolean {
   return true;
 }
 
+// New function to analyze emails in batches
+async function analyzeEmailsBatchWithGemini(emails: Array<{id: string, content: string, subject: string, sender: string}>) {
+  if (!checkQuota()) {
+    return { error: "Rate limit reached", results: [] };
+  }
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+
+  // Build batch prompt
+  const emailList = emails.map((email, index) => 
+    `${index + 1}. Subject: ${email.subject}\nFrom: ${email.sender}\nContent: ${email.content}`
+  ).join('\n\n');
+
+  const prompt = `Analyze the following emails to identify subscription services. For each email, determine if it's a subscription and extract details.
+
+Return a JSON array with one object per email in the same order. Each object should have:
+- "is_subscription": true/false
+- "subscription_name": "name" (if subscription)
+- "price": number (if subscription)
+- "currency": "USD" (if subscription)
+- "billing_cycle": "monthly/quarterly/yearly" (if subscription)
+- "next_billing_date": "YYYY-MM-DD" (if available)
+- "service_provider": "name" (if subscription)
+- "confidence_score": 0.95 (confidence in analysis)
+
+For non-subscriptions, only include "is_subscription": false and "confidence_score": 0.95.
+
+Emails to analyze:
+${emailList}
+
+Return only valid JSON array:`;
+
+  const body = {
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
+    generationConfig: { 
+      response_mime_type: "application/json",
+      temperature: 0.1,
+      maxOutputTokens: 2000
+    }
+  };
+
+  const maxRetries = 2;
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+
+      if (!response.ok) {
+        if (response.status === 429) {
+          try {
+            const errorData = await response.json();
+            if (errorData.error && errorData.error.status === 'RESOURCE_EXHAUSTED') {
+              return { error: `Quota exhausted`, results: [], quota_exhausted: true };
+            }
+          } catch (parseError) {}
+          
+          lastError = new Error(`Rate limit hit`);
+          
+          if (attempt < maxRetries) {
+            const backoffDelay = Math.pow(2, attempt) * 5000;
+            await new Promise(resolve => setTimeout(resolve, backoffDelay));
+            continue;
+          } else {
+            return { error: `Rate limit exceeded`, results: [] };
+          }
+        }
+        
+        throw new Error(`API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+      
+      if (!text) {
+        if (attempt < maxRetries) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          continue;
+        } else {
+          return { error: "No response", results: [] };
+        }
+      }
+
+      try {
+        const jsonMatch = text.match(/\[[\s\S]*\]/);
+        if (!jsonMatch) {
+          if (attempt < maxRetries) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            continue;
+          } else {
+            return { error: "No JSON array found", results: [] };
+          }
+        }
+        
+        const results = JSON.parse(jsonMatch[0]);
+        
+        if (!Array.isArray(results)) {
+          if (attempt < maxRetries) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            continue;
+          } else {
+            return { error: "Response is not an array", results: [] };
+          }
+        }
+        
+        // Validate and process each result
+        const processedResults = results.map((result, index) => {
+          if (typeof result.is_subscription !== 'boolean') {
+            return { error: "Invalid structure", is_subscription: false };
+          }
+          
+          if (result.is_subscription) {
+            // Apply the same validation logic as single email analysis
+            if (!result.subscription_name || typeof result.subscription_name !== 'string') {
+              const emailLower = emails[index].content.toLowerCase();
+              let extractedName: string | null = null;
+              
+              if (emailLower.includes('netflix') || emailLower.includes('nflx')) extractedName = 'Netflix';
+              else if (emailLower.includes('spotify')) extractedName = 'Spotify';
+              else if (emailLower.includes('amazon') || emailLower.includes('prime')) extractedName = 'Amazon Prime';
+              else if (emailLower.includes('disney') || emailLower.includes('disney+')) extractedName = 'Disney+';
+              else if (emailLower.includes('hbo') || emailLower.includes('max')) extractedName = 'HBO Max';
+              else if (emailLower.includes('youtube') || emailLower.includes('yt premium')) extractedName = 'YouTube Premium';
+              else if (emailLower.includes('apple')) extractedName = 'Apple Services';
+              else if (emailLower.includes('hulu')) extractedName = 'Hulu';
+              else if (emailLower.includes('paramount') || emailLower.includes('paramount+')) extractedName = 'Paramount+';
+              else if (emailLower.includes('peacock')) extractedName = 'Peacock';
+              else if (emailLower.includes('adobe')) extractedName = 'Adobe Creative Cloud';
+              else if (emailLower.includes('microsoft') || emailLower.includes('office 365')) extractedName = 'Microsoft 365';
+              else if (emailLower.includes('google one') || emailLower.includes('drive storage')) extractedName = 'Google One';
+              else if (emailLower.includes('dropbox')) extractedName = 'Dropbox';
+              else if (emailLower.includes('nba') || emailLower.includes('league pass')) extractedName = 'NBA League Pass';
+              else if (emailLower.includes('babbel')) extractedName = 'Babbel';
+              else if (emailLower.includes('chegg')) extractedName = 'Chegg';
+              else if (emailLower.includes('grammarly')) extractedName = 'Grammarly';
+              else if (emailLower.includes('nordvpn') || emailLower.includes('vpn')) extractedName = 'NordVPN';
+              else if (emailLower.includes('peloton')) extractedName = 'Peloton';
+              else if (emailLower.includes('duolingo')) extractedName = 'Duolingo';
+              else if (emailLower.includes('notion')) extractedName = 'Notion';
+              else if (emailLower.includes('canva')) extractedName = 'Canva';
+              else if (emailLower.includes('nytimes') || emailLower.includes('ny times')) extractedName = 'New York Times';
+              else if (emailLower.includes('vercel')) extractedName = 'Vercel';
+              
+              if (extractedName) {
+                result.subscription_name = extractedName;
+              } else {
+                result.subscription_name = 'Unknown Service';
+              }
+            }
+            
+            if (result.price !== undefined && typeof result.price !== 'number') {
+              result.price = parseFloat(result.price) || 0;
+            }
+            
+            if (result.confidence_score !== undefined && typeof result.confidence_score !== 'number') {
+              result.confidence_score = parseFloat(result.confidence_score) || 0.8;
+            }
+          }
+          
+          return result;
+        });
+        
+        return { results: processedResults };
+      } catch (parseError) {
+        if (attempt < maxRetries) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          continue;
+        } else {
+          return { error: "Parse failed", results: [] };
+        }
+      }
+      
+    } catch (error) {
+      lastError = error;
+      
+      if (attempt < maxRetries) {
+        const retryDelay = Math.pow(2, attempt) * 5000;
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
+      } else {
+        break;
+      }
+    }
+  }
+  
+  return { error: "All attempts failed", results: [] };
+}
+
 async function analyzeEmailWithGemini(emailText: string) {
   if (!checkQuota()) {
     return { error: "Rate limit reached", is_subscription: false };
@@ -275,65 +466,118 @@ serve(async (req) => {
       let errorCount = 0;
       let quotaExhausted = false;
       
-      for (const analysis of potentialSubscriptions) {
-        try {
-          const { data: emailData, error: emailError } = await supabase
-            .from("email_data")
-            .select("content, subject, sender, gmail_message_id")
-            .eq("id", analysis.email_data_id)
-            .single();
-
-          if (emailError || !emailData) {
-            errorCount++;
-            continue;
-          }
-
-          const emailContent = `Subject: ${emailData.subject}\nFrom: ${emailData.sender}\nContent: ${emailData.content}`.trim();
-          
-          await new Promise(resolve => setTimeout(resolve, 10000)); // Increased from 3 seconds to 10 seconds
-          
-          const geminiResult = await analyzeEmailWithGemini(emailContent);
-
-          if (geminiResult.error) {
-            if (geminiResult.quota_exhausted) {
-              quotaExhausted = true;
-              
-              await supabase.from("scan_history").update({
-                status: "quota_exhausted",
-                error_message: "Gemini API quota exhausted. Analysis will resume when quota resets.",
-                updated_at: new Date().toISOString()
-              }).eq("id", scan.id);
-              
+      // First, fetch all email data for the pending analyses
+      const emailDataPromises = potentialSubscriptions.map(async (analysis) => {
+        const { data: emailData, error: emailError } = await supabase
+          .from("email_data")
+          .select("content, subject, sender, gmail_message_id")
+          .eq("id", analysis.email_data_id)
+          .single();
+        
+        if (emailError || !emailData) {
+          return { analysis, emailData: null, error: emailError };
+        }
+        
+        return { analysis, emailData, error: null };
+      });
+      
+      const emailDataResults = await Promise.all(emailDataPromises);
+      
+      // Filter out emails that couldn't be fetched and group by user for batching
+      const validEmails = emailDataResults
+        .filter(result => result.emailData && !result.error)
+        .map(result => ({
+          analysisId: result.analysis.id,
+          emailDataId: result.analysis.email_data_id,
+          content: result.emailData!.content,
+          subject: result.emailData!.subject,
+          sender: result.emailData!.sender,
+          gmailMessageId: result.emailData!.gmail_message_id
+        }));
+      
+      // Process emails in batches of 5 (reasonable batch size for Gemini)
+      const BATCH_SIZE = 5;
+      for (let i = 0; i < validEmails.length; i += BATCH_SIZE) {
+        const batch = validEmails.slice(i, i + BATCH_SIZE);
+        
+        // Check for timeout
+        if (Date.now() - startTime > maxExecutionTime) {
+          console.log(`Processing timeout reached after ${i} emails`);
+          break;
+        }
+        
+        console.log(`Processing batch ${Math.floor(i / BATCH_SIZE) + 1} with ${batch.length} emails`);
+        
+                const batchEmails = batch.map(email => ({
+          id: email.analysisId,
+          content: email.content,
+          subject: email.subject,
+          sender: email.sender
+        }));
+        
+        const { results: batchResults, error: batchError } = await analyzeEmailsBatchWithGemini(batchEmails);
+        
+        if (batchError) {
+          if (typeof batchError === 'object' && batchError.quota_exhausted) {
+            quotaExhausted = true;
+            
+            await supabase.from("scan_history").update({
+              status: "quota_exhausted",
+              error_message: "Gemini API quota exhausted. Analysis will resume when quota resets.",
+              updated_at: new Date().toISOString()
+            }).eq("id", scan.id);
+            
+            // Mark all remaining analyses as pending for quota exhaustion
+            for (const email of batch) {
               await supabase.from("subscription_analysis").update({
                 analysis_status: 'pending',
-                gemini_response: JSON.stringify({ error: geminiResult.error, quota_exhausted: true }),
+                gemini_response: JSON.stringify({ error: batchError, quota_exhausted: true }),
                 updated_at: new Date().toISOString()
-              }).eq("id", analysis.id);
-              
-              break;
+              }).eq("id", email.analysisId);
             }
             
+            break;
+          }
+          
+          // Handle other batch errors
+          for (const email of batch) {
+            await supabase.from("subscription_analysis").update({
+              analysis_status: 'failed',
+              gemini_response: JSON.stringify({ error: batchError }),
+              updated_at: new Date().toISOString()
+            }).eq("id", email.analysisId);
+            errorCount++;
+          }
+          continue;
+        }
+
+        // Process batch results
+        for (let i = 0; i < batch.length; i++) {
+          const email = batch[i];
+          const geminiResult = batchResults[i];
+
+          if (geminiResult.error) {
             await supabase.from("subscription_analysis").update({
               analysis_status: 'failed',
               gemini_response: JSON.stringify({ error: geminiResult.error }),
               updated_at: new Date().toISOString()
-            }).eq("id", analysis.id);
+            }).eq("id", email.analysisId);
             errorCount++;
             continue;
           }
 
           await supabase.from("subscription_analysis").update({
-            subscription_name: geminiResult.subscription_name || analysis.subscription_name,
-            price: geminiResult.price || analysis.price,
-            currency: geminiResult.currency || analysis.currency,
-            billing_cycle: geminiResult.billing_cycle || analysis.billing_cycle,
+            subscription_name: geminiResult.subscription_name,
+            price: geminiResult.price,
+            currency: geminiResult.currency,
+            billing_cycle: geminiResult.billing_cycle,
             next_billing_date: geminiResult.next_billing_date,
-            service_provider: geminiResult.service_provider || analysis.service_provider,
-            confidence_score: geminiResult.confidence_score || analysis.confidence_score,
+            service_provider: geminiResult.service_provider,
+            confidence_score: geminiResult.confidence_score,
             analysis_status: 'completed',
             gemini_response: JSON.stringify(geminiResult),
             updated_at: new Date().toISOString()
-          }).eq("id", analysis.id);
+          }).eq("id", email.analysisId);
 
           if (geminiResult && geminiResult.is_subscription && geminiResult.subscription_name) {
             const normalizedServiceName = normalizeServiceName(geminiResult.subscription_name);
@@ -357,7 +601,7 @@ serve(async (req) => {
               next_billing_date: geminiResult.next_billing_date,
               provider: geminiResult.service_provider,
               category: 'auto-detected',
-              email_id: emailData.gmail_message_id,
+              email_id: email.gmailMessageId,
               is_manual: false,
               created_at: new Date().toISOString(),
               updated_at: new Date().toISOString()
@@ -374,16 +618,13 @@ serve(async (req) => {
               analysis_status: 'not_subscription',
               gemini_response: JSON.stringify(geminiResult),
               updated_at: new Date().toISOString()
-            }).eq("id", analysis.id);
+            }).eq("id", email.analysisId);
           }
-        } catch (analysisError) {
-          errorCount++;
-          
-          await supabase.from("subscription_analysis").update({
-            analysis_status: 'failed',
-            gemini_response: JSON.stringify({ error: analysisError.message }),
-            updated_at: new Date().toISOString()
-          }).eq("id", analysis.id);
+        }
+        
+        // Add a small delay between batches to be respectful to the API
+        if (i + BATCH_SIZE < validEmails.length) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
         }
       }
 
