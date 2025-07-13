@@ -25,8 +25,24 @@ console.log(`Email-scan: Using SUPABASE_SERVICE_KEY: ${!!supabaseServiceKey}`);
 // Helper function to extract Gmail token from JWT
 const extractGmailToken = (token) => {
   try {
+    console.log('SCAN-DEBUG: Extracting Gmail token from JWT...');
+    console.log('SCAN-DEBUG: JWT token length:', token?.length || 0);
+    
+    if (!token) {
+      console.error('SCAN-DEBUG: No JWT token provided to extractGmailToken');
+      return null;
+    }
+    
+    // Try to decode the JWT without verification first
     const payload = jsonwebtoken.decode(token);
+    
+    if (!payload) {
+      console.error('SCAN-DEBUG: Failed to decode JWT payload');
+      return null;
+    }
+    
     console.log('SCAN-DEBUG: JWT payload keys:', Object.keys(payload));
+    console.log('SCAN-DEBUG: JWT payload type:', typeof payload);
     
     // Log the email address associated with the token
     if (payload.email) {
@@ -39,23 +55,57 @@ const extractGmailToken = (token) => {
     
     // Check for Gmail token in various possible fields
     if (payload.gmail_token) {
-      console.log('SCAN-DEBUG: Found gmail_token in JWT');
+      console.log('SCAN-DEBUG: Found gmail_token in JWT, length:', payload.gmail_token.length);
       return payload.gmail_token;
     }
     
     if (payload.access_token) {
-      console.log('SCAN-DEBUG: Found access_token in JWT, using as Gmail token');
+      console.log('SCAN-DEBUG: Found access_token in JWT, length:', payload.access_token.length);
       return payload.access_token;
     }
     
     if (payload.google_token) {
-      console.log('SCAN-DEBUG: Found google_token in JWT');
+      console.log('SCAN-DEBUG: Found google_token in JWT, length:', payload.google_token.length);
       return payload.google_token;
     }
     
     if (payload.oauth_token) {
-      console.log('SCAN-DEBUG: Found oauth_token in JWT');
+      console.log('SCAN-DEBUG: Found oauth_token in JWT, length:', payload.oauth_token.length);
       return payload.oauth_token;
+    }
+    
+    // Try to verify the JWT with the secret to get the actual payload
+    try {
+      const jwtSecret = process.env.JWT_SECRET || 'dev_secret_DO_NOT_USE_IN_PRODUCTION';
+      const verifiedPayload = jsonwebtoken.verify(token, jwtSecret);
+      console.log('SCAN-DEBUG: JWT verification successful, verified payload keys:', Object.keys(verifiedPayload));
+      
+      // Check verified payload for Gmail token
+      if (verifiedPayload.gmail_token) {
+        console.log('SCAN-DEBUG: Found gmail_token in verified JWT, length:', verifiedPayload.gmail_token.length);
+        return verifiedPayload.gmail_token;
+      }
+      
+      if (verifiedPayload.access_token) {
+        console.log('SCAN-DEBUG: Found access_token in verified JWT, length:', verifiedPayload.access_token.length);
+        return verifiedPayload.access_token;
+      }
+      
+      if (verifiedPayload.google_token) {
+        console.log('SCAN-DEBUG: Found google_token in verified JWT, length:', verifiedPayload.google_token.length);
+        return verifiedPayload.google_token;
+      }
+      
+      if (verifiedPayload.oauth_token) {
+        console.log('SCAN-DEBUG: Found oauth_token in verified JWT, length:', verifiedPayload.oauth_token.length);
+        return verifiedPayload.oauth_token;
+      }
+      
+      console.error('SCAN-DEBUG: No Gmail token found in verified JWT payload');
+      console.error('SCAN-DEBUG: Verified JWT payload keys:', Object.keys(verifiedPayload));
+      
+    } catch (verifyError) {
+      console.error('SCAN-DEBUG: JWT verification failed:', verifyError.message);
     }
     
     console.error('SCAN-DEBUG: No Gmail token found in JWT, payload keys:', Object.keys(payload));
@@ -73,6 +123,7 @@ const extractGmailToken = (token) => {
     return null;
   } catch (error) {
     console.error('SCAN-DEBUG: Error extracting Gmail token:', error);
+    console.error('SCAN-DEBUG: Error stack:', error.stack);
     return null;
   }
 };
@@ -119,31 +170,90 @@ const fetchSubscriptionExamples = async () => {
 // Helper function to fetch emails from Gmail
 const fetchGmailEmails = async (gmailToken) => {
   console.log('SCAN-DEBUG: Fetching emails from Gmail...');
+  console.log('SCAN-DEBUG: Gmail token length:', gmailToken?.length || 0);
+  
   try {
-    // Use a simple query to get recent emails
-    const query = 'subject:(subscription OR receipt OR invoice OR payment OR billing OR renewal)';
+    // Use a more comprehensive query to get subscription-related emails
+    const query = 'subject:(subscription OR receipt OR invoice OR payment OR billing OR renewal OR "monthly" OR "yearly" OR "annual" OR "premium" OR "pro" OR "upgrade")';
     const encodedQuery = encodeURIComponent(query);
-    const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodedQuery}&maxResults=50`;
+    const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodedQuery}&maxResults=100`;
+    
+    console.log('SCAN-DEBUG: Gmail API URL:', url);
+    console.log('SCAN-DEBUG: Search query:', query);
+    
+    // Add timeout to prevent hanging requests
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
     
     const response = await fetch(url, {
       headers: {
         Authorization: `Bearer ${gmailToken}`,
         'Content-Type': 'application/json',
-      }
+      },
+      signal: controller.signal
     });
     
+    clearTimeout(timeoutId);
+    
+    console.log('SCAN-DEBUG: Gmail API response status:', response.status);
+    console.log('SCAN-DEBUG: Gmail API response headers:', Object.fromEntries(response.headers.entries()));
+    
     if (!response.ok) {
+      const errorText = await response.text();
       console.error('SCAN-DEBUG: Gmail API error:', response.status, response.statusText);
-      return [];
+      console.error('SCAN-DEBUG: Gmail API error details:', errorText);
+      throw new Error(`Gmail API error: ${response.status} ${response.statusText}`);
     }
     
     const data = await response.json();
+    console.log('SCAN-DEBUG: Gmail API response data keys:', Object.keys(data));
+    
     const messages = data.messages || [];
     console.log(`SCAN-DEBUG: Fetched ${messages.length} emails from Gmail`);
+    
+    if (messages.length === 0) {
+      console.log('SCAN-DEBUG: No emails found with the current query, trying broader search...');
+      
+      // Try a broader search if no emails found
+      const broaderQuery = 'subject:(email OR mail OR message)';
+      const broaderEncodedQuery = encodeURIComponent(broaderQuery);
+      const broaderUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${broaderEncodedQuery}&maxResults=50`;
+      
+      console.log('SCAN-DEBUG: Trying broader search with URL:', broaderUrl);
+      
+      // Add timeout for broader search too
+      const broaderController = new AbortController();
+      const broaderTimeoutId = setTimeout(() => broaderController.abort(), 30000);
+      
+      const broaderResponse = await fetch(broaderUrl, {
+        headers: {
+          Authorization: `Bearer ${gmailToken}`,
+          'Content-Type': 'application/json',
+        },
+        signal: broaderController.signal
+      });
+      
+      clearTimeout(broaderTimeoutId);
+      
+      if (broaderResponse.ok) {
+        const broaderData = await broaderResponse.json();
+        const broaderMessages = broaderData.messages || [];
+        console.log(`SCAN-DEBUG: Broader search found ${broaderMessages.length} emails`);
+        return broaderMessages;
+      } else {
+        console.log('SCAN-DEBUG: Broader search also failed');
+      }
+    }
+    
     return messages;
   } catch (error) {
+    if (error.name === 'AbortError') {
+      console.error('SCAN-DEBUG: Gmail API request timed out');
+      throw new Error('Gmail API request timed out. Please try again.');
+    }
     console.error('SCAN-DEBUG: Error fetching emails from Gmail:', error);
-    return [];
+    console.error('SCAN-DEBUG: Error stack:', error.stack);
+    throw error; // Re-throw to be handled by the calling function
   }
 };
 
@@ -1406,7 +1516,8 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
         status: 'completed',
         progress: 100,
         completed_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
+        error_message: 'No subscription-related emails found in your Gmail account. This could mean you don\'t have any active subscriptions, or your emails are organized differently.'
       });
       return;
     }
@@ -1467,13 +1578,20 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
   } catch (error) {
     console.error('SCAN-DEBUG: Error in async email processing:', error);
     console.error('SCAN-DEBUG: Error stack:', error.stack);
+    console.error('SCAN-DEBUG: Error name:', error.name);
+    console.error('SCAN-DEBUG: Error message:', error.message);
     
     // Update scan status to error
-    await updateScanStatus(scanId, userId, {
-      status: 'error',
-      error_message: error.message,
-      updated_at: new Date().toISOString()
-    });
+    try {
+      await updateScanStatus(scanId, userId, {
+        status: 'error',
+        error_message: error.message,
+        updated_at: new Date().toISOString()
+      });
+      console.log('SCAN-DEBUG: Successfully updated scan status to error');
+    } catch (updateError) {
+      console.error('SCAN-DEBUG: Failed to update scan status to error:', updateError);
+    }
     
     throw error;
   }
@@ -1552,7 +1670,7 @@ export default async function handler(req, res) {
 
     console.log('SCAN-DEBUG: About to extract Gmail token...');
     // Extract Gmail token from JWT
-    const gmailToken = extractGmailToken(token);
+    let gmailToken = extractGmailToken(token);
     if (!gmailToken) {
       console.log('SCAN-DEBUG: Failed to extract Gmail token from JWT');
       console.log('SCAN-DEBUG: JWT payload keys:', Object.keys(decoded));
@@ -1563,7 +1681,42 @@ export default async function handler(req, res) {
         console.log('SCAN-DEBUG: Using Gmail token from X-Gmail-Token header');
         gmailToken = headerGmailToken;
       } else {
-        console.log('SCAN-DEBUG: No Gmail token found in JWT or headers');
+        // Try to get Gmail token from database as final fallback
+        console.log('SCAN-DEBUG: Attempting to get Gmail token from database...');
+        try {
+          const userEmail = decoded.email;
+          console.log('SCAN-DEBUG: Looking up user tokens for email:', userEmail);
+          
+          const tokenResponse = await fetch(
+            `${supabaseUrl}/rest/v1/user_tokens?select=access_token&user_id=eq.${userId}&provider=eq.google`,
+            {
+              method: 'GET',
+              headers: {
+                'apikey': supabaseKey,
+                'Authorization': `Bearer ${supabaseKey}`,
+                'Content-Type': 'application/json'
+              }
+            }
+          );
+          
+          if (tokenResponse.ok) {
+            const tokenData = await tokenResponse.json();
+            if (tokenData && tokenData.length > 0 && tokenData[0].access_token) {
+              console.log('SCAN-DEBUG: Found Gmail token in database');
+              gmailToken = tokenData[0].access_token;
+            } else {
+              console.log('SCAN-DEBUG: No Gmail token found in database');
+            }
+          } else {
+            console.log('SCAN-DEBUG: Failed to fetch tokens from database:', tokenResponse.status);
+          }
+        } catch (dbError) {
+          console.error('SCAN-DEBUG: Error fetching Gmail token from database:', dbError);
+        }
+      }
+      
+      if (!gmailToken) {
+        console.log('SCAN-DEBUG: No Gmail token found in JWT, headers, or database');
         return res.status(400).json({ 
           error: 'Gmail access token not found',
           message: 'Please re-authenticate with Gmail to scan your emails'
@@ -1583,6 +1736,34 @@ export default async function handler(req, res) {
     }
 
     console.log('SCAN-DEBUG: Gmail token validated successfully');
+
+    // Test Gmail API access with a simple call
+    console.log('SCAN-DEBUG: Testing Gmail API access...');
+    try {
+      const testResponse = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
+        headers: {
+          Authorization: `Bearer ${gmailToken}`,
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      if (testResponse.ok) {
+        const profileData = await testResponse.json();
+        console.log('SCAN-DEBUG: Gmail API test successful, email address:', profileData.emailAddress);
+      } else {
+        console.error('SCAN-DEBUG: Gmail API test failed:', testResponse.status, testResponse.statusText);
+        return res.status(401).json({ 
+          error: 'Gmail API access failed',
+          message: 'Unable to access Gmail API. Please re-authenticate.'
+        });
+      }
+    } catch (testError) {
+      console.error('SCAN-DEBUG: Gmail API test error:', testError);
+      return res.status(401).json({ 
+        error: 'Gmail API test failed',
+        message: 'Unable to test Gmail API access. Please re-authenticate.'
+      });
+    }
 
     console.log('SCAN-DEBUG: About to create scan record...');
     // Create scan record
