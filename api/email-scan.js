@@ -2198,9 +2198,9 @@ export default async function handler(req, res) {
           console.log('SCAN-DEBUG: The scan is functionally complete with basic subscription detection');
         }
         
-        // Add a fallback mechanism: if Edge Function doesn't complete within 3 minutes, 
+        // Add a fallback mechanism: if Edge Function doesn't complete within 8 minutes, 
         // automatically complete the scan since pattern matching already detected subscriptions
-        console.log('SCAN-DEBUG: Setting up fallback completion in 3 minutes...');
+        console.log('SCAN-DEBUG: Setting up fallback completion in 8 minutes...');
         setTimeout(async () => {
           try {
             console.log('SCAN-DEBUG: Checking if scan is still in ready_for_analysis or analyzing status...');
@@ -2222,10 +2222,10 @@ export default async function handler(req, res) {
               const currentScan = await currentScanResponse.json();
               if (currentScan.length > 0) {
                 const currentStatus = currentScan[0].status;
-                console.log('SCAN-DEBUG: Current scan status after 3 minutes:', currentStatus);
+                console.log('SCAN-DEBUG: Current scan status after 8 minutes:', currentStatus);
                 
                 if (currentStatus === 'ready_for_analysis' || currentStatus === 'analyzing') {
-                  console.log('SCAN-DEBUG: Scan still not completed after 3 minutes');
+                  console.log('SCAN-DEBUG: Scan still not completed after 8 minutes');
                   console.log('SCAN-DEBUG: Completing scan automatically since pattern matching detected subscriptions');
                   
                   // Complete the scan
@@ -2246,7 +2246,7 @@ export default async function handler(req, res) {
           } catch (fallbackError) {
             console.error('SCAN-DEBUG: Error in fallback completion:', fallbackError);
           }
-        }, 3 * 60 * 1000); // 3 minutes
+        }, 8 * 60 * 1000); // Extended from 3 minutes to 8 minutes
       }
       
       // Return scan ID with completion status

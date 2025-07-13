@@ -65,7 +65,7 @@ export default async function handler(req, res) {
         .from('scan_history')
         .select('scan_id, user_id, created_at, updated_at, subscriptions_found, status')
         .eq('status', 'analyzing')
-        .lt('updated_at', new Date(Date.now() - 3 * 60 * 1000).toISOString()) // Reduced from 10 minutes to 3 minutes
+        .lt('updated_at', new Date(Date.now() - 8 * 60 * 1000).toISOString()) // Extended from 3 minutes to 8 minutes to give Edge Function time
         .order('created_at', { ascending: true })
         .limit(3);
 
@@ -96,34 +96,9 @@ export default async function handler(req, res) {
         }
       }
       
-      // Also check for any analyzing scans that have subscriptions_found > 0 (pattern matching worked)
-      // These should be completed since pattern matching succeeded
-      console.log('TRIGGER-DEBUG: Checking for analyzing scans with successful pattern matching...');
-      const { data: analyzingWithSubscriptions, error: analyzingError } = await supabase
-        .from('scan_history')
-        .select('scan_id, user_id, subscriptions_found, status')
-        .eq('status', 'analyzing')
-        .gt('subscriptions_found', 0)
-        .order('created_at', { ascending: true })
-        .limit(3);
-
-      if (!analyzingError && analyzingWithSubscriptions && analyzingWithSubscriptions.length > 0) {
-        console.log(`TRIGGER-DEBUG: Found ${analyzingWithSubscriptions.length} analyzing scans with successful pattern matching`);
-        console.log('TRIGGER-DEBUG: Completing these scans since pattern matching worked...');
-        
-        for (const scan of analyzingWithSubscriptions) {
-          await supabase
-            .from('scan_history')
-            .update({ 
-              status: 'completed',
-              completed_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            })
-            .eq('scan_id', scan.scan_id);
-        }
-        
-        console.log('TRIGGER-DEBUG: Successfully completed scans with pattern matching results');
-      }
+      // Remove the automatic completion of scans with pattern matching results
+      // Let the Edge Function complete the actual Gemini analysis
+      // Only use fallback for truly stuck scans after 8 minutes
       
       if (!readyScans || readyScans.length === 0) {
         return res.status(200).json({ 
