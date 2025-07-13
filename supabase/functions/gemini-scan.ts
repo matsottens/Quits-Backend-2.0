@@ -546,15 +546,22 @@ serve(async (req) => {
             
             const normalizedServiceName = normalizeServiceName(geminiResult.subscription_name);
             
-            // Check for existing subscriptions
+            // Check for existing subscriptions by normalized name AND price
             const { data: existingSubscriptions, error: checkError } = await supabase
               .from("subscriptions")
-              .select("name")
-              .eq("user_id", scan.user_id)
-              .ilike("name", `%${normalizedServiceName}%`);
+              .select("name, price")
+              .eq("user_id", scan.user_id);
             
-            if (!checkError && existingSubscriptions && existingSubscriptions.length > 0) {
-              console.log(`Subscription ${geminiResult.subscription_name} already exists for user ${scan.user_id}, skipping`);
+            const alreadyExists =
+              !checkError &&
+              existingSubscriptions &&
+              existingSubscriptions.some(sub =>
+                normalizeServiceName(sub.name) === normalizedServiceName &&
+                Number(sub.price) === Number(geminiResult.price)
+              );
+            
+            if (alreadyExists) {
+              console.log(`Subscription ${geminiResult.subscription_name} at price ${geminiResult.price} already exists for user ${scan.user_id}, skipping`);
               processedCount++;
               continue;
             }
