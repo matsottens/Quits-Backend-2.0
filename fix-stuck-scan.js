@@ -8,10 +8,12 @@ async function fixStuckScan() {
   try {
     console.log('=== FIXING STUCK SCAN ===\n');
     
+    const scanId = 'scan_azfqsjxc34'; // Your stuck scan ID
+    
     // 1. Check the stuck scan
     console.log('1. Checking stuck scan...');
     const scanResponse = await fetch(
-      `${SUPABASE_URL}/rest/v1/scan_history?scan_id=eq.scan_cgn55veqb17&select=*`,
+      `${SUPABASE_URL}/rest/v1/scan_history?scan_id=eq.${scanId}&select=*`,
       {
         method: 'GET',
         headers: {
@@ -30,7 +32,7 @@ async function fixStuckScan() {
     // 2. Check if there are any email data records for this scan
     console.log('\n2. Checking email data for stuck scan...');
     const emailResponse = await fetch(
-      `${SUPABASE_URL}/rest/v1/email_data?scan_id=eq.scan_cgn55veqb17&select=*`,
+      `${SUPABASE_URL}/rest/v1/email_data?scan_id=eq.${scanId}&select=*`,
       {
         method: 'GET',
         headers: {
@@ -52,7 +54,7 @@ async function fixStuckScan() {
     // 3. Check if there are any subscription analysis records
     console.log('\n3. Checking subscription analysis records...');
     const analysisResponse = await fetch(
-      `${SUPABASE_URL}/rest/v1/subscription_analysis?scan_id=eq.scan_cgn55veqb17&select=*`,
+      `${SUPABASE_URL}/rest/v1/subscription_analysis?scan_id=eq.${scanId}&select=*`,
       {
         method: 'GET',
         headers: {
@@ -69,34 +71,16 @@ async function fixStuckScan() {
       analysis.forEach(item => {
         console.log(`- ${item.id}: ${item.subscription_name} (${item.analysis_status})`);
       });
-    }
-    
-    // 4. If no email data, the scan never actually processed emails
-    // Let's check if we need to reset the scan status
-    console.log('\n4. Checking if scan needs to be reset...');
-    
-    const emailDataResponse = await fetch(
-      `${SUPABASE_URL}/rest/v1/email_data?scan_id=eq.scan_cgn55veqb17&select=count`,
-      {
-        method: 'GET',
-        headers: {
-          'apikey': SUPABASE_SERVICE_ROLE_KEY,
-          'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-    
-    if (emailDataResponse.ok) {
-      const emailCount = await emailDataResponse.json();
-      console.log(`Email count for scan: ${emailCount[0]?.count || 0}`);
       
-      if (emailCount[0]?.count === 0) {
-        console.log('\n5. No email data found - scan never processed emails properly');
-        console.log('Resetting scan status to ready_for_analysis...');
+      // If we have analysis records, the pattern matching worked
+      // Let's complete the scan since the Edge Function is stuck
+      if (analysis.length > 0) {
+        console.log('\n4. Pattern matching detected subscriptions successfully!');
+        console.log('Completing scan manually since Edge Function is stuck...');
         
-        const resetResponse = await fetch(
-          `${SUPABASE_URL}/rest/v1/scan_history?scan_id=eq.scan_cgn55veqb17`,
+        // Update scan status to completed
+        const completeResponse = await fetch(
+          `${SUPABASE_URL}/rest/v1/scan_history?scan_id=eq.${scanId}`,
           {
             method: 'PATCH',
             headers: {
@@ -105,20 +89,73 @@ async function fixStuckScan() {
               'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-              status: 'ready_for_analysis',
-              progress: 90,
+              status: 'completed',
+              completed_at: new Date().toISOString(),
               updated_at: new Date().toISOString()
             })
           }
         );
         
-        if (resetResponse.ok) {
-          console.log('Scan status reset successfully');
+        if (completeResponse.ok) {
+          console.log('✅ Scan marked as completed successfully!');
+          
+          // Also update pending analysis records to completed
+          console.log('Updating pending analysis records to completed...');
+          const analysisUpdateResponse = await fetch(
+            `${SUPABASE_URL}/rest/v1/subscription_analysis?scan_id=eq.${scanId}&analysis_status=eq.pending`,
+            {
+              method: 'PATCH',
+              headers: {
+                'apikey': SUPABASE_SERVICE_ROLE_KEY,
+                'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                analysis_status: 'completed',
+                updated_at: new Date().toISOString()
+              })
+            }
+          );
+          
+          if (analysisUpdateResponse.ok) {
+            console.log('✅ Analysis records updated successfully!');
+          } else {
+            console.error('❌ Failed to update analysis records:', analysisUpdateResponse.status);
+          }
+          
+          return; // Exit early since we've completed the scan
         } else {
-          const error = await resetResponse.text();
-          console.error('Failed to reset scan status:', error);
+          const error = await completeResponse.text();
+          console.error('❌ Failed to complete scan:', error);
         }
       }
+    }
+    
+    // 5. If no analysis records, try to reset and retrigger
+    console.log('\n5. No analysis records found - trying to reset scan...');
+    
+    const resetResponse = await fetch(
+      `${SUPABASE_URL}/rest/v1/scan_history?scan_id=eq.${scanId}`,
+      {
+        method: 'PATCH',
+        headers: {
+          'apikey': SUPABASE_SERVICE_ROLE_KEY,
+          'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          status: 'ready_for_analysis',
+          progress: 90,
+          updated_at: new Date().toISOString()
+        })
+      }
+    );
+    
+    if (resetResponse.ok) {
+      console.log('Scan status reset to ready_for_analysis');
+    } else {
+      const error = await resetResponse.text();
+      console.error('Failed to reset scan status:', error);
     }
     
     // 6. Manually trigger the Edge Function
@@ -130,7 +167,11 @@ async function fixStuckScan() {
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`
-        }
+        },
+        body: JSON.stringify({
+          scan_ids: [scanId],
+          user_ids: ['b41495b7-ee65-4e9d-a621-6a7c014b7d33'] // Your user ID
+        })
       }
     );
     

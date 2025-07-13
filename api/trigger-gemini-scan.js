@@ -42,9 +42,9 @@ export default async function handler(req, res) {
 
     // Check for scans that are ready for analysis
     console.log('TRIGGER-DEBUG: Checking for scans ready for analysis...');
-    const { data: readyScans, error: scanError } = await supabase
+    let { data: readyScans, error: scanError } = await supabase
       .from('scan_history')
-      .select('scan_id, user_id, created_at, emails_processed, subscriptions_found')
+      .select('scan_id, user_id, created_at, emails_processed, subscriptions_found, status')
       .eq('status', 'ready_for_analysis')
       .order('created_at', { ascending: true })
       .limit(5); // Process up to 5 scans at a time
@@ -54,13 +54,55 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: 'Failed to fetch ready scans', details: scanError.message });
     }
 
+    console.log('TRIGGER-DEBUG: Raw scan query result:', readyScans);
+
     if (!readyScans || readyScans.length === 0) {
       console.log('TRIGGER-DEBUG: No scans ready for analysis');
-      return res.status(200).json({ 
-        success: true, 
-        message: 'No scans ready for analysis',
-        scans_processed: 0
-      });
+      
+      // Also check for any scans that might be stuck in 'analyzing' status for too long
+      console.log('TRIGGER-DEBUG: Checking for stuck scans in analyzing status...');
+      const { data: stuckScans, error: stuckError } = await supabase
+        .from('scan_history')
+        .select('scan_id, user_id, created_at, updated_at, subscriptions_found, status')
+        .eq('status', 'analyzing')
+        .lt('updated_at', new Date(Date.now() - 10 * 60 * 1000).toISOString()) // Older than 10 minutes
+        .order('created_at', { ascending: true })
+        .limit(3);
+
+      if (!stuckError && stuckScans && stuckScans.length > 0) {
+        console.log(`TRIGGER-DEBUG: Found ${stuckScans.length} stuck scans, resetting them to ready_for_analysis`);
+        
+        for (const stuckScan of stuckScans) {
+          await supabase
+            .from('scan_history')
+            .update({ 
+              status: 'ready_for_analysis',
+              updated_at: new Date().toISOString()
+            })
+            .eq('scan_id', stuckScan.scan_id);
+        }
+        
+        // Now try to process these scans
+        const { data: resetScans, error: resetError } = await supabase
+          .from('scan_history')
+          .select('scan_id, user_id, created_at, emails_processed, subscriptions_found, status')
+          .eq('status', 'ready_for_analysis')
+          .order('created_at', { ascending: true })
+          .limit(5);
+        
+        if (!resetError && resetScans && resetScans.length > 0) {
+          console.log(`TRIGGER-DEBUG: Now have ${resetScans.length} scans ready for analysis after reset`);
+          readyScans = resetScans;
+        }
+      }
+      
+      if (!readyScans || readyScans.length === 0) {
+        return res.status(200).json({ 
+          success: true, 
+          message: 'No scans ready for analysis',
+          scans_processed: 0
+        });
+      }
     }
 
     console.log(`TRIGGER-DEBUG: Found ${readyScans.length} scans ready for analysis`);
@@ -107,53 +149,103 @@ export default async function handler(req, res) {
     
     console.log('TRIGGER-DEBUG: Edge Function URL: https://dstsluflwxzkwouxcjkh.supabase.co/functions/v1/gemini-scan');
     
-    const response = await fetch(
-      "https://dstsluflwxzkwouxcjkh.supabase.co/functions/v1/gemini-scan",
-      { 
-        method: "POST",
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
-        },
-        body: JSON.stringify({
-          scan_ids: scansToProcess.map(s => s.scan_id),
-          user_ids: scansToProcess.map(s => s.user_id)
-        })
-      }
-    );
+    // Add retry logic for Edge Function call
+    let edgeFunctionSuccess = false;
+    let retryCount = 0;
+    const maxRetries = 3;
+    let lastError = null;
     
-    console.log('TRIGGER-DEBUG: Edge Function response status:', response.status);
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('TRIGGER-DEBUG: Edge Function error:', response.status, errorText);
-      
-      // Reset scan status back to ready_for_analysis if Edge Function fails
-      for (const scan of scansToProcess) {
-        await supabase
-          .from('scan_history')
-          .update({ 
-            status: 'ready_for_analysis',
-            updated_at: new Date().toISOString()
-          })
-          .eq('scan_id', scan.scan_id);
+    while (!edgeFunctionSuccess && retryCount < maxRetries) {
+      try {
+        console.log(`TRIGGER-DEBUG: Edge Function attempt ${retryCount + 1}/${maxRetries}`);
+        
+        const response = await fetch(
+          "https://dstsluflwxzkwouxcjkh.supabase.co/functions/v1/gemini-scan",
+          { 
+            method: "POST",
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
+            },
+            body: JSON.stringify({
+              scan_ids: scansToProcess.map(s => s.scan_id),
+              user_ids: scansToProcess.map(s => s.user_id)
+            })
+          }
+        );
+        
+        console.log(`TRIGGER-DEBUG: Edge Function response status (attempt ${retryCount + 1}):`, response.status);
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(`TRIGGER-DEBUG: Edge Function error (attempt ${retryCount + 1}):`, response.status, errorText);
+          lastError = new Error(`Edge Function error: ${response.status} ${errorText}`);
+          retryCount++;
+          
+          if (retryCount < maxRetries) {
+            console.log(`TRIGGER-DEBUG: Retrying Edge Function in 10 seconds...`);
+            await new Promise(resolve => setTimeout(resolve, 10000));
+          }
+          continue;
+        }
+        
+        const data = await response.json();
+        console.log(`TRIGGER-DEBUG: Edge Function response (attempt ${retryCount + 1}):`, data);
+        
+        if (data.success) {
+          console.log(`TRIGGER-DEBUG: ✅ Edge Function succeeded on attempt ${retryCount + 1}`);
+          edgeFunctionSuccess = true;
+          
+          res.status(200).json({ 
+            success: true, 
+            message: 'Gemini analysis triggered successfully',
+            scans_processed: scansToProcess.length,
+            scan_ids: scansToProcess.map(s => s.scan_id),
+            data,
+            attempts: retryCount + 1
+          });
+          return;
+        } else {
+          console.log(`TRIGGER-DEBUG: Edge Function returned success: false`);
+          lastError = new Error(`Edge Function returned success: false: ${data.message || 'Unknown error'}`);
+          retryCount++;
+          
+          if (retryCount < maxRetries) {
+            console.log(`TRIGGER-DEBUG: Retrying Edge Function in 10 seconds...`);
+            await new Promise(resolve => setTimeout(resolve, 10000));
+          }
+        }
+        
+      } catch (error) {
+        console.error(`TRIGGER-DEBUG: Edge Function exception (attempt ${retryCount + 1}):`, error);
+        lastError = error;
+        retryCount++;
+        
+        if (retryCount < maxRetries) {
+          console.log(`TRIGGER-DEBUG: Retrying Edge Function in 10 seconds...`);
+          await new Promise(resolve => setTimeout(resolve, 10000));
+        }
       }
-      
-      return res.status(response.status).json({ 
-        error: 'Edge Function error', 
-        details: errorText 
-      });
     }
     
-    const data = await response.json();
-    console.log('TRIGGER-DEBUG: Edge Function response:', data);
+    // If all retries failed, reset scan status and return error
+    console.error('TRIGGER-DEBUG: All Edge Function attempts failed');
     
-    res.status(200).json({ 
-      success: true, 
-      message: 'Gemini analysis triggered successfully',
-      scans_processed: scansToProcess.length,
-      scan_ids: scansToProcess.map(s => s.scan_id),
-      data 
+    // Reset scan status back to ready_for_analysis if Edge Function fails
+    for (const scan of scansToProcess) {
+      await supabase
+        .from('scan_history')
+        .update({ 
+          status: 'ready_for_analysis',
+          updated_at: new Date().toISOString()
+        })
+        .eq('scan_id', scan.scan_id);
+    }
+    
+    return res.status(500).json({ 
+      error: 'Edge Function failed after all retries', 
+      details: lastError?.message || 'Unknown error',
+      attempts: retryCount
     });
   } catch (error) {
     console.error('TRIGGER-DEBUG: Error triggering Gemini analysis:', error);
