@@ -290,7 +290,7 @@ serve(async (req) => {
 
           const emailContent = `Subject: ${emailData.subject}\nFrom: ${emailData.sender}\nContent: ${emailData.content}`.trim();
           
-          await new Promise(resolve => setTimeout(resolve, 3000));
+          await new Promise(resolve => setTimeout(resolve, 10000)); // Increased from 3 seconds to 10 seconds
           
           const geminiResult = await analyzeEmailWithGemini(emailContent);
 
