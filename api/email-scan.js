@@ -1618,6 +1618,7 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
   console.log('SCAN-DEBUG: ===== ASYNC EMAIL PROCESSING STARTED =====');
   console.log('SCAN-DEBUG: Function called at:', new Date().toISOString());
   console.log('SCAN-DEBUG: Function execution started - this should appear immediately');
+  console.log('SCAN-DEBUG: THIS IS A TEST - IF YOU SEE THIS, THE FUNCTION IS BEING CALLED');
   console.log('SCAN-DEBUG: Parameters received:');
   console.log('SCAN-DEBUG: - gmailToken length:', gmailToken ? gmailToken.length : 'null');
   console.log('SCAN-DEBUG: - scanId:', scanId);
@@ -1942,73 +1943,22 @@ export default async function handler(req, res) {
     console.log('SCAN-DEBUG: Created scan record with ID:', scanId);
     console.log('SCAN-DEBUG: Using database user ID:', dbUserId);
 
-    // Return scan ID immediately to prevent timeout
-    console.log('SCAN-DEBUG: Returning scanId immediately to prevent timeout:', scanId);
-    res.status(200).json({ 
-      success: true, 
-      scanId: scanId,
-      message: 'Scan started successfully. Use the scan ID to check progress.'
-    });
-
-    // Process emails asynchronously (don't await this)
-    console.log('SCAN-DEBUG: Starting async email processing...');
+    // Start async processing BEFORE sending response
+    console.log('SCAN-DEBUG: Starting async email processing BEFORE sending response...');
     console.log('SCAN-DEBUG: About to call processEmailsAsync with parameters:');
     console.log('SCAN-DEBUG: - gmailToken length:', gmailToken ? gmailToken.length : 'null');
     console.log('SCAN-DEBUG: - scanId:', scanId);
     console.log('SCAN-DEBUG: - dbUserId:', dbUserId);
     
-    // Add timeout wrapper to prevent hanging
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => {
-        console.log('SCAN-DEBUG: Async email processing timed out after 5 minutes');
-        reject(new Error('Email processing timed out after 5 minutes'));
-      }, 5 * 60 * 1000); // 5 minutes timeout
-    });
-    
-    console.log('SCAN-DEBUG: About to call processEmailsAsync...');
-    console.log('SCAN-DEBUG: processEmailsAsync function exists:', typeof processEmailsAsync);
-    console.log('SCAN-DEBUG: processEmailsAsync function name:', processEmailsAsync.name);
-    console.log('SCAN-DEBUG: processEmailsAsync function toString:', processEmailsAsync.toString().substring(0, 100) + '...');
-    
-    // Test if function is callable
-    if (typeof processEmailsAsync !== 'function') {
-      console.error('SCAN-DEBUG: processEmailsAsync is not a function!');
-      updateScanStatus(scanId, dbUserId, {
-        status: 'error',
-        error_message: 'processEmailsAsync is not defined as a function',
-        updated_at: new Date().toISOString()
-      }).catch(updateError => {
-        console.error('SCAN-DEBUG: Failed to update scan status to error:', updateError);
-      });
-      return;
-    }
-    
-    // Add immediate error handling
+    // Start the async processing but don't await it
+    let processingStarted = false;
     try {
       console.log('SCAN-DEBUG: About to call processEmailsAsync function...');
       console.log('SCAN-DEBUG: Current timestamp before function call:', new Date().toISOString());
       console.log('SCAN-DEBUG: About to execute: processEmailsAsync(gmailToken, scanId, dbUserId)');
       
-      const processingPromise = processEmailsAsync(gmailToken, scanId, dbUserId);
-      console.log('SCAN-DEBUG: processEmailsAsync called successfully, setting up race condition...');
-      console.log('SCAN-DEBUG: processingPromise type:', typeof processingPromise);
-      console.log('SCAN-DEBUG: processingPromise is Promise:', processingPromise instanceof Promise);
-      
-      // Add a promise that resolves immediately to test if the function is actually running
-      const immediatePromise = new Promise((resolve) => {
-        setTimeout(() => {
-          console.log('SCAN-DEBUG: Immediate promise resolved - checking if processEmailsAsync is still running...');
-          resolve('immediate');
-        }, 1000); // 1 second
-      });
-      
-      Promise.race([processingPromise, timeoutPromise, immediatePromise]).then(result => {
-        if (result === 'immediate') {
-          console.log('SCAN-DEBUG: Immediate promise won the race - processEmailsAsync may be hanging');
-        } else {
-          console.log('SCAN-DEBUG: processEmailsAsync completed successfully');
-        }
-      }).catch(error => {
+      // Start the processing
+      processEmailsAsync(gmailToken, scanId, dbUserId).catch(error => {
         console.error('SCAN-DEBUG: Async email processing failed:', error);
         console.error('SCAN-DEBUG: Error stack:', error.stack);
         // Update scan status to error
@@ -2021,7 +1971,8 @@ export default async function handler(req, res) {
         });
       });
       
-      console.log('SCAN-DEBUG: Async email processing setup completed successfully');
+      processingStarted = true;
+      console.log('SCAN-DEBUG: Async email processing started successfully');
     } catch (syncError) {
       console.error('SCAN-DEBUG: Synchronous error calling processEmailsAsync:', syncError);
       console.error('SCAN-DEBUG: Sync error stack:', syncError.stack);
@@ -2034,6 +1985,15 @@ export default async function handler(req, res) {
         console.error('SCAN-DEBUG: Failed to update scan status to error:', updateError);
       });
     }
+
+    // Return scan ID immediately to prevent timeout
+    console.log('SCAN-DEBUG: Returning scanId immediately to prevent timeout:', scanId);
+    res.status(200).json({ 
+      success: true, 
+      scanId: scanId,
+      message: 'Scan started successfully. Use the scan ID to check progress.',
+      processingStarted: processingStarted
+    });
 
   } catch (error) {
     console.error('SCAN-DEBUG: Error in email scan handler:', error);
