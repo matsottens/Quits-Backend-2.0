@@ -1689,13 +1689,21 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
     if (emails.length === 0) {
       console.log('SCAN-DEBUG: No emails found, completing scan');
       await updateScanStatus(scanId, userId, {
-        status: 'completed',
+        status: 'ready_for_analysis',
         progress: 100,
         completed_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         error_message: 'No subscription-related emails found in your Gmail account. This could mean you don\'t have any active subscriptions, or your emails are organized differently.'
       });
-      return;
+      
+      // Return scan ID immediately to prevent timeout
+      console.log('SCAN-DEBUG: Returning scanId immediately to prevent timeout:', scanId);
+      return res.status(200).json({ 
+        success: true, 
+        scanId: scanId,
+        message: 'Scan completed. No subscription emails found.',
+        processingCompleted: true
+      });
     }
     
     console.log('SCAN-DEBUG: About to process emails for subscriptions...');
@@ -1723,23 +1731,22 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
     if (subscriptionEmails.length === 0) {
       console.log('SCAN-DEBUG: No subscriptions found, completing scan');
       await updateScanStatus(scanId, userId, {
-        status: 'completed',
+        status: 'ready_for_analysis',
         progress: 100,
         completed_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       });
-      return;
+    } else {
+      console.log('SCAN-DEBUG: Email processing completed successfully');
+      console.log('SCAN-DEBUG: Setting scan status to ready_for_analysis for Gemini processing');
+      
+      // Set scan status to ready_for_analysis so Gemini trigger can process pending analysis records
+      await updateScanStatus(scanId, userId, {
+        status: 'ready_for_analysis',
+        progress: 100,
+        updated_at: new Date().toISOString()
+      });
     }
-    
-    console.log('SCAN-DEBUG: Email processing completed successfully');
-    
-    // Update scan status to completed
-    await updateScanStatus(scanId, userId, {
-      status: 'completed',
-      progress: 100,
-      completed_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    });
     
   } catch (error) {
     console.error('SCAN-DEBUG: Error in async email processing:', error);
@@ -1990,7 +1997,7 @@ export default async function handler(req, res) {
       if (emails.length === 0) {
         console.log('SCAN-DEBUG: No emails found, completing scan');
         await updateScanStatus(scanId, dbUserId, {
-          status: 'completed',
+          status: 'ready_for_analysis',
           progress: 100,
           completed_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
@@ -2033,19 +2040,19 @@ export default async function handler(req, res) {
       if (subscriptionEmails.length === 0) {
         console.log('SCAN-DEBUG: No subscriptions found, completing scan');
         await updateScanStatus(scanId, dbUserId, {
-          status: 'completed',
+          status: 'ready_for_analysis',
           progress: 100,
           completed_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         });
       } else {
         console.log('SCAN-DEBUG: Email processing completed successfully');
+        console.log('SCAN-DEBUG: Setting scan status to ready_for_analysis for Gemini processing');
         
-        // Update scan status to completed
+        // Set scan status to ready_for_analysis so Gemini trigger can process pending analysis records
         await updateScanStatus(scanId, dbUserId, {
-          status: 'completed',
+          status: 'ready_for_analysis',
           progress: 100,
-          completed_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         });
       }
