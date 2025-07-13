@@ -260,9 +260,36 @@ const fetchGmailEmails = async (gmailToken) => {
 // Helper function to process emails for subscriptions
 const processEmailsForSubscriptions = async (emails, subscriptionExamples, gmailToken, scanId, userId) => {
   console.log('SCAN-DEBUG: Processing emails for subscriptions...');
+  console.log(`SCAN-DEBUG: Processing ${emails.length} emails`);
   
   const subscriptionEmails = [];
   let processedCount = 0;
+  let uniqueEmailsProcessed = 0;
+  
+  // Load existing subscriptions for duplicate prevention
+  console.log('SCAN-DEBUG: Loading existing subscriptions for duplicate prevention');
+  let existingSubscriptions = [];
+  try {
+    const existingResponse = await fetch(
+      `${supabaseUrl}/rest/v1/subscriptions?user_id=eq.${userId}&select=name`,
+      {
+        method: 'GET',
+        headers: {
+          'apikey': supabaseKey,
+          'Authorization': `Bearer ${supabaseKey}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+    
+    if (existingResponse.ok) {
+      const existingData = await existingResponse.json();
+      existingSubscriptions = existingData.map(sub => normalizeServiceName(sub.name));
+      console.log(`SCAN-DEBUG: Loaded ${existingSubscriptions.length} existing subscriptions for duplicate prevention`);
+    }
+  } catch (error) {
+    console.error('SCAN-DEBUG: Error loading existing subscriptions:', error);
+  }
   
   for (let i = 0; i < emails.length; i++) {
     const message = emails[i];
@@ -271,6 +298,15 @@ const processEmailsForSubscriptions = async (emails, subscriptionExamples, gmail
     try {
       console.log(`SCAN-DEBUG: Processing email ${i + 1}/${emails.length}`);
       
+      // Update progress
+      await updateScanStatus(scanId, userId, {
+        progress: 30 + Math.round((i / emails.length) * 40),
+        emails_processed: i
+      });
+      
+      console.log(`SCAN-DEBUG: Fetching content for email ${messageId}`);
+      console.log(`SCAN-DEBUG: Fetching content for email ID: ${messageId}`);
+      
       // Fetch email content
       const emailData = await fetchEmailContent(gmailToken, messageId);
       if (!emailData) {
@@ -278,38 +314,125 @@ const processEmailsForSubscriptions = async (emails, subscriptionExamples, gmail
         continue;
       }
       
+      // Extract email details
+      const headers = emailData.payload?.headers || [];
+      const parsedHeaders = parseEmailHeaders(headers);
+      const emailBody = extractEmailBody(emailData);
+      
+      console.log(`SCAN-DEBUG: Email details - Subject: "${parsedHeaders.subject}", From: "${parsedHeaders.from}"`);
+      
+      // Store email data in database
+      console.log(`SCAN-DEBUG: Storing email data for message ${messageId}`);
+      console.log('SCAN-DEBUG: Using REST API to store email data...');
+      
+      const emailDataRecord = {
+        scan_id: scanId,
+        user_id: userId,
+        gmail_message_id: messageId,
+        subject: parsedHeaders.subject,
+        sender: parsedHeaders.from,
+        date: parsedHeaders.date,
+        content: emailBody,
+        content_preview: emailBody.substring(0, 500),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      
+      const storeResponse = await fetch(`${supabaseUrl}/rest/v1/email_data`, {
+        method: 'POST',
+        headers: {
+          'apikey': supabaseKey,
+          'Authorization': `Bearer ${supabaseKey}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation'
+        },
+        body: JSON.stringify(emailDataRecord)
+      });
+      
+      let emailDataId = null;
+      if (storeResponse.ok) {
+        const storeData = await storeResponse.json();
+        emailDataId = storeData[0].id;
+        console.log(`SCAN-DEBUG: REST API successful, got ID: ${emailDataId}`);
+        console.log(`SCAN-DEBUG: Successfully stored email data for message ${messageId} with ID: ${emailDataId}`);
+      } else {
+        console.error('SCAN-DEBUG: Error storing email data:', storeResponse.status, storeResponse.statusText);
+        continue;
+      }
+      
+      console.log(`SCAN-DEBUG: Validated email_data_id: ${emailDataId}`);
+      
       // Analyze email with pattern matching
+      console.log(`SCAN-DEBUG: Analyzing email with pattern matching: "${parsedHeaders.subject}"`);
       const analysis = await analyzeEmailWithPatternMatching(emailData);
+      
+      console.log(`SCAN-DEBUG: Pattern matching result for email ${messageId}:`, JSON.stringify(analysis));
       
       if (analysis.isSubscription && analysis.confidence > 0.6) {
         console.log(`SCAN-DEBUG: Detected potential subscription: ${analysis.serviceName} (${analysis.confidence} confidence)`);
         
-        // Extract email details
-        const headers = emailData.payload?.headers || [];
-        const parsedHeaders = parseEmailHeaders(headers);
-        const emailBody = extractEmailBody(emailData);
+        // Check for duplicates
+        const normalizedServiceName = normalizeServiceName(analysis.serviceName);
+        if (existingSubscriptions.includes(normalizedServiceName)) {
+          console.log(`SCAN-DEBUG: Subscription "${analysis.serviceName}" already exists, skipping`);
+          continue;
+        }
         
-        subscriptionEmails.push({
-          messageId,
-          emailData,
-          analysis,
-          subject: parsedHeaders.subject,
-          from: parsedHeaders.from,
-          date: parsedHeaders.date,
-          emailBody
+        // Create analysis record
+        console.log(`SCAN-DEBUG: About to insert analysis record with email_data_id: ${emailDataId}`);
+        
+        const analysisRecord = {
+          email_data_id: emailDataId,
+          user_id: userId,
+          scan_id: scanId,
+          subscription_name: analysis.serviceName,
+          price: analysis.amount || 0,
+          currency: analysis.currency || 'USD',
+          billing_cycle: analysis.billingFrequency || 'monthly',
+          next_billing_date: analysis.nextBillingDate,
+          service_provider: analysis.serviceName,
+          confidence_score: analysis.confidence,
+          analysis_status: 'pending',
+          gemini_response: null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+        
+        console.log('SCAN-DEBUG: Analysis record keys:', Object.keys(analysisRecord));
+        
+        const analysisResponse = await fetch(`${supabaseUrl}/rest/v1/subscription_analysis`, {
+          method: 'POST',
+          headers: {
+            'apikey': supabaseKey,
+            'Authorization': `Bearer ${supabaseKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(analysisRecord)
         });
+        
+        if (analysisResponse.ok) {
+          console.log('SCAN-DEBUG: Stored analysis record for Edge Function processing');
+          
+          // Add to subscription emails array for further processing
+          subscriptionEmails.push({
+            messageId,
+            emailData,
+            analysis,
+            subject: parsedHeaders.subject,
+            from: parsedHeaders.from,
+            date: parsedHeaders.date,
+            emailBody,
+            emailDataId
+          });
+          
+          uniqueEmailsProcessed++;
+        } else {
+          console.error('SCAN-DEBUG: Error creating analysis record:', analysisResponse.status, analysisResponse.statusText);
+        }
       }
       
       processedCount++;
-      
-      // Update progress every 10 emails
-      if (processedCount % 10 === 0) {
-        await updateScanStatus(scanId, userId, {
-          progress: 20 + Math.round((processedCount / emails.length) * 60),
-          emails_processed: processedCount,
-          updated_at: new Date().toISOString()
-        });
-      }
+      console.log(`SCAN-DEBUG: Successfully processed email ${i + 1}/${emails.length} (${uniqueEmailsProcessed} unique emails processed)`);
       
     } catch (error) {
       console.error(`SCAN-DEBUG: Error processing email ${i + 1}:`, error);
@@ -1498,8 +1621,8 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
     });
     
     console.log('SCAN-DEBUG: About to fetch emails from Gmail...');
-    // Fetch emails from Gmail
-    const emails = await fetchGmailEmails(gmailToken);
+    // Fetch emails from Gmail using the comprehensive search function
+    const emails = await fetchEmailsFromGmail(gmailToken);
     console.log('SCAN-DEBUG: Fetched emails from Gmail:', emails.length);
     
     // Update scan status with email count
@@ -1523,7 +1646,7 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
     }
     
     console.log('SCAN-DEBUG: About to process emails for subscriptions...');
-    // Process emails to find subscriptions
+    // Process emails to find subscriptions (this now includes storing data and creating analysis records)
     const { subscriptionEmails, processedCount } = await processEmailsForSubscriptions(
       emails, 
       subscriptionExamples, 
@@ -1555,15 +1678,7 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
       return;
     }
     
-    console.log('SCAN-DEBUG: About to store email data...');
-    // Store email data for analysis
-    await storeEmailData(subscriptionEmails, scanId, userId);
-    console.log('SCAN-DEBUG: Stored email data successfully');
-    
-    console.log('SCAN-DEBUG: About to create subscription analysis records...');
-    // Create subscription analysis records
-    await createSubscriptionAnalysisRecords(subscriptionEmails, scanId, userId);
-    console.log('SCAN-DEBUG: Created subscription analysis records successfully');
+    console.log('SCAN-DEBUG: Email processing completed successfully');
     
     // Update scan status to completed
     await updateScanStatus(scanId, userId, {
@@ -1572,8 +1687,6 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
       completed_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     });
-    
-    console.log('SCAN-DEBUG: Email scan completed successfully');
     
   } catch (error) {
     console.error('SCAN-DEBUG: Error in async email processing:', error);
