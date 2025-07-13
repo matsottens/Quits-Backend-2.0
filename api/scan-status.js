@@ -310,7 +310,12 @@ const calculateProgress = (scan) => {
       progress = 85;
       break;
     case 'analyzing':
-      progress = 90;
+      // If pattern matching already found subscriptions, show 100% since it's functionally complete
+      if (scan.subscriptions_found > 0) {
+        progress = 100;
+      } else {
+        progress = 90;
+      }
       break;
     case 'quota_exhausted':
       // Keep progress at current level but indicate temporary pause

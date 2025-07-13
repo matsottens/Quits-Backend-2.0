@@ -65,7 +65,7 @@ export default async function handler(req, res) {
         .from('scan_history')
         .select('scan_id, user_id, created_at, updated_at, subscriptions_found, status')
         .eq('status', 'analyzing')
-        .lt('updated_at', new Date(Date.now() - 10 * 60 * 1000).toISOString()) // Older than 10 minutes
+        .lt('updated_at', new Date(Date.now() - 3 * 60 * 1000).toISOString()) // Reduced from 10 minutes to 3 minutes
         .order('created_at', { ascending: true })
         .limit(3);
 
@@ -94,6 +94,35 @@ export default async function handler(req, res) {
           console.log(`TRIGGER-DEBUG: Now have ${resetScans.length} scans ready for analysis after reset`);
           readyScans = resetScans;
         }
+      }
+      
+      // Also check for any analyzing scans that have subscriptions_found > 0 (pattern matching worked)
+      // These should be completed since pattern matching succeeded
+      console.log('TRIGGER-DEBUG: Checking for analyzing scans with successful pattern matching...');
+      const { data: analyzingWithSubscriptions, error: analyzingError } = await supabase
+        .from('scan_history')
+        .select('scan_id, user_id, subscriptions_found, status')
+        .eq('status', 'analyzing')
+        .gt('subscriptions_found', 0)
+        .order('created_at', { ascending: true })
+        .limit(3);
+
+      if (!analyzingError && analyzingWithSubscriptions && analyzingWithSubscriptions.length > 0) {
+        console.log(`TRIGGER-DEBUG: Found ${analyzingWithSubscriptions.length} analyzing scans with successful pattern matching`);
+        console.log('TRIGGER-DEBUG: Completing these scans since pattern matching worked...');
+        
+        for (const scan of analyzingWithSubscriptions) {
+          await supabase
+            .from('scan_history')
+            .update({ 
+              status: 'completed',
+              completed_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            })
+            .eq('scan_id', scan.scan_id);
+        }
+        
+        console.log('TRIGGER-DEBUG: Successfully completed scans with pattern matching results');
       }
       
       if (!readyScans || readyScans.length === 0) {
