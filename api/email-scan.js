@@ -22,6 +22,21 @@ console.log(`Email-scan: Supabase key defined: ${!!supabaseKey}`);
 console.log(`Email-scan: Using SUPABASE_SERVICE_ROLE_KEY: ${!!supabaseServiceRoleKey}`);
 console.log(`Email-scan: Using SUPABASE_SERVICE_KEY: ${!!supabaseServiceKey}`);
 
+// Add unhandled promise rejection handler
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('SCAN-DEBUG: Unhandled Promise Rejection at:', promise, 'reason:', reason);
+  console.error('SCAN-DEBUG: Unhandled rejection stack:', reason?.stack);
+  console.error('SCAN-DEBUG: Unhandled rejection name:', reason?.name);
+  console.error('SCAN-DEBUG: Unhandled rejection message:', reason?.message);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('SCAN-DEBUG: Uncaught Exception:', error);
+  console.error('SCAN-DEBUG: Uncaught exception stack:', error.stack);
+  console.error('SCAN-DEBUG: Uncaught exception name:', error.name);
+  console.error('SCAN-DEBUG: Uncaught exception message:', error.message);
+});
+
 // Helper function to extract Gmail token from JWT
 const extractGmailToken = (token) => {
   try {
@@ -131,10 +146,16 @@ const extractGmailToken = (token) => {
 // Helper function to fetch subscription examples
 const fetchSubscriptionExamples = async () => {
   console.log('SCAN-DEBUG: Fetching subscription examples...');
+  console.log('SCAN-DEBUG: Function called at:', new Date().toISOString());
+  console.log('SCAN-DEBUG: Supabase URL:', supabaseUrl ? 'defined' : 'undefined');
+  console.log('SCAN-DEBUG: Supabase key:', supabaseKey ? 'defined' : 'undefined');
+  
   try {
     // Add timeout to prevent hanging
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+    
+    console.log('SCAN-DEBUG: About to make REST API call to fetch subscription examples...');
     
     // Use direct fetch instead of Supabase client to avoid hanging
     const response = await fetch(`${supabaseUrl}/rest/v1/subscription_examples?select=service_name,sender_pattern,subject_pattern`, {
@@ -149,6 +170,8 @@ const fetchSubscriptionExamples = async () => {
     
     clearTimeout(timeoutId);
     
+    console.log('SCAN-DEBUG: Subscription examples API response status:', response.status);
+    
     if (!response.ok) {
       console.error('SCAN-DEBUG: Error fetching subscription examples:', response.status, response.statusText);
       return [];
@@ -162,6 +185,7 @@ const fetchSubscriptionExamples = async () => {
       console.error('SCAN-DEBUG: Subscription examples fetch timed out');
     } else {
       console.error('SCAN-DEBUG: Exception fetching subscription examples:', error);
+      console.error('SCAN-DEBUG: Error stack:', error.stack);
     }
     return [];
   }
@@ -543,6 +567,7 @@ const createSubscriptionAnalysisRecords = async (subscriptionEmails, scanId, use
  */
 const fetchEmailsFromGmail = async (gmailToken) => {
   console.log('SCAN-DEBUG: Starting to fetch emails from Gmail');
+  console.log('SCAN-DEBUG: Function called at:', new Date().toISOString());
   console.log('SCAN-DEBUG: Gmail token length:', gmailToken?.length || 0);
   
   try {
@@ -1134,6 +1159,9 @@ const saveSubscription = async (userId, subscriptionData) => {
 // Function to validate Gmail token
 const validateGmailToken = async (token) => {
   console.log('SCAN-DEBUG: Validating Gmail token');
+  console.log('SCAN-DEBUG: Function called at:', new Date().toISOString());
+  console.log('SCAN-DEBUG: Token length:', token?.length || 0);
+  
   if (!token) {
     console.error('SCAN-DEBUG: No Gmail token provided');
     return false;
@@ -1160,6 +1188,7 @@ const validateGmailToken = async (token) => {
     }
   } catch (googleError) {
     console.error('SCAN-DEBUG: Google APIs validation failed:', googleError.message);
+    console.error('SCAN-DEBUG: Google APIs error stack:', googleError.stack);
     
     // Fallback to direct fetch
     console.log('SCAN-DEBUG: Trying direct fetch validation...');
@@ -1184,6 +1213,7 @@ const validateGmailToken = async (token) => {
       }
     } catch (fetchError) {
       console.error('SCAN-DEBUG: Direct fetch validation also failed:', fetchError.message);
+      console.error('SCAN-DEBUG: Direct fetch error stack:', fetchError.stack);
       return false;
     }
   }
@@ -1371,8 +1401,13 @@ const updateScanStatus = async (scanId, dbUserId, updates) => {
   const maxRetries = 3;
   let lastError = null;
   
+  console.log(`SCAN-DEBUG: updateScanStatus called at ${new Date().toISOString()}`);
+  console.log(`SCAN-DEBUG: updateScanStatus called for scan ${scanId}, user ${dbUserId}`);
+  console.log(`SCAN-DEBUG: Updates to apply:`, JSON.stringify(updates, null, 2));
+  
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
+      console.log(`SCAN-DEBUG: updateScanStatus attempt ${attempt}/${maxRetries}`);
       console.log(`SCAN-DEBUG: updateScanStatus called for scan ${scanId}, user ${dbUserId} (attempt ${attempt}/${maxRetries})`);
       console.log(`SCAN-DEBUG: Updates to apply:`, JSON.stringify(updates, null, 2));
       
@@ -1581,33 +1616,44 @@ const searchEmails = async (gmail, query) => {
 // New async function to process emails without blocking the response
 const processEmailsAsync = async (gmailToken, scanId, userId) => {
   console.log('SCAN-DEBUG: ===== ASYNC EMAIL PROCESSING STARTED =====');
+  console.log('SCAN-DEBUG: Function called at:', new Date().toISOString());
+  console.log('SCAN-DEBUG: Function execution started - this should appear immediately');
   console.log('SCAN-DEBUG: Parameters received:');
   console.log('SCAN-DEBUG: - gmailToken length:', gmailToken ? gmailToken.length : 'null');
   console.log('SCAN-DEBUG: - scanId:', scanId);
   console.log('SCAN-DEBUG: - userId:', userId);
+  console.log('SCAN-DEBUG: - gmailToken type:', typeof gmailToken);
+  console.log('SCAN-DEBUG: - scanId type:', typeof scanId);
+  console.log('SCAN-DEBUG: - userId type:', typeof userId);
   
   console.log('SCAN-DEBUG: About to validate parameters...');
   if (!gmailToken) {
+    console.error('SCAN-DEBUG: Gmail token is missing');
     throw new Error('Gmail token is required');
   }
   if (!scanId) {
+    console.error('SCAN-DEBUG: Scan ID is missing');
     throw new Error('Scan ID is required');
   }
   if (!userId) {
+    console.error('SCAN-DEBUG: User ID is missing');
     throw new Error('User ID is required');
   }
   
   console.log('SCAN-DEBUG: Parameters validated successfully');
+  console.log('SCAN-DEBUG: About to start the main processing logic...');
   
   try {
     console.log('SCAN-DEBUG: Starting email scan process...');
     
     // Update scan status to indicate we're starting
+    console.log('SCAN-DEBUG: About to update scan status to in_progress...');
     await updateScanStatus(scanId, userId, {
       status: 'in_progress',
       progress: 10,
       updated_at: new Date().toISOString()
     });
+    console.log('SCAN-DEBUG: Successfully updated scan status to in_progress');
     
     console.log('SCAN-DEBUG: About to fetch subscription examples...');
     // Fetch subscription examples for pattern matching
@@ -1615,23 +1661,29 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
     console.log('SCAN-DEBUG: Fetched subscription examples:', subscriptionExamples.length);
     
     // Update progress
+    console.log('SCAN-DEBUG: About to update progress to 15...');
     await updateScanStatus(scanId, userId, {
       progress: 15,
       updated_at: new Date().toISOString()
     });
+    console.log('SCAN-DEBUG: Successfully updated progress to 15');
     
     console.log('SCAN-DEBUG: About to fetch emails from Gmail...');
+    console.log('SCAN-DEBUG: Calling fetchEmailsFromGmail function...');
     // Fetch emails from Gmail using the comprehensive search function
     const emails = await fetchEmailsFromGmail(gmailToken);
     console.log('SCAN-DEBUG: Fetched emails from Gmail:', emails.length);
+    console.log('SCAN-DEBUG: Email IDs sample:', emails.slice(0, 3));
     
     // Update scan status with email count
+    console.log('SCAN-DEBUG: About to update scan status with email count...');
     await updateScanStatus(scanId, userId, {
       progress: 20,
       emails_found: emails.length,
       emails_to_process: emails.length,
       updated_at: new Date().toISOString()
     });
+    console.log('SCAN-DEBUG: Successfully updated scan status with email count');
     
     if (emails.length === 0) {
       console.log('SCAN-DEBUG: No emails found, completing scan');
@@ -1709,6 +1761,12 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
     throw error;
   }
 };
+
+// Test that the function is properly defined
+console.log('SCAN-DEBUG: processEmailsAsync function definition test:');
+console.log('SCAN-DEBUG: - Function exists:', typeof processEmailsAsync);
+console.log('SCAN-DEBUG: - Function name:', processEmailsAsync.name);
+console.log('SCAN-DEBUG: - Function is async:', processEmailsAsync.constructor.name === 'AsyncFunction');
 
 export default async function handler(req, res) {
   console.log('SCAN-DEBUG: ===== EMAIL SCAN ENDPOINT CALLED =====');
@@ -1894,6 +1952,10 @@ export default async function handler(req, res) {
 
     // Process emails asynchronously (don't await this)
     console.log('SCAN-DEBUG: Starting async email processing...');
+    console.log('SCAN-DEBUG: About to call processEmailsAsync with parameters:');
+    console.log('SCAN-DEBUG: - gmailToken length:', gmailToken ? gmailToken.length : 'null');
+    console.log('SCAN-DEBUG: - scanId:', scanId);
+    console.log('SCAN-DEBUG: - dbUserId:', dbUserId);
     
     // Add timeout wrapper to prevent hanging
     const timeoutPromise = new Promise((_, reject) => {
@@ -1905,6 +1967,8 @@ export default async function handler(req, res) {
     
     console.log('SCAN-DEBUG: About to call processEmailsAsync...');
     console.log('SCAN-DEBUG: processEmailsAsync function exists:', typeof processEmailsAsync);
+    console.log('SCAN-DEBUG: processEmailsAsync function name:', processEmailsAsync.name);
+    console.log('SCAN-DEBUG: processEmailsAsync function toString:', processEmailsAsync.toString().substring(0, 100) + '...');
     
     // Test if function is callable
     if (typeof processEmailsAsync !== 'function') {
@@ -1921,10 +1985,30 @@ export default async function handler(req, res) {
     
     // Add immediate error handling
     try {
-      const processingPromise = processEmailsAsync(gmailToken, scanId, dbUserId);
-      console.log('SCAN-DEBUG: processEmailsAsync called, setting up race condition...');
+      console.log('SCAN-DEBUG: About to call processEmailsAsync function...');
+      console.log('SCAN-DEBUG: Current timestamp before function call:', new Date().toISOString());
+      console.log('SCAN-DEBUG: About to execute: processEmailsAsync(gmailToken, scanId, dbUserId)');
       
-      Promise.race([processingPromise, timeoutPromise]).catch(error => {
+      const processingPromise = processEmailsAsync(gmailToken, scanId, dbUserId);
+      console.log('SCAN-DEBUG: processEmailsAsync called successfully, setting up race condition...');
+      console.log('SCAN-DEBUG: processingPromise type:', typeof processingPromise);
+      console.log('SCAN-DEBUG: processingPromise is Promise:', processingPromise instanceof Promise);
+      
+      // Add a promise that resolves immediately to test if the function is actually running
+      const immediatePromise = new Promise((resolve) => {
+        setTimeout(() => {
+          console.log('SCAN-DEBUG: Immediate promise resolved - checking if processEmailsAsync is still running...');
+          resolve('immediate');
+        }, 1000); // 1 second
+      });
+      
+      Promise.race([processingPromise, timeoutPromise, immediatePromise]).then(result => {
+        if (result === 'immediate') {
+          console.log('SCAN-DEBUG: Immediate promise won the race - processEmailsAsync may be hanging');
+        } else {
+          console.log('SCAN-DEBUG: processEmailsAsync completed successfully');
+        }
+      }).catch(error => {
         console.error('SCAN-DEBUG: Async email processing failed:', error);
         console.error('SCAN-DEBUG: Error stack:', error.stack);
         // Update scan status to error
@@ -1936,6 +2020,8 @@ export default async function handler(req, res) {
           console.error('SCAN-DEBUG: Failed to update scan status to error:', updateError);
         });
       });
+      
+      console.log('SCAN-DEBUG: Async email processing setup completed successfully');
     } catch (syncError) {
       console.error('SCAN-DEBUG: Synchronous error calling processEmailsAsync:', syncError);
       console.error('SCAN-DEBUG: Sync error stack:', syncError.stack);
