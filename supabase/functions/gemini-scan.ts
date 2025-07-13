@@ -552,9 +552,9 @@ serve(async (req) => {
         }
 
         // Process batch results
-        for (let i = 0; i < batch.length; i++) {
-          const email = batch[i];
-          const geminiResult = batchResults[i];
+        for (let j = 0; j < batch.length; j++) {
+          const email = batch[j];
+          const geminiResult = batchResults[j];
 
           if (geminiResult.error) {
             await supabase.from("subscription_analysis").update({
@@ -592,6 +592,8 @@ serve(async (req) => {
               continue;
             }
             
+            console.log(`Attempting to insert subscription: ${geminiResult.subscription_name} for user ${scan.user_id}`);
+            
             const { error: subscriptionError } = await supabase.from("subscriptions").insert({
               user_id: scan.user_id,
               name: geminiResult.subscription_name,
@@ -608,9 +610,12 @@ serve(async (req) => {
             });
 
             if (subscriptionError) {
+              console.log(`Failed to insert subscription: ${subscriptionError.message}`);
               errorCount++;
               continue;
             }
+
+            console.log(`Successfully inserted subscription: ${geminiResult.subscription_name}`);
 
             processedCount++;
           } else {
