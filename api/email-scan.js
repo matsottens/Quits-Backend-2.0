@@ -2198,55 +2198,8 @@ export default async function handler(req, res) {
           console.log('SCAN-DEBUG: The scan is functionally complete with basic subscription detection');
         }
         
-        // Add a fallback mechanism: if Edge Function doesn't complete within 8 minutes, 
-        // automatically complete the scan since pattern matching already detected subscriptions
-        console.log('SCAN-DEBUG: Setting up fallback completion in 8 minutes...');
-        setTimeout(async () => {
-          try {
-            console.log('SCAN-DEBUG: Checking if scan is still in ready_for_analysis or analyzing status...');
-            
-            // Check current scan status
-            const currentScanResponse = await fetch(
-              `${supabaseUrl}/rest/v1/scan_history?scan_id=eq.${scanId}&select=status`,
-              {
-                method: 'GET',
-                headers: {
-                  'apikey': supabaseKey,
-                  'Authorization': `Bearer ${supabaseKey}`,
-                  'Content-Type': 'application/json'
-                }
-              }
-            );
-            
-            if (currentScanResponse.ok) {
-              const currentScan = await currentScanResponse.json();
-              if (currentScan.length > 0) {
-                const currentStatus = currentScan[0].status;
-                console.log('SCAN-DEBUG: Current scan status after 8 minutes:', currentStatus);
-                
-                if (currentStatus === 'ready_for_analysis' || currentStatus === 'analyzing') {
-                  console.log('SCAN-DEBUG: Scan still not completed after 8 minutes');
-                  console.log('SCAN-DEBUG: Completing scan automatically since pattern matching detected subscriptions');
-                  
-                  // Complete the scan
-                  await updateScanStatus(scanId, dbUserId, {
-                    status: 'completed',
-                    completed_at: new Date().toISOString(),
-                    updated_at: new Date().toISOString()
-                  });
-                  
-                  console.log('SCAN-DEBUG: ✅ Scan completed automatically via fallback mechanism');
-                } else if (currentStatus === 'completed') {
-                  console.log('SCAN-DEBUG: ✅ Scan already completed by Edge Function');
-                } else {
-                  console.log('SCAN-DEBUG: Scan status is:', currentStatus);
-                }
-              }
-            }
-          } catch (fallbackError) {
-            console.error('SCAN-DEBUG: Error in fallback completion:', fallbackError);
-          }
-        }, 8 * 60 * 1000); // Extended from 3 minutes to 8 minutes
+        // NO FALLBACK MECHANISM - Scans will only be completed when Edge Function succeeds
+        console.log('SCAN-DEBUG: No fallback mechanism - scan will remain in ready_for_analysis until Edge Function completes');
       }
       
       // Return scan ID with completion status

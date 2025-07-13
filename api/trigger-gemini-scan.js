@@ -59,54 +59,14 @@ export default async function handler(req, res) {
     if (!readyScans || readyScans.length === 0) {
       console.log('TRIGGER-DEBUG: No scans ready for analysis');
       
-      // Also check for any scans that might be stuck in 'analyzing' status for too long
-      console.log('TRIGGER-DEBUG: Checking for stuck scans in analyzing status...');
-      const { data: stuckScans, error: stuckError } = await supabase
-        .from('scan_history')
-        .select('scan_id, user_id, created_at, updated_at, subscriptions_found, status')
-        .eq('status', 'analyzing')
-        .lt('updated_at', new Date(Date.now() - 8 * 60 * 1000).toISOString()) // Extended from 3 minutes to 8 minutes to give Edge Function time
-        .order('created_at', { ascending: true })
-        .limit(3);
-
-      if (!stuckError && stuckScans && stuckScans.length > 0) {
-        console.log(`TRIGGER-DEBUG: Found ${stuckScans.length} stuck scans, resetting them to ready_for_analysis`);
-        
-        for (const stuckScan of stuckScans) {
-          await supabase
-            .from('scan_history')
-            .update({ 
-              status: 'ready_for_analysis',
-              updated_at: new Date().toISOString()
-            })
-            .eq('scan_id', stuckScan.scan_id);
-        }
-        
-        // Now try to process these scans
-        const { data: resetScans, error: resetError } = await supabase
-          .from('scan_history')
-          .select('scan_id, user_id, created_at, emails_processed, subscriptions_found, status')
-          .eq('status', 'ready_for_analysis')
-          .order('created_at', { ascending: true })
-          .limit(5);
-        
-        if (!resetError && resetScans && resetScans.length > 0) {
-          console.log(`TRIGGER-DEBUG: Now have ${resetScans.length} scans ready for analysis after reset`);
-          readyScans = resetScans;
-        }
-      }
+      // NO STUCK SCAN DETECTION - Let Edge Function handle completion
+      console.log('TRIGGER-DEBUG: No automatic scan completion - Edge Function must complete analysis');
       
-      // Remove the automatic completion of scans with pattern matching results
-      // Let the Edge Function complete the actual Gemini analysis
-      // Only use fallback for truly stuck scans after 8 minutes
-      
-      if (!readyScans || readyScans.length === 0) {
-        return res.status(200).json({ 
-          success: true, 
-          message: 'No scans ready for analysis',
-          scans_processed: 0
-        });
-      }
+      return res.status(200).json({ 
+        success: true, 
+        message: 'No scans ready for analysis',
+        scans_processed: 0
+      });
     }
 
     console.log(`TRIGGER-DEBUG: Found ${readyScans.length} scans ready for analysis`);

@@ -21,7 +21,7 @@ const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
-// Add quota management at the top
+// Add quota management
 const QUOTA_CHECK_INTERVAL = 1000; // Check quota every 1 second
 const MAX_REQUESTS_PER_MINUTE = 60; // Conservative limit
 let requestCount = 0;
@@ -125,7 +125,7 @@ ${emailText}
   };
 
   // Implement retry logic with exponential backoff for rate limiting
-  const maxRetries = 2; // Reduced from 3 to avoid quota exhaustion
+  const maxRetries = 2;
   let lastError = null;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -148,7 +148,6 @@ ${emailText}
             const errorData = await response.json();
             if (errorData.error && errorData.error.status === 'RESOURCE_EXHAUSTED') {
               console.log('Edge Function: Gemini API quota exhausted, stopping retries');
-              // Update the scan status to indicate quota exhaustion
               return { 
                 error: `Quota exhausted after ${attempt} attempts`, 
                 is_subscription: false,
@@ -162,11 +161,10 @@ ${emailText}
           lastError = new Error(`Gemini API rate limit hit (attempt ${attempt})`);
           
           if (attempt < maxRetries) {
-            // Shorter exponential backoff for rate limits: 10s, 20s
             const backoffDelay = Math.pow(2, attempt) * 5000; // 10s, 20s
             console.log(`Edge Function: Rate limit hit, backing off for ${backoffDelay}ms before retry`);
             await new Promise(resolve => setTimeout(resolve, backoffDelay));
-            continue; // Try again
+            continue;
           } else {
             console.log('Edge Function: Max retries reached for rate limiting');
             return { error: `Rate limit exceeded after ${maxRetries} attempts`, is_subscription: false };
@@ -224,7 +222,6 @@ ${emailText}
           // If subscription_name is missing, try to extract it from the email content
           if (!result.subscription_name || typeof result.subscription_name !== 'string') {
             console.log("Edge Function: Subscription name missing, attempting to extract from email content");
-            // Try to extract service name from email content or use a fallback
             const emailLower = emailText.toLowerCase();
             let extractedName: string | null = null;
             
@@ -259,7 +256,6 @@ ${emailText}
               result.subscription_name = extractedName;
               console.log(`Edge Function: Extracted subscription name: ${extractedName}`);
             } else {
-              // If we still can't find a name, use a generic name but still process it
               result.subscription_name = 'Unknown Service';
               console.log("Edge Function: Using generic name 'Unknown Service' for subscription");
             }
@@ -319,7 +315,7 @@ serve(async (_req) => {
     
     // Add timeout mechanism to prevent hanging
     const startTime = Date.now();
-    const maxExecutionTime = 8 * 60 * 1000; // 8 minutes max execution time
+    const maxExecutionTime = 7 * 60 * 1000; // 7 minutes max execution time
     
     // 1. Find all scans ready for analysis
     const { data: scans, error: scanError } = await supabase
@@ -339,18 +335,36 @@ serve(async (_req) => {
 
     console.log(`Edge Function: Processing ${scans.length} scans ready for analysis`);
 
+    let totalProcessed = 0;
+    let totalErrors = 0;
+
     for (const scan of scans) {
       // Check timeout before processing each scan
       if (Date.now() - startTime > maxExecutionTime) {
-        console.log(`Edge Function: Timeout reached, stopping processing. Processed ${scans.indexOf(scan)} scans.`);
+        console.log(`Edge Function: Timeout reached, stopping processing. Processed ${totalProcessed} scans.`);
         return new Response(JSON.stringify({ 
           success: true, 
-          message: `Processed ${scans.indexOf(scan)} scans before timeout`,
+          message: `Processed ${totalProcessed} scans before timeout`,
           timeout: true
         }), { status: 200 });
       }
       
       console.log(`Edge Function: Processing scan ${scan.scan_id} for user ${scan.user_id}`);
+      
+      // Mark scan as analyzing to prevent duplicate processing
+      const { error: statusUpdateError } = await supabase
+        .from("scan_history")
+        .update({ 
+          status: "analyzing",
+          updated_at: new Date().toISOString()
+        })
+        .eq("id", scan.id);
+
+      if (statusUpdateError) {
+        console.error(`Edge Function: Failed to update scan status to analyzing for scan ${scan.scan_id}:`, statusUpdateError);
+        totalErrors++;
+        continue;
+      }
       
       // 2. Get pre-identified potential subscriptions for this scan
       const { data: potentialSubscriptions, error: subscriptionError } = await supabase
@@ -361,19 +375,25 @@ serve(async (_req) => {
 
       if (subscriptionError) {
         console.error(`Edge Function: Failed to fetch potential subscriptions for scan ${scan.scan_id}:`, subscriptionError);
+        // Mark scan as error since we can't process it
         await supabase.from("scan_history").update({ 
           status: "error", 
-          error_message: subscriptionError.message 
+          error_message: `Failed to fetch potential subscriptions: ${subscriptionError.message}`,
+          updated_at: new Date().toISOString()
         }).eq("id", scan.id);
+        totalErrors++;
         continue;
       }
 
       if (!potentialSubscriptions || potentialSubscriptions.length === 0) {
         console.log(`Edge Function: No potential subscriptions found for scan ${scan.scan_id}`);
+        // Mark scan as completed since there's nothing to analyze
         await supabase.from("scan_history").update({ 
           status: "completed", 
-          completed_at: new Date().toISOString() 
+          completed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
         }).eq("id", scan.id);
+        totalProcessed++;
         continue;
       }
 
@@ -382,6 +402,7 @@ serve(async (_req) => {
       // 3. Analyze each potential subscription with Gemini
       let processedCount = 0;
       let errorCount = 0;
+      let quotaExhausted = false;
       
       for (const analysis of potentialSubscriptions) {
         try {
@@ -407,7 +428,7 @@ From: ${emailData.sender}
 Content: ${emailData.content}
           `.trim();
           
-          // Reduced delay to prevent timeouts - from 15s to 3s
+          // Reduced delay to prevent timeouts
           await new Promise(resolve => setTimeout(resolve, 3000)); // 3 second delay between calls
           
           const geminiResult = await analyzeEmailWithGemini(emailContent);
@@ -426,6 +447,8 @@ Content: ${emailData.content}
             // Check if this is a quota exhaustion error
             if (geminiResult.quota_exhausted) {
               console.log(`Edge Function: Quota exhausted during analysis, marking scan for retry`);
+              quotaExhausted = true;
+              
               // Update scan status to indicate quota exhaustion
               await supabase.from("scan_history").update({
                 status: "quota_exhausted",
@@ -544,18 +567,29 @@ Content: ${emailData.content}
         }
       }
 
-      // 4. Mark scan as completed
-      await supabase.from("scan_history").update({ 
-        status: "completed", 
-        completed_at: new Date().toISOString() 
-      }).eq("id", scan.id);
-      
-      console.log(`Edge Function: Completed processing scan ${scan.scan_id} - Created ${processedCount} subscriptions, ${errorCount} errors`);
+      // 4. Mark scan as completed ONLY if we didn't hit quota exhaustion
+      if (!quotaExhausted) {
+        const { error: completionError } = await supabase.from("scan_history").update({ 
+          status: "completed", 
+          completed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }).eq("id", scan.id);
+
+        if (completionError) {
+          console.error(`Edge Function: Failed to mark scan ${scan.scan_id} as completed:`, completionError);
+          totalErrors++;
+        } else {
+          console.log(`Edge Function: Successfully completed scan ${scan.scan_id} - Created ${processedCount} subscriptions, ${errorCount} errors`);
+          totalProcessed++;
+        }
+      } else {
+        console.log(`Edge Function: Scan ${scan.scan_id} left in quota_exhausted status for retry`);
+      }
     }
 
     return new Response(JSON.stringify({ 
       success: true, 
-      message: `Processed ${scans.length} scans successfully` 
+      message: `Processed ${totalProcessed} scans successfully, ${totalErrors} errors` 
     }), { status: 200 });
     
   } catch (error) {
