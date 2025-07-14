@@ -89,15 +89,43 @@ export default async function handler(req, res) {
 
     // Look up the user in the database to get the UUID
     console.log('SCAN-STATUS-DEBUG: Looking up user with Google ID:', googleId);
-    const { data: user, error: userError } = await supabase
+    
+    // Try to find user by google_id first, then by id (in case Google ID is stored as primary key)
+    let { data: user, error: userError } = await supabase
       .from('users')
       .select('id')
       .eq('google_id', googleId)
       .single();
+    
+    // If not found by google_id, try by id (Google ID might be stored as primary key)
+    if (userError && userError.code === 'PGRST116') {
+      console.log('SCAN-STATUS-DEBUG: User not found by google_id, trying by id');
+      const { data: userById, error: userByIdError } = await supabase
+        .from('users')
+        .select('id')
+        .eq('id', googleId)
+        .single();
+      
+      user = userById;
+      userError = userByIdError;
+    }
 
     if (userError || !user) {
       console.error('SCAN-STATUS-DEBUG: User lookup error:', userError);
       console.error('SCAN-STATUS-DEBUG: User data:', user);
+      
+      // Let's check what users exist in the database for debugging
+      console.log('SCAN-STATUS-DEBUG: Checking all users in database for debugging...');
+      const { data: allUsers, error: allUsersError } = await supabase
+        .from('users')
+        .select('id, email, google_id')
+        .limit(5);
+      
+      if (allUsersError) {
+        console.error('SCAN-STATUS-DEBUG: Error fetching all users:', allUsersError);
+      } else {
+        console.log('SCAN-STATUS-DEBUG: Found users in database:', allUsers);
+      }
       
       // If user doesn't exist yet, this might be a new user whose scan is still being processed
       // Return a status indicating the scan is still being set up
