@@ -77,10 +77,19 @@ export default async function handler(req, res) {
     }
 
     // Get scanId from path or query parameters early
-    const pathParts = req.url.split('/');
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const pathParts = url.pathname.split('/').filter(part => part.length > 0);
     const scanIdFromPath = pathParts[pathParts.length - 1];
-    const queryParams = new URLSearchParams(req.url.split('?')[1] || '');
-    const scanId = scanIdFromPath !== 'scan-status' ? scanIdFromPath : (queryParams.get('scanId') || 'latest');
+    
+    // Handle both path parameter and query parameter cases
+    let scanId;
+    if (scanIdFromPath && scanIdFromPath !== 'scan-status' && scanIdFromPath.startsWith('scan_')) {
+      // Path parameter case: /api/scan-status/scan_abc123
+      scanId = scanIdFromPath;
+    } else {
+      // Query parameter case: /api/scan-status?scanId=scan_abc123
+      scanId = url.searchParams.get('scanId') || 'latest';
+    }
 
     console.log('SCAN-STATUS-DEBUG: URL:', req.url);
     console.log('SCAN-STATUS-DEBUG: Path parts:', pathParts);
