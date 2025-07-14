@@ -357,6 +357,8 @@ serve(async (req) => {
         continue;
       }
       
+      let quotaExhausted = false;
+      let subscriptionsFound = 0;
       const { data: potentialSubscriptions, error: subscriptionError } = await supabase
         .from("subscription_analysis")
         .select("*")
@@ -376,29 +378,20 @@ serve(async (req) => {
 
       if (!potentialSubscriptions || potentialSubscriptions.length === 0) {
         console.log(`No pending analyses found for scan ${scan.scan_id}`);
-        await supabase.from("scan_history").update({ 
-          status: "completed", 
-          completed_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        }).eq("id", scan.id);
-        totalProcessed++;
-        continue;
-      }
+        // Do not return/continue here; let the completion update run below
+      } else {
+        console.log(`Found ${potentialSubscriptions.length} pending analyses for scan ${scan.scan_id}`);
 
-      console.log(`Found ${potentialSubscriptions.length} pending analyses for scan ${scan.scan_id}`);
-
-      let processedCount = 0;
-      let errorCount = 0;
-      let quotaExhausted = false;
-      let subscriptionsFound = 0;
-      
-      // First, fetch all email data for the pending analyses
-      const emailDataPromises = potentialSubscriptions.map(async (analysis) => {
-          const { data: emailData, error: emailError } = await supabase
-            .from("email_data")
-            .select("content, subject, sender, gmail_message_id")
-            .eq("id", analysis.email_data_id)
-            .single();
+        let processedCount = 0;
+        let errorCount = 0;
+        
+        // First, fetch all email data for the pending analyses
+        const emailDataPromises = potentialSubscriptions.map(async (analysis) => {
+            const { data: emailData, error: emailError } = await supabase
+              .from("email_data")
+              .select("content, subject, sender, gmail_message_id")
+              .eq("id", analysis.email_data_id)
+              .single();
 
           if (emailError || !emailData) {
           console.error(`Failed to fetch email data for analysis ${analysis.id}:`, emailError);
@@ -603,24 +596,27 @@ serve(async (req) => {
           await new Promise(resolve => setTimeout(resolve, 2000));
         }
       }
+      }
 
+      // Always attempt to mark scan as completed unless quota exhausted
       if (!quotaExhausted) {
-        console.log(`Scan ${scan.scan_id} completed: ${processedCount} processed, ${subscriptionsFound} subscriptions found, ${errorCount} errors`);
-        
+        console.log(`Attempting to mark scan ${scan.scan_id} as completed`);
         const { error: completionError } = await supabase.from("scan_history").update({ 
           status: "completed", 
           completed_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
           subscriptions_found: subscriptionsFound
         }).eq("id", scan.id);
-
         if (completionError) {
           console.error(`Failed to update scan completion for ${scan.scan_id}:`, completionError);
           totalErrors++;
         } else {
+          console.log(`Scan ${scan.scan_id} successfully marked as completed`);
           totalProcessed++;
           totalSubscriptionsFound += subscriptionsFound;
         }
+      } else {
+        console.log(`Quota exhausted for scan ${scan.scan_id}, not marking as completed`);
       }
     }
 
