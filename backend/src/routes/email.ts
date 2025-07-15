@@ -1,9 +1,9 @@
 import express, { Request, Response, NextFunction, RequestHandler } from 'express';
 import { google, gmail_v1 } from 'googleapis';
 import { oauth2Client, gmail } from '../config/google';
-import { summarizeEmail } from '../services/gemini.js';
-import { extractSubscriptionDetails } from '../services/subscription.js';
-import { authenticateUser, AuthRequest } from '../middleware/auth';
+import { summarizeEmail } from '../services/gemini';
+import { extractSubscriptionDetails } from '../services/subscription';
+import { authenticateUser } from '../middlewares/auth';
 import { supabase } from '../config/supabase';
 // import { genAI, generateContent } from '../services/gemini.js';
 // import { Content, Part } from '@google/generative-ai';
@@ -160,7 +160,7 @@ router.post('/scan',
 // Get scanning status
 router.get('/status', 
   authenticateUser as RequestHandler,
-  async (req: AuthRequest, res): Promise<void> => {
+  async (req: Request, res): Promise<void> => {
     try {
       const { data: scan, error } = await supabase
         .from('email_scans')
@@ -193,7 +193,7 @@ router.get('/status',
 // Get subscription suggestions
 router.get('/suggestions', 
   authenticateUser as RequestHandler,
-  async (req: AuthRequest, res): Promise<void> => {
+  async (req: Request, res): Promise<void> => {
     try {
       const { data: suggestions, error } = await supabase
         .from('subscription_suggestions')
@@ -219,7 +219,7 @@ router.get('/suggestions',
 // Confirm or reject a suggestion
 router.post('/suggestions/:id/confirm', 
   authenticateUser as RequestHandler,
-  async (req: AuthRequest, res): Promise<void> => {
+  async (req: Request, res): Promise<void> => {
     try {
       const { id } = req.params;
       const { confirmed } = req.body;

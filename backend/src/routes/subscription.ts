@@ -1,9 +1,9 @@
 import express, { Response, RequestHandler } from 'express';
 import { supabase } from '../config/supabase';
-import { authenticateUser, AuthRequest } from '../middleware/auth';
-import {
-  createSubscription, getUserSubscriptions, updateSubscription, deleteSubscription
-} from '../services/database';
+import { authenticateUser } from '../middlewares/auth';
+// import {
+//   createSubscription, getUserSubscriptions, updateSubscription, deleteSubscription
+// } from '../services/database';
 
 const router = express.Router();
 
@@ -12,7 +12,7 @@ const router = express.Router();
 router.use(authenticateUser as RequestHandler);
 
 // Get all subscriptions for the authenticated user
-router.get('/', (async (req: AuthRequest, res) => {
+router.get('/', (async (req, res) => {
   try {
     const { data: subscriptions, error } = await supabase
       .from('subscriptions')
@@ -31,7 +31,7 @@ router.get('/', (async (req: AuthRequest, res) => {
 }) as RequestHandler);
 
 // Get a specific subscription
-router.get('/:id', (async (req: AuthRequest, res) => {
+router.get('/:id', (async (req, res) => {
   try {
     const { id } = req.params;
     
@@ -54,7 +54,7 @@ router.get('/:id', (async (req: AuthRequest, res) => {
 }) as RequestHandler);
 
 // Create a new subscription
-router.post('/', (async (req: AuthRequest, res) => {
+router.post('/', (async (req, res) => {
   try {
     const { name, price, currency, billing_cycle, next_billing_date } = req.body;
     
@@ -87,7 +87,7 @@ router.post('/', (async (req: AuthRequest, res) => {
 }) as RequestHandler);
 
 // Update a subscription
-router.put('/:id', (async (req: AuthRequest, res) => {
+router.put('/:id', (async (req, res) => {
   try {
     const { id } = req.params;
     const { name, price, currency, billing_cycle, next_billing_date, status } = req.body;
@@ -131,7 +131,7 @@ router.put('/:id', (async (req: AuthRequest, res) => {
 }) as RequestHandler);
 
 // Delete a subscription
-router.delete('/:id', (async (req: AuthRequest, res) => {
+router.delete('/:id', (async (req, res) => {
   try {
     const { id } = req.params;
     

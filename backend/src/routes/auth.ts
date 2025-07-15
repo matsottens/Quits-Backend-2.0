@@ -2,7 +2,7 @@ import express, { Request, Response, NextFunction, RequestHandler } from 'expres
 import { google } from 'googleapis';
 import { oauth2Client, SCOPES } from '../config/google';
 import { supabase } from '../config/supabase';
-import { authenticateUser, AuthRequest } from '../middleware/auth';
+import { authenticateUser } from '../middlewares/auth';
 import { generateToken } from '../utils/jwt.js';
 import { upsertUser } from '../services/database';
 
@@ -487,7 +487,7 @@ router.post('/google/callback/direct-alt',
 // Get user profile (Protected Route)
 router.get('/me', 
   authenticateUser as RequestHandler,
-  (async (req: AuthRequest, res: Response) => {
+  (async (req: Request, res: Response) => {
     try {
       const userId = req.user?.id;
       if (!userId) {
@@ -521,7 +521,7 @@ router.get('/me',
 // Example Logout (optional - depends on session management)
 router.post('/logout',
   authenticateUser as RequestHandler,
-  (async (req: AuthRequest, res: Response) => {
+  (async (req: Request, res: Response) => {
     try {
         const userId = req.user?.id;
         if (!userId) {

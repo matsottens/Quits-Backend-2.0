@@ -3,7 +3,6 @@ import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import authRoutes from './routes/auth';
 import emailRoutes from './routes/email';
 import subscriptionRoutes from './routes/subscription';
@@ -12,10 +11,6 @@ import { handleGoogleProxy } from './routes/proxy';
 
 // Load environment variables
 dotenv.config();
-
-// __dirname is not defined in ES module scope
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
