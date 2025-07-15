@@ -1,9 +1,9 @@
 import express, { Response, RequestHandler } from 'express';
-import { supabase } from '../config/supabase.js';
-import { authenticateUser, AuthRequest } from '../middleware/auth.js';
+import { supabase } from '../config/supabase';
+import { authenticateUser, AuthRequest } from '../middleware/auth';
 import {
   createSubscription, getUserSubscriptions, updateSubscription, deleteSubscription
-} from '../services/database.js';
+} from '../services/database';
 
 const router = express.Router();
 

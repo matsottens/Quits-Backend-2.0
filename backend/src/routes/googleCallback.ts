@@ -1,8 +1,8 @@
 import { Request, Response } from 'express';
 import { google } from 'googleapis';
-import { supabase } from '../config/supabase.js';
+import { supabase } from '../config/supabase';
 import { generateToken } from '../utils/jwt.js';
-import { upsertUser } from '../services/database.js';
+import { upsertUser } from '../services/database';
 
 // Handle OPTIONS requests for the Google callback endpoint
 export const handleGoogleCallbackOptions = (req: Request, res: Response) => {

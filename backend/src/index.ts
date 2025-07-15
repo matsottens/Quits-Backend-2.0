@@ -4,11 +4,11 @@ import helmet from 'helmet';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import authRoutes from './routes/auth.js';
-import emailRoutes from './routes/email.js';
-import subscriptionRoutes from './routes/subscription.js';
-import { handleGoogleCallback } from './routes/googleCallback.js';
-import { handleGoogleProxy } from './routes/proxy.js';
+import authRoutes from './routes/auth';
+import emailRoutes from './routes/email';
+import subscriptionRoutes from './routes/subscription';
+import { handleGoogleCallback } from './routes/googleCallback';
+import { handleGoogleProxy } from './routes/proxy';
 
 // Load environment variables
 dotenv.config();
@@ -167,15 +167,6 @@ const handleGoogleCallbackOptions = (req: Request, res: Response) => {
   // Send 204 No Content for OPTIONS requests
   return res.status(204).end();
 };
-
-// Direct Google callback handlers (not using Router)
-const googleCallbackPath = '/api/auth/google/callback';
-app.options(googleCallbackPath, function(req: Request, res: Response) {
-  return handleGoogleCallbackOptions(req, res);
-});
-app.get(googleCallbackPath, function(req: Request, res: Response) {
-  return handleGoogleCallback(req, res);
-});
 
 // CORS test endpoint at the root level
 app.get('/cors-test', (req: Request, res: Response) => {

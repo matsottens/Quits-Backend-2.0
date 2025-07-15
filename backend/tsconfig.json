@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
     "target": "es2020",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "module": "CommonJS",
+    "moduleResolution": "node",
     "esModuleInterop": true,
     "outDir": "./dist",
     "strict": false,
@@ -13,7 +13,10 @@
     "noImplicitReturns": false,
     "noFallthroughCasesInSwitch": true,
     "strictNullChecks": false,
-    "noImplicitThis": false
+    "noImplicitThis": false,
+    "noImplicitReturns": false,
+    "allowJs": true,
+    "checkJs": false
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]

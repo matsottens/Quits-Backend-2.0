@@ -3,10 +3,10 @@ import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
-import { handleGoogleProxy } from './routes/proxy.js';
-import authRoutes from './routes/auth.js';
-import emailRoutes from './routes/email.js';
-import subscriptionRoutes from './routes/subscription.js';
+import { handleGoogleProxy } from './routes/proxy';
+import authRoutes from './routes/auth';
+import emailRoutes from './routes/email';
+import subscriptionRoutes from './routes/subscription';
 
 // Create Express app
 const app = express();
@@ -65,13 +65,16 @@ app.options('/api/google-proxy', (req, res) => {
   }
   
   // Send 204 No Content for OPTIONS requests
-  return res.status(204).end();
+  res.status(204).end();
 });
 
 app.get('/api/google-proxy', googleProxyHandler);
 app.post('/api/google-proxy', googleProxyHandler);
 
 // Regular route handlers
+console.log('authRoutes:', typeof authRoutes, authRoutes && authRoutes.stack ? 'Express router' : authRoutes);
+console.log('emailRoutes:', typeof emailRoutes, emailRoutes && emailRoutes.stack ? 'Express router' : emailRoutes);
+console.log('subscriptionRoutes:', typeof subscriptionRoutes, subscriptionRoutes && subscriptionRoutes.stack ? 'Express router' : subscriptionRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/email', emailRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
@@ -92,8 +95,8 @@ app.get('/', (req, res) => {
 });
 
 // Create a serverless-compatible handler
-export default function handler(req, res) {
-  return new Promise((resolve, reject) => {
+export default function handler(req: any, res: any) {
+  return new Promise<void>((resolve, reject) => {
     // This mock function captures the end call to resolve the promise
     const originalEnd = res.end;
     res.end = function() {

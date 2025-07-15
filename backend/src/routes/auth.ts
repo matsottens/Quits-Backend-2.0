@@ -1,10 +1,10 @@
 import express, { Request, Response, NextFunction, RequestHandler } from 'express';
 import { google } from 'googleapis';
-import { oauth2Client, SCOPES } from '../config/google.js';
-import { supabase } from '../config/supabase.js';
-import { authenticateUser, AuthRequest } from '../middleware/auth.js';
+import { oauth2Client, SCOPES } from '../config/google';
+import { supabase } from '../config/supabase';
+import { authenticateUser, AuthRequest } from '../middleware/auth';
 import { generateToken } from '../utils/jwt.js';
-import { upsertUser } from '../services/database.js';
+import { upsertUser } from '../services/database';
 
 const router = express.Router();
 
@@ -115,7 +115,8 @@ const handleGoogleCallback: RequestHandler = async (req: Request, res: Response)
         console.error('Google OAuth Error on callback:', oauthError);
         
         if (isJsonp) {
-          return res.send(`${callback}({"error": "google_oauth_failed", "details": "${oauthError}"})`);
+          res.send(`${callback}({"error": "google_oauth_failed", "details": "${oauthError}"})`);
+          return;
         }
         
         // Redirect back to frontend with error
@@ -123,21 +124,24 @@ const handleGoogleCallback: RequestHandler = async (req: Request, res: Response)
           ? redirect
           : req.headers.referer?.split('?')[0] || process.env.CLIENT_URL || 'http://localhost:5173';
           
-        return res.redirect(`${redirectUrl.replace('/auth/callback','/login')}?error=google_oauth_failed&details=${oauthError}`);
+        res.redirect(`${redirectUrl.replace('/auth/callback','/login')}?error=google_oauth_failed&details=${oauthError}`);
+        return;
     }
 
     if (!code || typeof code !== 'string') {
       console.error('Authorization code is required.');
       
       if (isJsonp) {
-        return res.send(`${callback}({"error": "missing_code"})`);
+        res.send(`${callback}({"error": "missing_code"})`);
+        return;
       }
       
       const redirectUrl = typeof redirect === 'string' && redirect.length > 0
         ? redirect
         : req.headers.referer?.split('?')[0] || process.env.CLIENT_URL || 'http://localhost:5173';
         
-      return res.redirect(`${redirectUrl.replace('/auth/callback','/login')}?error=missing_code`);
+      res.redirect(`${redirectUrl.replace('/auth/callback','/login')}?error=missing_code`);
+      return;
     }
 
     // Determine the redirect URI used by the client for this specific request
@@ -223,12 +227,13 @@ const handleGoogleCallback: RequestHandler = async (req: Request, res: Response)
           picture: user.picture
         }
       };
-      return res.send(`${callback}(${JSON.stringify(responseData)})`);
+      res.send(`${callback}(${JSON.stringify(responseData)})`);
+      return;
     }
     
     // For regular API response, send JSON
     if (req.headers.accept?.includes('application/json')) {
-      return res.json({
+      res.json({
         token: appToken,
         user: {
           id: user.id,
@@ -237,6 +242,7 @@ const handleGoogleCallback: RequestHandler = async (req: Request, res: Response)
           picture: user.picture
         }
       });
+      return;
     }
     
     // Otherwise, redirect user back to the frontend with the token
@@ -246,7 +252,8 @@ const handleGoogleCallback: RequestHandler = async (req: Request, res: Response)
       : redirectUri.replace('/auth/callback', '/dashboard'); // Default fallback
       
     // Include the app token in the redirect URL
-    return res.redirect(`${clientRedirectUrl}?token=${appToken}`);
+    res.redirect(`${clientRedirectUrl}?token=${appToken}`);
+    return;
 
   } catch (error: any) {
     console.error('Google OAuth Callback Error:', error.response?.data || error.message);
@@ -254,7 +261,8 @@ const handleGoogleCallback: RequestHandler = async (req: Request, res: Response)
     // Handle JSONP error response if callback was provided
     const callback = req.query.callback;
     if (typeof callback === 'string' && callback.length > 0) {
-      return res.send(`${callback}({"error": "auth_failed", "message": ${JSON.stringify(error.message)}})`);
+      res.send(`${callback}({"error": "auth_failed", "message": ${JSON.stringify(error.message)}})`);
+      return;
     }
     
     // Get redirect URL
@@ -271,15 +279,14 @@ const handleGoogleCallback: RequestHandler = async (req: Request, res: Response)
     } else if (error.response?.data?.error === 'invalid_grant') {
         errorCode = 'invalid_grant'; // Often means code expired or already used
     }
-    return res.redirect(`${loginUrl}?error=${errorCode}`);
+    res.redirect(`${loginUrl}?error=${errorCode}`);
+    return;
   }
 };
 
 // Handle Google OAuth callback - explicitly catch all possible URL patterns
 // Replace the problematic wildcard pattern with specific routes
 router.get('/google/callback', handleGoogleCallback);
-router.get('/auth/google/callback', handleGoogleCallback);
-router.get('/api/auth/google/callback', handleGoogleCallback);
 
 // JSONP endpoint for Google OAuth callback (used as a fallback for CORS issues)
 router.get('/google/callback/jsonp', (async (req: Request, res: Response) => {
@@ -290,11 +297,13 @@ router.get('/google/callback/jsonp', (async (req: Request, res: Response) => {
     console.log('JSONP endpoint called with origin:', origin);
     
     if (!callback || typeof callback !== 'string') {
-      return res.status(400).json({ error: 'Callback parameter is required for JSONP' });
+      res.status(400).json({ error: 'Callback parameter is required for JSONP' });
+      return;
     }
     
     if (!code || typeof code !== 'string') {
-      return res.send(`${callback}({"error": "missing_code"})`);
+      res.send(`${callback}({"error": "missing_code"})`);
+      return;
     }
     
     console.log('JSONP callback received with code:', code.substring(0, 10) + '...');
@@ -332,7 +341,8 @@ router.get('/google/callback/jsonp', (async (req: Request, res: Response) => {
       const userInfo = userInfoResponse.data;
       
       if (!userInfo.id || !userInfo.email) {
-        return res.send(`${callback}({"error": "Failed to retrieve user info"})`);
+        res.send(`${callback}({"error": "Failed to retrieve user info"})`);
+        return;
       }
       
       // Create or update user
@@ -371,14 +381,17 @@ router.get('/google/callback/jsonp', (async (req: Request, res: Response) => {
         }
       };
       
-      return res.send(`${callback}(${JSON.stringify(responseData)})`);
+      res.send(`${callback}(${JSON.stringify(responseData)})`);
+      return;
     } catch (error: any) {
       console.error('JSONP OAuth error:', error.message);
-      return res.send(`${callback}({"error": "auth_failed", "message": ${JSON.stringify(error.message)}})`);
+      res.send(`${callback}({"error": "auth_failed", "message": ${JSON.stringify(error.message)}})`);
+      return;
     }
   } catch (error: any) {
     console.error('JSONP route error:', error);
-    return res.status(500).json({ error: 'Server error' });
+    res.status(500).json({ error: 'Server error' });
+    return;
   }
 }) as RequestHandler);
 
@@ -408,7 +421,7 @@ router.post('/google/callback/direct2', (async (req: Request, res: Response) => 
     });
     
     // Mock successful authentication response
-    return res.status(200).json({
+    res.status(200).json({
       success: true,
       message: 'Direct2 authentication successful',
       token: 'mock-auth-token-' + Date.now(),
@@ -418,12 +431,14 @@ router.post('/google/callback/direct2', (async (req: Request, res: Response) => 
         name: 'Mock User'
       }
     });
+    return;
   } catch (error: any) {
     console.error('Error in direct2 endpoint:', error);
-    return res.status(500).json({
+    res.status(500).json({
       error: 'Internal server error',
       message: error.message
     });
+    return;
   }
 }) as RequestHandler);
 
@@ -448,7 +463,7 @@ router.post('/google/callback/direct-alt',
       console.log('Direct-alt fallback route hit with body:', req.body);
       
       // Simple success response - no processing for now
-      return res.json({
+      res.json({
         success: true,
         message: 'Direct-alt fallback route is working!',
         token: 'sample-token-for-testing',
@@ -460,9 +475,11 @@ router.post('/google/callback/direct-alt',
         },
         time: new Date().toISOString()
       });
+      return;
     } catch (error: any) {
       console.error('Direct-alt fallback route error:', error);
-      return res.status(500).json({ error: 'Server error during authentication' });
+      res.status(500).json({ error: 'Server error during authentication' });
+      return;
     }
   }) as RequestHandler
 );
@@ -474,7 +491,8 @@ router.get('/me',
     try {
       const userId = req.user?.id;
       if (!userId) {
-        return res.status(401).json({ error: 'User not authenticated' });
+        res.status(401).json({ error: 'User not authenticated' });
+        return;
       }
 
       // Fetch user details from your database (e.g., users table)
@@ -486,13 +504,16 @@ router.get('/me',
 
       if (error || !userProfile) {
           console.error('Error fetching user profile:', error);
-          return res.status(404).json({ error: 'User profile not found' });
+          res.status(404).json({ error: 'User profile not found' });
+          return;
       }
 
       res.json(userProfile);
+      return;
     } catch (error) {
       console.error('Error fetching /me:', error);
       res.status(500).json({ error: 'Failed to fetch user profile' });
+      return;
     }
   }) as RequestHandler
 );
@@ -504,7 +525,8 @@ router.post('/logout',
     try {
         const userId = req.user?.id;
         if (!userId) {
-            return res.status(401).json({ error: 'User not authenticated' });
+            res.status(401).json({ error: 'User not authenticated' });
+            return;
         }
 
         // If storing tokens, maybe revoke them or remove them from DB
@@ -521,9 +543,11 @@ router.post('/logout',
         // Clear any session cookies if using them
 
         res.status(200).json({ message: 'Logout successful' });
+        return;
     } catch (error) {
         console.error('Logout error:', error);
         res.status(500).json({ error: 'Logout failed' });
+        return;
     }
   }) as RequestHandler
 );
@@ -550,7 +574,7 @@ router.options('/google/callback', ((req: Request, res: Response) => {
   console.log('Response headers for OPTIONS:', res.getHeaders());
   
   // Always respond with 200 OK for OPTIONS
-  return res.status(200).end();
+  res.status(200).end();
 }) as RequestHandler);
 
 // Handle OPTIONS requests for the direct2 endpoint
@@ -574,7 +598,7 @@ router.options('/google/callback/direct2', ((req: Request, res: Response) => {
   console.log('Response headers for OPTIONS:', res.getHeaders());
   
   // Always respond with 200 OK for OPTIONS
-  return res.status(200).end();
+  res.status(200).end();
 }) as RequestHandler);
 
 // Handle OPTIONS requests for the direct-alt endpoint
@@ -590,7 +614,7 @@ router.options('/google/callback/direct-alt', ((req: Request, res: Response) => 
     res.setHeader('Access-Control-Allow-Credentials', 'true');
   }
   
-  return res.status(200).end();
+  res.status(200).end();
 }) as RequestHandler);
 
 // Handle OPTIONS requests for the direct2-test endpoint
@@ -606,18 +630,18 @@ router.options('/google/callback/direct2-test', ((req: Request, res: Response) =
     res.setHeader('Access-Control-Allow-Credentials', 'true');
   }
   
-  return res.status(200).end();
+  res.status(200).end();
 }) as RequestHandler);
 
 // Catch-all route to help with debugging
-router.all('*', (req: Request, res: Response) => {
-  console.log('Hit fallback route:', req.originalUrl);
-  res.status(404).json({ 
-    error: "Route not found, but hit the auth router", 
-    path: req.originalUrl,
-    method: req.method,
-    timestamp: new Date().toISOString()
-  });
-});
+// router.all('*', (req: Request, res: Response) => {
+//   console.log('Hit fallback route:', req.originalUrl);
+//   res.status(404).json({ 
+//     error: "Route not found, but hit the auth router", 
+//     path: req.originalUrl,
+//     method: req.method,
+//     timestamp: new Date().toISOString()
+//   });
+// });
 
 export default router; 

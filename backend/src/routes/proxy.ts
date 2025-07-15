@@ -1,11 +1,11 @@
 import { Request, Response } from 'express';
 import { google } from 'googleapis';
-import { supabase } from '../config/supabase.js';
+import { supabase } from '../config/supabase';
 import { generateToken } from '../utils/jwt.js';
-import { upsertUser } from '../services/database.js';
+import { upsertUser } from '../services/database';
 
 // Emergency proxy route that can be registered directly in index.ts
-export const handleGoogleProxy = async (req: Request, res: Response) => {
+export const handleGoogleProxy = async (req: Request, res: Response): Promise<void> => {
   console.log('=================================================================');
   console.log('[PROXY] Google proxy endpoint hit:', req.path);
   console.log('[PROXY] Full URL:', req.protocol + '://' + req.get('host') + req.originalUrl);
@@ -37,7 +37,8 @@ export const handleGoogleProxy = async (req: Request, res: Response) => {
   const code = req.query.code;
   
   if (!code || typeof code !== 'string') {
-    return res.status(400).json({ error: 'Missing authorization code' });
+    res.status(400).json({ error: 'Missing authorization code' });
+    return;
   }
   
   // Use a single redirect URI to simplify the flow - must match what frontend used
@@ -105,7 +106,7 @@ export const handleGoogleProxy = async (req: Request, res: Response) => {
     // Return JSON or redirect based on the request
     if (req.headers.accept?.includes('application/json')) {
       console.log('[PROXY] Returning JSON response');
-      return res.json({
+      res.json({
         success: true,
         token,
         user: {
@@ -115,12 +116,14 @@ export const handleGoogleProxy = async (req: Request, res: Response) => {
           picture: user.picture
         }
       });
+      return;
     }
     
     // Redirect to the dashboard with the token
     const redirectUrl = (req.query.redirect as string) || 'https://www.quits.cc/dashboard';
     console.log(`[PROXY] Redirecting to: ${redirectUrl}?token=${token.substring(0, 10)}...`);
-    return res.redirect(`${redirectUrl}?token=${token}`);
+    res.redirect(`${redirectUrl}?token=${token}`);
+    return;
   } catch (error: any) {
     console.error('[PROXY] Error in Google proxy handler:', error.message);
     console.error('[PROXY] Stack trace:', error.stack);
@@ -130,7 +133,7 @@ export const handleGoogleProxy = async (req: Request, res: Response) => {
     }
     
     // Provide a detailed error response
-    return res.status(500).json({
+    res.status(500).json({
       error: 'Authentication failed',
       message: error.message,
       details: {
@@ -141,5 +144,6 @@ export const handleGoogleProxy = async (req: Request, res: Response) => {
         redirect_uri_used: redirectUri
       }
     });
+    return;
   }
 }; 

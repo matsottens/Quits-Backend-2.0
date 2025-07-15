@@ -1,10 +1,10 @@
 import express, { Request, Response, NextFunction, RequestHandler } from 'express';
 import { google, gmail_v1 } from 'googleapis';
-import { oauth2Client, gmail } from '../config/google.js';
+import { oauth2Client, gmail } from '../config/google';
 import { summarizeEmail } from '../services/gemini.js';
 import { extractSubscriptionDetails } from '../services/subscription.js';
-import { authenticateUser, AuthRequest } from '../middleware/auth.js';
-import { supabase } from '../config/supabase.js';
+import { authenticateUser, AuthRequest } from '../middleware/auth';
+import { supabase } from '../config/supabase';
 // import { genAI, generateContent } from '../services/gemini.js';
 // import { Content, Part } from '@google/generative-ai';
 
@@ -25,14 +25,15 @@ router.use(((req, res, next) => {
 // Start email scanning
 router.post('/scan', 
   authenticateUser as RequestHandler,
-  async (req: Request, res: Response) => {
+  async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = req.user?.id;
       
       if (!userId) {
-        return res.status(401).json({
+        res.status(401).json({
           error: 'Unauthorized: User ID is required'
         });
+        return;
       }
       
       // Extract Gmail token from request headers
@@ -53,17 +54,19 @@ router.post('/scan',
 
       if (checkError && checkError.code !== 'PGRST116') {
         console.error('Error checking for existing scan:', checkError);
-        return res.status(500).json({
+        res.status(500).json({
           error: 'Failed to check existing scan status'
         });
+        return;
       }
       
       if (existingScan) {
         console.log(`Scan already in progress for user ${userId}`);
-        return res.json({
+        res.json({
           message: 'Scan already in progress',
           scanId: existingScan.id
         });
+        return;
       }
       
       // Get user's OAuth tokens from database
@@ -79,9 +82,10 @@ router.post('/scan',
         
         // If we don't have stored tokens but have a header token, use that
         if (!gmailToken) {
-          return res.status(400).json({
+          res.status(400).json({
             error: 'No OAuth tokens found for user'
           });
+          return;
         }
         
         console.log('Using token from request header instead of database');
@@ -91,9 +95,10 @@ router.post('/scan',
       const accessToken = gmailToken || userTokens?.access_token;
       
       if (!accessToken && useRealData) {
-        return res.status(400).json({
+        res.status(400).json({
           error: 'No access token available for Gmail API'
         });
+        return;
       }
       
       // Create scan record in database
@@ -112,9 +117,10 @@ router.post('/scan',
 
       if (scanError) {
         console.error('Error creating scan record:', scanError);
-        return res.status(500).json({
+        res.status(500).json({
           error: 'Failed to create scan record'
         });
+        return;
       }
       
       // Start the background process to scan emails
@@ -134,17 +140,19 @@ router.post('/scan',
             });
         });
       
-      return res.json({
+      res.json({
         message: 'Email scanning started',
         scanId: scanRecord.id
       });
+      return;
       
     } catch (error) {
       console.error('Error starting email scan:', error);
-      return res.status(500).json({
+      res.status(500).json({
         error: 'Failed to start email scanning',
         details: error instanceof Error ? error.message : 'Unknown error'
       });
+      return;
     }
   }
 );
@@ -152,7 +160,7 @@ router.post('/scan',
 // Get scanning status
 router.get('/status', 
   authenticateUser as RequestHandler,
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res): Promise<void> => {
     try {
       const { data: scan, error } = await supabase
         .from('email_scans')
@@ -163,7 +171,8 @@ router.get('/status',
         .single();
 
       if (error) {
-        return res.status(404).json({ error: 'No scan found' });
+        res.status(404).json({ error: 'No scan found' });
+        return;
       }
 
       res.json({
@@ -172,9 +181,11 @@ router.get('/status',
         total_emails: scan.total_emails,
         processed_emails: scan.processed_emails
       });
+      return;
     } catch (error) {
       console.error('Error getting scan status:', error);
       res.status(500).json({ error: 'Failed to get scan status' });
+      return;
     }
   }
 );
@@ -182,7 +193,7 @@ router.get('/status',
 // Get subscription suggestions
 router.get('/suggestions', 
   authenticateUser as RequestHandler,
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res): Promise<void> => {
     try {
       const { data: suggestions, error } = await supabase
         .from('subscription_suggestions')
@@ -191,13 +202,16 @@ router.get('/suggestions',
         .eq('status', 'pending');
 
       if (error) {
-        return res.status(500).json({ error: 'Failed to get suggestions' });
+        res.status(500).json({ error: 'Failed to get suggestions' });
+        return;
       }
 
       res.json({ suggestions });
+      return;
     } catch (error) {
       console.error('Error getting suggestions:', error);
       res.status(500).json({ error: 'Failed to get suggestions' });
+      return;
     }
   }
 );
@@ -205,7 +219,7 @@ router.get('/suggestions',
 // Confirm or reject a suggestion
 router.post('/suggestions/:id/confirm', 
   authenticateUser as RequestHandler,
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res): Promise<void> => {
     try {
       const { id } = req.params;
       const { confirmed } = req.body;
@@ -219,7 +233,8 @@ router.post('/suggestions/:id/confirm',
           .single();
 
         if (suggestionError) {
-          return res.status(404).json({ error: 'Suggestion not found' });
+          res.status(404).json({ error: 'Suggestion not found' });
+          return;
         }
 
         // Add to subscriptions
@@ -236,7 +251,8 @@ router.post('/suggestions/:id/confirm',
           });
 
         if (subscriptionError) {
-          return res.status(500).json({ error: 'Failed to create subscription' });
+          res.status(500).json({ error: 'Failed to create subscription' });
+          return;
         }
       }
 
@@ -247,13 +263,16 @@ router.post('/suggestions/:id/confirm',
         .eq('id', id);
 
       if (updateError) {
-        return res.status(500).json({ error: 'Failed to update suggestion' });
+        res.status(500).json({ error: 'Failed to update suggestion' });
+        return;
       }
 
       res.json({ success: true });
+      return;
     } catch (error) {
       console.error('Error confirming suggestion:', error);
       res.status(500).json({ error: 'Failed to confirm suggestion' });
+      return;
     }
   }
 );
@@ -471,7 +490,8 @@ router.post('/test-gemini', (async (req: Request, res: Response) => {
   try {
     const { emailContent } = req.body;
     if (!emailContent) {
-      return res.status(400).json({ success: false, error: 'Missing emailContent in request body' });
+      res.status(400).json({ success: false, error: 'Missing emailContent in request body' });
+      return;
     }
 
     console.log('Testing Gemini with email content length:', emailContent.length);
@@ -501,6 +521,7 @@ router.post('/test-gemini', (async (req: Request, res: Response) => {
       contentLength: emailContent.length,
       wasTruncated: emailContent.length > 10000
     });
+    return;
   } catch (error: any) {
     console.error('Error testing Gemini:', error);
     res.status(500).json({ 
@@ -509,6 +530,7 @@ router.post('/test-gemini', (async (req: Request, res: Response) => {
       details: error.message,
       stack: process.env.NODE_ENV !== 'production' ? error.stack : undefined
     });
+    return;
   }
 }) as RequestHandler);
 
@@ -520,21 +542,24 @@ router.post('/process', (async (req: Request, res: Response) => {
     const { emailContent } = req.body;
     
     if (!emailContent) {
-      return res.status(400).json({ error: 'Email content is required' });
+      res.status(400).json({ error: 'Email content is required' });
+      return;
     }
     
     const result = await summarizeEmail(emailContent);
     
-    return res.json({
+    res.json({
       success: true,
       data: result
     });
+    return;
   } catch (error) {
     console.error('Error processing email:', error);
-    return res.status(500).json({ 
+    res.status(500).json({ 
       error: 'Failed to process email',
       details: error instanceof Error ? error.message : String(error)
     });
+    return;
   }
 }) as RequestHandler);
 
@@ -547,7 +572,5 @@ router.get('/test-connection', (req: Request, res: Response) => {
     timestamp: new Date().toISOString()
   });
 });
-
-export default router; 
 
 export default router; 
