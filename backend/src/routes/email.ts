@@ -1,10 +1,10 @@
 import express, { Request, Response, NextFunction, RequestHandler } from 'express';
 import { google, gmail_v1 } from 'googleapis';
-import { oauth2Client, gmail } from '../config/google.js';
-import { summarizeEmail } from '../services/gemini.js';
-import { extractSubscriptionDetails } from '../services/subscription.js';
-import { authenticateUser, AuthRequest } from '../middleware/auth.js';
-import { supabase } from '../config/supabase.js';
+import { oauth2Client, gmail } from '../config/google';
+import { summarizeEmail } from '../services/gemini';
+import { extractSubscriptionDetails } from '../services/subscription';
+import { authenticateUser, AuthRequest } from '../middleware/auth';
+import { supabase } from '../config/supabase';
 // import { genAI, generateContent } from '../services/gemini.js';
 // import { Content, Part } from '@google/generative-ai';
 
@@ -25,7 +25,7 @@ router.use(((req, res, next) => {
 // Start email scanning
 router.post('/scan', 
   authenticateUser as RequestHandler,
-  async (req: Request, res: Response) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const userId = req.user?.id;
       
@@ -547,7 +547,5 @@ router.get('/test-connection', (req: Request, res: Response) => {
     timestamp: new Date().toISOString()
   });
 });
-
-export default router; 
 
 export default router; 

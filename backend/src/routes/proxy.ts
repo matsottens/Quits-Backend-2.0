@@ -1,8 +1,8 @@
 import { Request, Response } from 'express';
 import { google } from 'googleapis';
-import { supabase } from '../config/supabase.js';
-import { generateToken } from '../utils/jwt.js';
-import { upsertUser } from '../services/database.js';
+import { supabase } from '../config/supabase';
+import { generateToken } from '../utils/jwt';
+import { upsertUser } from '../services/database';
 
 // Emergency proxy route that can be registered directly in index.ts
 export const handleGoogleProxy = async (req: Request, res: Response) => {
@@ -41,7 +41,7 @@ export const handleGoogleProxy = async (req: Request, res: Response) => {
   }
   
   // Use a single redirect URI to simplify the flow - must match what frontend used
-  const redirectUri = 'https://www.quits.cc/auth/callback';
+  const redirectUri = process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3000/api/auth/google/callback';
   
   try {
     console.log(`[PROXY] Using redirect URI: ${redirectUri}`);
@@ -118,7 +118,12 @@ export const handleGoogleProxy = async (req: Request, res: Response) => {
     }
     
     // Redirect to the dashboard with the token
-    const redirectUrl = (req.query.redirect as string) || 'https://www.quits.cc/dashboard';
+    let redirectUrl = (req.query.redirect as string);
+    if (!redirectUrl) {
+      redirectUrl = process.env.NODE_ENV !== 'production'
+        ? 'http://localhost:5173/dashboard'
+        : 'https://www.quits.cc/dashboard';
+    }
     console.log(`[PROXY] Redirecting to: ${redirectUrl}?token=${token.substring(0, 10)}...`);
     return res.redirect(`${redirectUrl}?token=${token}`);
   } catch (error: any) {

@@ -1,4 +1,4 @@
-import { supabase } from '../config/supabase.js';
+import { supabase } from '../config/supabase';
 
 // Create or update a user in the database
 export const upsertUser = async (userInfo) => {

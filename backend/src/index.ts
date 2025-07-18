@@ -2,28 +2,40 @@ import express, { Request, Response, NextFunction, RequestHandler } from 'expres
 import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
+import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
-import authRoutes from './routes/auth.js';
-import emailRoutes from './routes/email.js';
-import subscriptionRoutes from './routes/subscription.js';
-import { handleGoogleCallback } from './routes/googleCallback.js';
-import { handleGoogleProxy } from './routes/proxy.js';
+import authRoutes from './routes/auth';
+import emailRoutes from './routes/email';
+import subscriptionRoutes from './routes/subscription';
+import scanRoutes from './routes/scan';
+import { handleGoogleCallback } from './routes/googleCallback';
+import { handleGoogleProxy } from './routes/proxy';
 
-// Load environment variables
-dotenv.config();
-
-// __dirname is not defined in ES module scope
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// Robust dotenv loading logic
+const env = process.env.NODE_ENV || 'development';
+const envFile = `.env.${env}`;
+const envPath = fs.existsSync(path.join(__dirname, '..', envFile))
+  ? path.join(__dirname, '..', envFile)
+  : fs.existsSync(path.join(__dirname, '..', '.env'))
+    ? path.join(__dirname, '..', '.env')
+    : undefined;
+if (envPath) {
+  dotenv.config({ path: envPath });
+} else {
+  dotenv.config(); // fallback
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
 
 console.log('CLIENT_URL from env:', process.env.CLIENT_URL);
+console.log('SUPABASE_URL:', process.env.SUPABASE_URL?.slice(0, 8), '...');
+console.log('SUPABASE_ANON_KEY:', process.env.SUPABASE_ANON_KEY?.slice(0, 8), '...');
+console.log('SUPABASE_SERVICE_ROLE_KEY:', process.env.SUPABASE_SERVICE_ROLE_KEY?.slice(0, 8), '...');
 
 // Add security middleware with customized CSP
+if (process.env.NODE_ENV === 'production') {
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -43,6 +55,15 @@ app.use(helmet({
   crossOriginOpenerPolicy: false,
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
+} else {
+  // In development, use helmet without CSP
+  app.use(helmet({
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+    crossOriginOpenerPolicy: false,
+    crossOriginResourcePolicy: { policy: "cross-origin" }
+  }));
+}
 
 // Configure CORS with the cors package
 app.use(cors({
@@ -149,6 +170,7 @@ app.get('/test-oauth', (req: Request, res: Response) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/email', emailRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
+app.use('/api', scanRoutes);
 
 // Define the missing handleGoogleCallbackOptions function
 const handleGoogleCallbackOptions = (req: Request, res: Response) => {

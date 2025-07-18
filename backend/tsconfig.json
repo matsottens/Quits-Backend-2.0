@@ -1,8 +1,9 @@
 {
   "compilerOptions": {
-    "target": "es2020",
+    "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    "moduleDetection": "force",
     "esModuleInterop": true,
     "outDir": "./dist",
     "strict": false,
@@ -15,6 +16,6 @@
     "strictNullChecks": false,
     "noImplicitThis": false
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "src/types/express.d.ts"],
   "exclude": ["node_modules", "dist"]
 } 
