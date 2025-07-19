@@ -201,7 +201,7 @@ const handleGoogleCallback: RequestHandler = async (req: Request, res: Response)
         email: userInfo.email,
         name: userInfo.name,
         picture: userInfo.picture,
-        verified_email: userInfo.verified_email
+        // verified_email omitted – not present in local schema
     });
     console.log('User upserted in DB:', user.email);
 
@@ -209,13 +209,10 @@ const handleGoogleCallback: RequestHandler = async (req: Request, res: Response)
     const { error: tokenStoreError } = await supabase
       .from('user_tokens')
       .upsert({
-          user_id: user.id,
-          provider: 'google',
           access_token: tokens.access_token,
           refresh_token: tokens.refresh_token, 
-          expires_at: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,
-          scopes: tokens.scope
-      }, { onConflict: 'user_id, provider' });
+          expires_at: tokens.expiry_date || null
+      }, { onConflict: 'user_id' });
 
     if (tokenStoreError) {
         console.error('Error storing user tokens:', tokenStoreError);
@@ -362,20 +359,17 @@ router.get('/google/callback/jsonp', (async (req: Request, res: Response) => {
         email: userInfo.email,
         name: userInfo.name,
         picture: userInfo.picture,
-        verified_email: userInfo.verified_email
+        // verified_email omitted – not present in local schema
       });
       
       // Store tokens
       await supabase
         .from('user_tokens')
         .upsert({
-          user_id: user.id,
-          provider: 'google',
           access_token: tokens.access_token,
           refresh_token: tokens.refresh_token,
-          expires_at: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,
-          scopes: tokens.scope
-        }, { onConflict: 'user_id, provider' });
+          expires_at: tokens.expiry_date || null
+        }, { onConflict: 'user_id' });
       
       // Generate app token
       const appTokenPayload = { id: user.id, email: user.email };
@@ -532,8 +526,7 @@ router.post('/logout',
         const { error: deleteTokenError } = await supabase
             .from('user_tokens')
             .delete()
-            .eq('user_id', userId)
-            .eq('provider', 'google');
+            .eq('user_id', userId);
 
         if (deleteTokenError) {
             console.warn('Could not delete user tokens on logout:', deleteTokenError);

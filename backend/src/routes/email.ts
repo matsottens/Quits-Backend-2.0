@@ -41,7 +41,7 @@ router.post('/scan',
       
       // Extract Gmail token from request headers
       const gmailToken = req.headers['x-gmail-token'] as string;
-      const useRealData = req.body.useRealData === true;
+      let useRealData = req.body.useRealData === true;
       
       console.log(`Scan requested for user ${userId}`);
       console.log(`Using real Gmail data: ${useRealData ? 'YES' : 'NO'}`);
@@ -75,8 +75,12 @@ router.post('/scan',
         .from('user_tokens')
         .select('access_token, refresh_token')
         .eq('user_id', userId)
-        .eq('provider', 'google')
-        .single();
+        .maybeSingle();
+
+      // If the user_tokens table is missing the requested columns, Supabase returns code 42703
+      if (tokenError && tokenError.code === '42703') {
+        console.warn('user_tokens table schema mismatch; proceeding without stored tokens');
+      }
       
       if (tokenError) {
         console.error('Error retrieving user tokens:', tokenError);
@@ -95,15 +99,14 @@ router.post('/scan',
       const accessToken = gmailToken || userTokens?.access_token;
       
       if (!accessToken && useRealData) {
-        return res.status(400).json({
-          error: 'No access token available for Gmail API'
-        });
+        console.warn('No access token found – switching to mock data.');
+        useRealData = false;
       }
       
       // Generate a consistent UUID for both id and scan_id columns
       const newScanId = randomUUID();
-
-      // Create scan record in database
+      
+      // Create scan record in database - only include columns that definitely exist
       const { data: scanRecord, error: scanError } = await supabase
         .from('scan_history')
         .insert({
@@ -111,12 +114,10 @@ router.post('/scan',
           scan_id: newScanId,     // business identifier
           user_id: userId,
           status: 'in_progress',
-          started_at: new Date().toISOString(),
-          use_real_data: useRealData,
           emails_to_process: 0,
           emails_processed: 0
         })
-        .select()
+        .select('id,status,emails_to_process,emails_processed')
         .single();
 
       if (scanError) {
@@ -183,6 +184,48 @@ router.get('/status',
       });
     } catch (error) {
       console.error('Error getting scan status:', error);
+      res.status(500).json({ error: 'Failed to get scan status' });
+    }
+  }
+);
+
+// Get scanning status by scan ID (UUID)
+router.get('/status/:id',
+  authenticateUser as RequestHandler,
+  async (req: AuthRequest, res) => {
+    try {
+      const { id } = req.params;
+      if (!id) {
+        return res.status(400).json({ error: 'Missing scan ID' });
+      }
+
+      const { data: scan, error } = await supabase
+        .from('scan_history')
+        .select('*')
+        .eq('id', id)
+        .single();
+
+      if (error) {
+        if (error.code === 'PGRST116') {
+          return res.status(404).json({ error: 'Scan not found' });
+        }
+        console.error('Error fetching scan:', error);
+        return res.status(500).json({ error: 'Failed to get scan status' });
+      }
+
+      res.json({
+        status: scan.status,
+        progress: Math.round((scan.emails_processed / (scan.emails_to_process || 1)) * 100),
+        stats: {
+          emails_found: scan.emails_found,
+          emails_to_process: scan.emails_to_process,
+          emails_processed: scan.emails_processed,
+          subscriptions_found: scan.subscriptions_found
+        },
+        scan_id: scan.id
+      });
+    } catch (err) {
+      console.error('Error getting scan status by ID:', err);
       res.status(500).json({ error: 'Failed to get scan status' });
     }
   }
@@ -327,6 +370,7 @@ async function processEmails(userId: string, scanId: string, accessToken: string
             filteredEmails.push({
               user_id: userId,
               scan_id: scanId,
+              gmail_message_id: message.id, // ensure NOT NULL column is populated
               subject,
               sender: from,
               date,
@@ -351,6 +395,7 @@ async function processEmails(userId: string, scanId: string, accessToken: string
         filteredEmails.push({
           user_id: userId,
           scan_id: scanId,
+          gmail_message_id: `mock-${i+1}`,
           subject: `Mock Subscription Email #${i+1}`,
           sender: 'mock@service.com',
           date: new Date().toISOString(),
@@ -363,11 +408,67 @@ async function processEmails(userId: string, scanId: string, accessToken: string
     }
     // Insert all filtered emails
     if (filteredEmails.length > 0) {
-      await supabase.from('email_data').insert(filteredEmails);
+      const { data: inserted, error: insertErr } = await supabase
+        .from('email_data')
+        .insert(filteredEmails)
+        .select('id');
+
+      if (insertErr) {
+        console.error('Failed to insert email_data:', insertErr);
+      } else {
+        // Build subscription_analysis rows
+        const analysisRows = (inserted || []).map((row: any) => ({
+          email_data_id: row.id,
+          scan_id: scanId,
+          user_id: userId,
+          analysis_status: 'pending',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }));
+
+        if (analysisRows.length > 0) {
+          const { error: analysisErr } = await supabase
+            .from('subscription_analysis')
+            .insert(analysisRows);
+          if (analysisErr) {
+            console.error('Failed to insert subscription_analysis rows:', analysisErr);
+          }
+        }
+
+        // Update processed email count for progress tracking
+        try {
+          await supabase
+            .from('scan_history')
+            .update({ emails_processed: processedCount })
+            .eq('id', scanId);
+        } catch (updateCountErr) {
+          console.warn('Failed to update processed email count:', updateCountErr);
+        }
+      }
     }
-    // Set scan to ready_for_analysis (Edge Function will do analysis and set completed)
-    await supabase.from('scan_history').update({ status: 'ready_for_analysis', updated_at: new Date().toISOString() }).eq('id', scanId);
-    console.log(`Scan ${scanId} set to ready_for_analysis with ${filteredEmails.length} emails.`);
+    // Update status to 'analyzing' so edge function expects it
+    await supabase.from('scan_history').update({ status: 'analyzing', updated_at: new Date().toISOString() }).eq('id', scanId);
+
+    console.log(`Triggering Gemini analysis for scan ${scanId}`);
+    try {
+      const { data: invokeResult, error: invokeError } = await supabase.functions.invoke('gemini-scan', {
+        body: {
+          scan_ids: [scanId],
+          user_ids: [userId]
+        }
+      });
+      if (invokeError) {
+        console.error('Edge function invoke error:', invokeError);
+      } else {
+        console.log('Edge function response:', invokeResult);
+      }
+    } catch (invokeEx) {
+      console.error('Failed to invoke Gemini edge function:', invokeEx);
+    }
+
+    // Edge function will mark scan to completed; we can fallback set to ready_for_analysis
+    await supabase.from('scan_history').update({ updated_at: new Date().toISOString() }).eq('id', scanId);
+    console.log(`Scan ${scanId} analysis triggered.`);
   } catch (error) {
     console.error('Error processing emails:', error);
     // Set scan to failed

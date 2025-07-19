@@ -148,7 +148,7 @@ export const handleGoogleCallback = async (req: Request, res: Response) => {
         email: userInfo.email,
         name: userInfo.name || undefined,
         picture: userInfo.picture || undefined,
-        verified_email: userInfo.verified_email || undefined
+        // verified_email not stored in local dev schema
       });
       
       console.log('User upserted in database:', {
@@ -162,12 +162,10 @@ export const handleGoogleCallback = async (req: Request, res: Response) => {
           .from('user_tokens')
           .upsert({
             user_id: user.id,
-            provider: 'google',
             access_token: tokens.access_token,
             refresh_token: tokens.refresh_token, 
-            expires_at: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,
-            scopes: tokens.scope
-          }, { onConflict: 'user_id, provider' });
+            expires_at: tokens.expiry_date || null
+          }, { onConflict: 'user_id' });
     
         if (tokenStoreError) {
           console.error('Error storing user tokens:', tokenStoreError);

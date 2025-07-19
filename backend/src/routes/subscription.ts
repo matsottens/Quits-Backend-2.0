@@ -20,7 +20,8 @@ router.get('/', (async (req: AuthRequest, res) => {
       return res.status(500).json({ error: 'Failed to fetch subscriptions' });
     }
     
-    return res.json(subscriptions);
+    // Wrap in an object to match frontend expectation
+    return res.json({ subscriptions });
   } catch (err) {
     console.error('Error fetching subscriptions:', err);
     return res.status(500).json({ error: 'An error occurred while fetching subscriptions' });

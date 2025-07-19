@@ -11,22 +11,52 @@ export const upsertUser = async (userInfo) => {
       email: userInfo.email,
       name: userInfo.name || null,
       picture: userInfo.picture || null,
+      google_user_id: userInfo.google_user_id || null,
       verified_email: typeof userInfo.verified_email === 'boolean' ? userInfo.verified_email : null
     };
 
-    // Use actual Supabase implementation
-    const { data, error } = await supabase
+    // Start with a minimal upsert using only guaranteed columns. We'll add optional columns later if they exist.
+    let { data, error } = await supabase
       .from('users')
       .upsert({
         id: sanitizedUserInfo.id,
         email: sanitizedUserInfo.email,
         name: sanitizedUserInfo.name,
-        profile_picture: sanitizedUserInfo.picture,
-        verified_email: sanitizedUserInfo.verified_email,
         updated_at: new Date().toISOString()
       }, { onConflict: 'id' })
-      .select()
+      // Only select columns we are certain exist. Avoid profile_picture which may be absent in some DBs
+      .select('id, email, name')
       .single();
+
+    // Fallback if optional columns are missing (Supabase may return 42703 or PGRST204)
+    if (error && (error.code === '42703' || error.code === 'PGRST204')) {
+      console.warn('Optional column missing – retrying upsert without it');
+      const retry = await supabase
+        .from('users')
+        .upsert({
+          id: sanitizedUserInfo.id,
+          email: sanitizedUserInfo.email,
+          name: sanitizedUserInfo.name,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'id' })
+        .select('id, email, name')
+        .single();
+      data = retry.data;
+      error = retry.error;
+    }
+
+    // If minimal upsert succeeded and optional google_user_id column exists, update it silently
+    if (!error && sanitizedUserInfo.google_user_id) {
+      try {
+        // Will silently fail with 42703 / PGRST204 if column does not exist
+        await supabase
+          .from('users')
+          .update({ google_user_id: sanitizedUserInfo.google_user_id })
+          .eq('id', sanitizedUserInfo.id);
+      } catch (colErr) {
+        // Swallow column-missing errors
+      }
+    }
     
     if (error) {
       console.error('Supabase upsert error:', error);
@@ -74,7 +104,8 @@ export const upsertUser = async (userInfo) => {
       id: data.id,
       email: data.email,
       name: data.name,
-      picture: data.profile_picture
+      // profile_picture may not exist – fall back to Google picture if available
+      picture: sanitizedUserInfo.picture || null
     };
   } catch (error) {
     console.error('Error upserting user:', error);

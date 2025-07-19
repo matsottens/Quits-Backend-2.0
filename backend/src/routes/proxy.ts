@@ -58,7 +58,12 @@ export const handleGoogleProxy = async (req: Request, res: Response) => {
     redirectUri = buildRedirect(req.headers.origin as string);
   }
 
-  // Fallback to env or backend path (mainly production)
+  // Fallback to CLIENT_URL env if provided (common in development)
+  if (!redirectUri && process.env.CLIENT_URL) {
+    redirectUri = new URL('/auth/callback', process.env.CLIENT_URL).toString();
+  }
+
+  // Ultimate fallback to environment variable or backend path (production emergency)
   if (!redirectUri) {
     redirectUri = process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3000/api/auth/google/callback';
   }
@@ -105,18 +110,36 @@ export const handleGoogleProxy = async (req: Request, res: Response) => {
     const internalUserId = uuidv5(String(userInfo.id), USER_NAMESPACE);
 
     const user = await upsertUser({
-        id: internalUserId,
-        email: userInfo.email,
-        name: userInfo.name,
-        picture: userInfo.picture,
-        verified_email: userInfo.verified_email
+      id: internalUserId,
+      email: userInfo.email,
+      name: userInfo.name,
+      picture: userInfo.picture
     });
     
     console.log('[PROXY] User upserted in database:', {
       id: user.id,
       email: user.email
     });
-    
+
+    // Store tokens in Supabase so that background email scans can use them later
+    try {
+      const { error: tokenStoreError } = await supabase
+        .from('user_tokens')
+        .upsert({
+          user_id: user.id,
+          access_token: tokens.access_token,
+          refresh_token: tokens.refresh_token,
+          expires_at: tokens.expiry_date || null
+        }, { onConflict: 'user_id' });
+
+      if (tokenStoreError) {
+        console.error('[PROXY] Error storing user tokens:', tokenStoreError);
+      }
+    } catch (storeError) {
+      console.error('[PROXY] Failed to store tokens:', storeError);
+      // Continue even if token storage fails
+    }
+
     // Generate token with a fallback JWT secret if needed
     const jwtSecret = process.env.JWT_SECRET || 'quits-jwt-secret-key-development';
     console.log('[PROXY] Using JWT secret:', jwtSecret.substring(0, 3) + '...');
