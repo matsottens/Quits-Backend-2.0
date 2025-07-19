@@ -2,6 +2,11 @@ import { Request, Response, NextFunction } from 'express';
 import { verifyToken } from '../utils/jwt';
 
 export interface AuthRequest extends Request {
+  // Explicitly specify common properties so TypeScript recognises them even with strict express@5 typings
+  headers: any;   // IncomingHttpHeaders
+  body: any;
+  params: any;
+  query: any;
   user?: {
     id: string;
     email: string;
