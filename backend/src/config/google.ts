@@ -10,7 +10,11 @@ const {
 } = process.env;
 
 if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
-  throw new Error('Missing Google OAuth environment variables');
+  if (NODE_ENV === 'production') {
+    throw new Error('Missing Google OAuth environment variables');
+  } else {
+    console.warn('Warning: Missing Google OAuth environment variables – Google login will be disabled in development.');
+  }
 }
 
 // Initialize OAuth2 client

@@ -56,6 +56,14 @@ router.get('/verify', (req: Request, res: Response) => {
   res.json({ success: true, message: 'Auth verify endpoint is working!' });
 });
 
+// Return info about the currently authenticated user
+router.get('/me', authenticateUser as RequestHandler, (req: AuthRequest, res: Response) => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  res.json({ id: req.user.id, email: req.user.email });
+});
+
 // Get Google OAuth URL
 router.get('/google', (req: Request, res: Response) => {
   try {

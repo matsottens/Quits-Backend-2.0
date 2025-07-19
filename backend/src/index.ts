@@ -14,11 +14,16 @@ import { handleGoogleProxy } from './routes/proxy';
 // Robust dotenv loading logic
 const env = process.env.NODE_ENV || 'development';
 const envFile = `.env.${env}`;
-const envPath = fs.existsSync(path.join(__dirname, '..', envFile))
+let envPath = fs.existsSync(path.join(__dirname, '..', envFile))
   ? path.join(__dirname, '..', envFile)
   : fs.existsSync(path.join(__dirname, '..', '.env'))
     ? path.join(__dirname, '..', '.env')
     : undefined;
+
+// Fallback: look two levels up (project root) for a generic .env
+if (!envPath && fs.existsSync(path.join(__dirname, '..', '..', '.env'))) {
+  envPath = path.join(__dirname, '..', '..', '.env');
+}
 if (envPath) {
   dotenv.config({ path: envPath });
 } else {
@@ -30,9 +35,10 @@ const PORT = process.env.PORT || 3000;
 const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
 
 console.log('CLIENT_URL from env:', process.env.CLIENT_URL);
-console.log('SUPABASE_URL:', process.env.SUPABASE_URL?.slice(0, 8), '...');
-console.log('SUPABASE_ANON_KEY:', process.env.SUPABASE_ANON_KEY?.slice(0, 8), '...');
-console.log('SUPABASE_SERVICE_ROLE_KEY:', process.env.SUPABASE_SERVICE_ROLE_KEY?.slice(0, 8), '...');
+console.log('SUPABASE_URL:', process.env.SUPABASE_URL);
+console.log('SUPABASE_SERVICE_KEY:', process.env.SUPABASE_SERVICE_KEY);
+console.log('SUPABASE_SERVICE_ROLE_KEY:', process.env.SUPABASE_SERVICE_ROLE_KEY);
+console.log('SUPABASE_ANON_KEY:', process.env.SUPABASE_ANON_KEY);
 
 // Add security middleware with customized CSP
 if (process.env.NODE_ENV === 'production') {

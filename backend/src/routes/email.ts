@@ -1,4 +1,10 @@
 import express, { Request, Response, NextFunction, RequestHandler } from 'express';
+import { randomUUID } from 'crypto';
+import { v5 as uuidv5 } from 'uuid';
+
+// Fixed, non-random namespace UUID (arbitrary) for deriving deterministic UUIDs from Google IDs
+const USER_NAMESPACE = '5e2f6d9e-b3b5-4d1b-9f2c-111111111111';
+
 import { google, gmail_v1 } from 'googleapis';
 import { oauth2Client, gmail } from '../config/google';
 import { summarizeEmail } from '../services/gemini';
@@ -30,9 +36,7 @@ router.post('/scan',
       const userId = req.user?.id;
       
       if (!userId) {
-        return res.status(401).json({
-          error: 'Unauthorized: User ID is required'
-        });
+        return res.status(401).json({ error: 'Unauthorized: User ID is required' });
       }
       
       // Extract Gmail token from request headers
@@ -45,7 +49,7 @@ router.post('/scan',
       
       // Check if a scan is already in progress
       const { data: existingScan, error: checkError } = await supabase
-        .from('email_scans')
+        .from('scan_history')
         .select('id, status')
         .eq('user_id', userId)
         .eq('status', 'in_progress')
@@ -96,16 +100,21 @@ router.post('/scan',
         });
       }
       
+      // Generate a consistent UUID for both id and scan_id columns
+      const newScanId = randomUUID();
+
       // Create scan record in database
       const { data: scanRecord, error: scanError } = await supabase
-        .from('email_scans')
+        .from('scan_history')
         .insert({
+          id: newScanId,          // primary key
+          scan_id: newScanId,     // business identifier
           user_id: userId,
           status: 'in_progress',
           started_at: new Date().toISOString(),
           use_real_data: useRealData,
-          total_emails: 0,
-          processed_emails: 0
+          emails_to_process: 0,
+          emails_processed: 0
         })
         .select()
         .single();
@@ -122,7 +131,7 @@ router.post('/scan',
         .catch(err => {
           console.error('Background email processing error:', err);
           supabase
-            .from('email_scans')
+            .from('scan_history')
             .update({
               status: 'failed',
               error_message: err.message,
@@ -155,7 +164,7 @@ router.get('/status',
   async (req: AuthRequest, res) => {
     try {
       const { data: scan, error } = await supabase
-        .from('email_scans')
+        .from('scan_history')
         .select('*')
         .eq('user_id', req.user?.id)
         .order('created_at', { ascending: false })
@@ -168,9 +177,9 @@ router.get('/status',
 
       res.json({
         status: scan.status,
-        progress: Math.round((scan.processed_emails / scan.total_emails) * 100),
-        total_emails: scan.total_emails,
-        processed_emails: scan.processed_emails
+        progress: Math.round((scan.emails_processed / scan.emails_to_process) * 100),
+        total_emails: scan.emails_to_process,
+        processed_emails: scan.emails_processed
       });
     } catch (error) {
       console.error('Error getting scan status:', error);
@@ -280,11 +289,11 @@ async function processEmails(userId: string, scanId: string, accessToken: string
       });
       const messages = messageList.data.messages || [];
       totalEmails = messages.length;
-      await supabase.from('email_scans').update({ total_emails: totalEmails }).eq('id', scanId);
+      await supabase.from('scan_history').update({ emails_to_process: totalEmails }).eq('id', scanId);
       if (messages.length === 0) {
         console.log('No matching emails found');
         // Set scan to ready_for_analysis anyway (Edge Function will see no emails)
-        await supabase.from('email_scans').update({ status: 'ready_for_analysis', updated_at: new Date().toISOString() }).eq('id', scanId);
+        await supabase.from('scan_history').update({ status: 'ready_for_analysis', updated_at: new Date().toISOString() }).eq('id', scanId);
         return;
       }
       for (const message of messages) {
@@ -337,7 +346,7 @@ async function processEmails(userId: string, scanId: string, accessToken: string
       await new Promise(resolve => setTimeout(resolve, 3000));
       const mockEmails = 20;
       totalEmails = mockEmails;
-      await supabase.from('email_scans').update({ total_emails: totalEmails }).eq('id', scanId);
+      await supabase.from('scan_history').update({ emails_to_process: totalEmails }).eq('id', scanId);
       for (let i = 0; i < mockEmails; i++) {
         filteredEmails.push({
           user_id: userId,
@@ -357,12 +366,12 @@ async function processEmails(userId: string, scanId: string, accessToken: string
       await supabase.from('email_data').insert(filteredEmails);
     }
     // Set scan to ready_for_analysis (Edge Function will do analysis and set completed)
-    await supabase.from('email_scans').update({ status: 'ready_for_analysis', updated_at: new Date().toISOString() }).eq('id', scanId);
+    await supabase.from('scan_history').update({ status: 'ready_for_analysis', updated_at: new Date().toISOString() }).eq('id', scanId);
     console.log(`Scan ${scanId} set to ready_for_analysis with ${filteredEmails.length} emails.`);
   } catch (error) {
     console.error('Error processing emails:', error);
     // Set scan to failed
-    await supabase.from('email_scans').update({ status: 'failed', updated_at: new Date().toISOString(), error_message: error instanceof Error ? error.message : String(error) }).eq('id', scanId);
+    await supabase.from('scan_history').update({ status: 'failed', updated_at: new Date().toISOString(), error_message: error instanceof Error ? error.message : String(error) }).eq('id', scanId);
   }
 }
 

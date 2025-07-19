@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { supabase } from '../config/supabase';
+import { verifyToken } from '../utils/jwt';
 
 export interface AuthRequest extends Request {
   user?: {
@@ -19,20 +19,14 @@ export const authenticateUser = async (req: AuthRequest, res: Response, next: Ne
   }
 
   try {
-    // Verify the token with Supabase
-    const { data: { user }, error } = await supabase.auth.getUser(token);
-
-    if (error || !user) {
-      console.error('Token verification error:', error);
+    const payload: any = await verifyToken(token);
+    if (!payload || !payload.id) {
       return res.status(403).json({ error: 'Invalid token' });
     }
 
-    // Set user data in request
     req.user = {
-      id: user.id,
-      email: user.email || '',
-      name: user.user_metadata?.name,
-      avatar_url: user.user_metadata?.avatar_url
+      id: payload.id,
+      email: payload.email || ''
     };
 
     next();

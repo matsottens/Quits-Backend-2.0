@@ -8,7 +8,11 @@
     "build": "cd backend && npm install && npm run build",
     "start": "node api/index.js",
     "verify-modules": "node verify-modules.js",
-    "predeploy": "npm run verify-modules"
+    "predeploy": "npm run verify-modules",
+    "prepare-local": "node scripts/prepare-env.js",
+    "dev": "npm run prepare-local && concurrently \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev"
   },
   "engines": {
     "node": ">=18.x"
@@ -22,5 +26,8 @@
     "googleapis": "^130.0.0",
     "jsonwebtoken": "^9.0.2",
     "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "concurrently": "^8.0.1"
   }
 }
