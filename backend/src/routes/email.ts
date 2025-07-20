@@ -211,10 +211,10 @@ router.get('/status',
 
           if (!error && userRecord?.id) {
             ({ data: scan, error } = await supabase
-              .from('scan_history')
-              .select('*')
+        .from('scan_history')
+        .select('*')
               .eq('user_id', userRecord.id)
-              .order('created_at', { ascending: false })
+        .order('created_at', { ascending: false })
               .limit(1)
               .single());
           }

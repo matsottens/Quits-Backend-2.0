@@ -1774,10 +1774,10 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
               console.log('SCAN-DEBUG: Completing scan automatically since pattern matching detected subscriptions');
               
               // Keep scan in ready_for_analysis; do not mark completed automatically
-              await updateScanStatus(scanId, userId, {
+    await updateScanStatus(scanId, userId, {
                 status: 'ready_for_analysis',
-                updated_at: new Date().toISOString()
-              });
+      updated_at: new Date().toISOString()
+    });
               console.log('SCAN-DEBUG: Scan left in ready_for_analysis via fallback; trigger will handle completion');
             } else {
               console.log('SCAN-DEBUG: Scan status changed, no fallback needed');
