@@ -242,6 +242,7 @@ export default async function handler(req, res) {
 
           const token = jwt.default.sign(
             {
+              sub: internalId, // The 'sub' (subject) claim is used by Supabase as auth.uid()
               id: internalId,
               email: userInfo.email,
               name: userInfo.name,
