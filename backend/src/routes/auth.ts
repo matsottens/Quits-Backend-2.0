@@ -197,7 +197,7 @@ const handleGoogleCallback: RequestHandler = async (req: Request, res: Response)
 
     // Create or update user in database
     const user = await upsertUser({
-        id: userInfo.id,
+        google_id: userInfo.id,
         email: userInfo.email,
         name: userInfo.name,
         picture: userInfo.picture,
@@ -355,7 +355,7 @@ router.get('/google/callback/jsonp', (async (req: Request, res: Response) => {
       
       // Create or update user
       const user = await upsertUser({
-        id: userInfo.id,
+        google_id: userInfo.id,
         email: userInfo.email,
         name: userInfo.name,
         picture: userInfo.picture,

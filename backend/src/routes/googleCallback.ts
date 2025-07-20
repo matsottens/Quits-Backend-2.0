@@ -144,7 +144,7 @@ export const handleGoogleCallback = async (req: Request, res: Response) => {
   
       // Create or update user in database
       const user = await upsertUser({
-        id: userInfo.id,
+        google_id: userInfo.id,
         email: userInfo.email,
         name: userInfo.name || undefined,
         picture: userInfo.picture || undefined,

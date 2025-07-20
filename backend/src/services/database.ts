@@ -5,29 +5,31 @@ export const upsertUser = async (userInfo: any) => {
   try {
     console.log('Upserting user:', userInfo.email);
 
-    // Ensure that optional fields are properly handled
-    const sanitizedUserInfo = {
-      id: userInfo.id,
+    // Prepare user fields – only include defined properties to avoid Supabase null/undefined issues
+    const sanitizedUserInfo: any = {
       email: userInfo.email,
       name: userInfo.name || null,
-      avatar_url: userInfo.picture || null, // Use avatar_url which matches the actual schema
-      google_id: userInfo.google_id || userInfo.id || null, // Use google_id which exists in schema
-      // maintain legacy property to satisfy other code paths
+      avatar_url: userInfo.picture || null,
+      google_id: userInfo.google_id || (userInfo.id && !/^[0-9a-fA-F-]{36}$/.test(userInfo.id) ? userInfo.id : null),
+      // maintain legacy picture property for callers that still expect it
       picture: userInfo.picture || null,
-      verified_email: typeof userInfo.verified_email === 'boolean' ? userInfo.verified_email : null
+      verified_email: typeof userInfo.verified_email === 'boolean' ? userInfo.verified_email : null,
     };
 
-    // Try full upsert first with all columns including google_user_id and google_id
+    // If caller provided a valid UUID, keep it so we can upsert on primary key
+    if (userInfo.id && /^[0-9a-fA-F-]{36}$/.test(userInfo.id)) {
+      sanitizedUserInfo.id = userInfo.id;
+    }
+
+    // Decide which column to use for conflict resolution
+    const conflictTarget = sanitizedUserInfo.id ? 'id' : sanitizedUserInfo.google_id ? 'google_id' : 'email';
+
     let { data, error } = await supabase
       .from('users')
       .upsert({
-        id: sanitizedUserInfo.id,
-        email: sanitizedUserInfo.email,
-        name: sanitizedUserInfo.name,
-        avatar_url: sanitizedUserInfo.avatar_url,
-        google_id: sanitizedUserInfo.google_id,
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'id' })
+        ...sanitizedUserInfo,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: conflictTarget })
       .select('id, email, name, avatar_url, google_id')
       .single();
 

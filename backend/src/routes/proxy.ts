@@ -2,10 +2,9 @@ import { Request, Response } from 'express';
 import { google } from 'googleapis';
 import { supabase } from '../config/supabase';
 import { generateToken } from '../utils/jwt';
-import { v5 as uuidv5 } from 'uuid';
 import { upsertUser } from '../services/database';
 
-const USER_NAMESPACE = '5e2f6d9e-b3b5-4d1b-9f2c-111111111111';
+// (User namespace no longer needed – relying on Supabase UUIDs)
 
 // Emergency proxy route that can be registered directly in index.ts
 export const handleGoogleProxy = async (req: Request, res: Response) => {
@@ -106,16 +105,13 @@ export const handleGoogleProxy = async (req: Request, res: Response) => {
       throw new Error('Failed to retrieve user information');
     }
     
-    // Create/update user
-    const internalUserId = uuidv5(String(userInfo.id), USER_NAMESPACE);
-
+    // Create or update user – rely on Supabase to generate or fetch internal UUID
     const user = await upsertUser({
-      id: internalUserId,
+      google_id: userInfo.id,
       email: userInfo.email,
       name: userInfo.name,
       picture: userInfo.picture
     });
-    
     console.log('[PROXY] User upserted in database:', {
       id: user.id,
       email: user.email
@@ -140,11 +136,8 @@ export const handleGoogleProxy = async (req: Request, res: Response) => {
       // Continue even if token storage fails
     }
 
-    // Generate token with a fallback JWT secret if needed
-    const jwtSecret = process.env.JWT_SECRET || 'quits-jwt-secret-key-development';
-    console.log('[PROXY] Using JWT secret:', jwtSecret.substring(0, 3) + '...');
-    
-    const token = await generateToken({ id: internalUserId, email: user.email });
+    // Generate token
+    const token = await generateToken({ id: user.id, email: user.email });
     console.log('[PROXY] Generated JWT token');
     
     // Return JSON or redirect based on the request

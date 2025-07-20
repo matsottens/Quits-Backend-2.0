@@ -79,7 +79,7 @@ export default async function handler(req, res) {
           // First, we need to look up the database user ID using google_id or email
           // This is a workaround for the UUID type mismatch
           const userLookupResponse = await fetch(
-            `${supabaseUrl}/rest/v1/users?select=id,email,google_id&or=(email.eq.${encodeURIComponent(decoded.email)},google_id.eq.${encodeURIComponent(userId)})`, 
+            `${supabaseUrl}/rest/v1/users?select=id,email,google_id&or=(email.eq.${encodeURIComponent(decoded.email)},google_id.eq.${encodeURIComponent(userId)},id.eq.${encodeURIComponent(userId)})`, 
             {
               method: 'GET',
               headers: {
@@ -515,7 +515,7 @@ export default async function handler(req, res) {
       try {
         // First, we need to look up the database user ID using google_id or email
         const userLookupResponse = await fetch(
-          `${supabaseUrl}/rest/v1/users?select=id,email,google_id&or=(email.eq.${encodeURIComponent(decoded.email)},google_id.eq.${encodeURIComponent(userId)})`, 
+          `${supabaseUrl}/rest/v1/users?select=id,email,google_id&or=(email.eq.${encodeURIComponent(decoded.email)},google_id.eq.${encodeURIComponent(userId)},id.eq.${encodeURIComponent(userId)})`, 
           {
             method: 'GET',
             headers: {

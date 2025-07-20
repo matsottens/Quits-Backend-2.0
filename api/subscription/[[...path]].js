@@ -81,7 +81,7 @@ export default async function handler(req, res) {
       // First, look up the database user ID
       try {
         const userLookupResponse = await fetch(
-          `${supabaseUrl}/rest/v1/users?select=id,email,google_id&or=(email.eq.${encodeURIComponent(decoded.email)},google_id.eq.${encodeURIComponent(userId)})`, 
+          `${supabaseUrl}/rest/v1/users?select=id,email,google_id&or=(email.eq.${encodeURIComponent(decoded.email)},google_id.eq.${encodeURIComponent(userId)},id.eq.${encodeURIComponent(userId)})`, 
           {
             method: 'GET',
             headers: {
