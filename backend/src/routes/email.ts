@@ -164,14 +164,22 @@ router.get('/status',
   authenticateUser as RequestHandler,
   async (req: AuthRequest, res) => {
     try {
-      const { data: scan, error } = await supabase
+      // Optional legacy parameter ?scanId=scan_xxx
+      const requestedId = typeof req.query.scanId === 'string' ? req.query.scanId : null;
+
+      const query = supabase
         .from('scan_history')
         .select('*')
         .eq('user_id', req.user?.id)
         .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
+        .limit(1);
 
+      if (requestedId) {
+        // for legacy IDs scan_id column stores the value
+        query.eq('scan_id', requestedId);
+      }
+
+      const { data: scan, error } = await query.single();
       if (error) {
         return res.status(404).json({ error: 'No scan found' });
       }
@@ -180,7 +188,8 @@ router.get('/status',
         status: scan.status,
         progress: Math.round((scan.emails_processed / scan.emails_to_process) * 100),
         total_emails: scan.emails_to_process,
-        processed_emails: scan.emails_processed
+        processed_emails: scan.emails_processed,
+        scan_id: scan.scan_id || scan.id
       });
     } catch (error) {
       console.error('Error getting scan status:', error);
