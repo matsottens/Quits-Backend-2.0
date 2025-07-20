@@ -1,7 +1,7 @@
 import { supabase } from '../config/supabase';
 
 // Create or update a user in the database
-export const upsertUser = async (userInfo) => {
+export const upsertUser = async (userInfo: any) => {
   try {
     console.log('Upserting user:', userInfo.email);
 
@@ -66,7 +66,7 @@ export const upsertUser = async (userInfo) => {
         id: sanitizedUserInfo.id,
         email: sanitizedUserInfo.email,
         name: sanitizedUserInfo.name || 'User',
-        picture: sanitizedUserInfo.picture || null
+        picture: sanitizedUserInfo.avatar_url || null
       };
     }
 
