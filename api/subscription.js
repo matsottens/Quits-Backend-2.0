@@ -13,6 +13,11 @@ const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
 const supabaseKey = supabaseServiceRoleKey || supabaseServiceKey;
 
+// Use caller JWT if provided, else fall back to service/anon key – needed for RLS on Vercel
+const AUTH_HEADER = req.headers && req.headers.authorization ? req.headers.authorization : `Bearer ${supabaseKey}`;
+// Use service-role key for inserts if we have it; otherwise fall back to caller JWT
+const INSERT_AUTH = supabaseKey && supabaseKey.includes('service_role') ? `Bearer ${supabaseKey}` : AUTH_HEADER;
+
 console.log(`Supabase URL defined: ${!!supabaseUrl}`);
 console.log(`Supabase key defined: ${!!supabaseKey}`);
 console.log(`Using SUPABASE_SERVICE_ROLE_KEY: ${!!supabaseServiceRoleKey}`);
@@ -79,12 +84,12 @@ export default async function handler(req, res) {
           // First, we need to look up the database user ID using google_id or email
           // This is a workaround for the UUID type mismatch
           const userLookupResponse = await fetch(
-            `${supabaseUrl}/rest/v1/users?select=id,email,google_id&or=(email.eq.${encodeURIComponent(decoded.email)},google_id.eq.${encodeURIComponent(userId)})`, 
+            `${supabaseUrl}/rest/v1/users?select=id,email,google_id&or=(email.eq.${encodeURIComponent(decoded.email)},google_id.eq.${encodeURIComponent(userId)},id.eq.${encodeURIComponent(userId)})`, 
             {
               method: 'GET',
               headers: {
                 'apikey': supabaseKey,
-                'Authorization': `Bearer ${supabaseKey}`,
+                'Authorization': AUTH_HEADER,
                 'Content-Type': 'application/json'
               }
             }
@@ -123,7 +128,7 @@ export default async function handler(req, res) {
                 method: 'POST',
                 headers: {
                   'apikey': supabaseKey,
-                  'Authorization': `Bearer ${supabaseKey}`,
+                  'Authorization': AUTH_HEADER,
                   'Content-Type': 'application/json',
                   'Prefer': 'return=representation'
                 },
@@ -162,7 +167,7 @@ export default async function handler(req, res) {
                     method: 'POST',
                     headers: {
                       'apikey': supabaseKey,
-                      'Authorization': `Bearer ${supabaseKey}`,
+                      'Authorization': INSERT_AUTH,
                       'Content-Type': 'application/json',
                       'Prefer': 'return=representation'
                     },
@@ -211,7 +216,7 @@ export default async function handler(req, res) {
                       method: 'PATCH',
                       headers: {
                         'apikey': supabaseKey,
-                        'Authorization': `Bearer ${supabaseKey}`,
+                        'Authorization': AUTH_HEADER,
                         'Content-Type': 'application/json'
                       },
                       body: JSON.stringify({
@@ -265,7 +270,7 @@ export default async function handler(req, res) {
                           method: 'POST',
                           headers: {
                             'apikey': supabaseKey,
-                            'Authorization': `Bearer ${supabaseKey}`,
+                            'Authorization': AUTH_HEADER,
                             'Content-Type': 'application/json',
                             'Prefer': 'return=representation'
                           },
@@ -297,7 +302,7 @@ export default async function handler(req, res) {
                           method: 'PATCH',
                           headers: {
                             'apikey': supabaseKey,
-                            'Authorization': `Bearer ${supabaseKey}`,
+                            'Authorization': AUTH_HEADER,
                             'Content-Type': 'application/json'
                           },
                           body: JSON.stringify({
@@ -323,7 +328,7 @@ export default async function handler(req, res) {
                       method: 'PATCH',
                       headers: {
                         'apikey': supabaseKey,
-                        'Authorization': `Bearer ${supabaseKey}`,
+                        'Authorization': AUTH_HEADER,
                         'Content-Type': 'application/json'
                       },
                       body: JSON.stringify({
@@ -346,7 +351,43 @@ export default async function handler(req, res) {
                 // Continue with user creation even if email reading fails
               }
             } else {
-              console.log('No Gmail token provided, skipping email reading for new user');
+              console.log('No Gmail token provided – creating placeholder scan record');
+
+              try {
+                const placeholderRes = await fetch(
+                  `${supabaseUrl}/rest/v1/scan_history`,
+                  {
+                    method: 'POST',
+                    headers: {
+                      'apikey': supabaseKey,
+                      'Authorization': INSERT_AUTH,
+                      'Content-Type': 'application/json',
+                      'Prefer': 'return=representation'
+                    },
+                    body: JSON.stringify({
+                      scan_id: `scan_${Date.now()}_${dbUserId}`,
+                      user_id: dbUserId,
+                      status: 'pending',
+                      progress: 0,
+                      emails_found: 0,
+                      emails_to_process: 0,
+                      emails_processed: 0,
+                      emails_scanned: 0,
+                      subscriptions_found: 0,
+                      created_at: new Date().toISOString(),
+                      updated_at: new Date().toISOString()
+                    })
+                  }
+                );
+                if (placeholderRes.ok) {
+                  const createdScan = await placeholderRes.json();
+                  console.log('Placeholder scan created with ID:', createdScan[0].scan_id);
+                } else {
+                  console.error('Failed to create placeholder scan:', await placeholderRes.text());
+                }
+              } catch (phErr) {
+                console.error('Error creating placeholder scan:', phErr);
+              }
             }
 
             // No longer create mock subscription - real analysis will provide actual subscriptions
@@ -362,7 +403,7 @@ export default async function handler(req, res) {
               method: 'GET',
               headers: {
                 'apikey': supabaseKey,
-                'Authorization': `Bearer ${supabaseKey}`,
+                'Authorization': AUTH_HEADER,
                 'Content-Type': 'application/json'
               }
             }
@@ -382,7 +423,7 @@ export default async function handler(req, res) {
               method: 'GET',
               headers: {
                 'apikey': supabaseKey,
-                'Authorization': `Bearer ${supabaseKey}`,
+                'Authorization': AUTH_HEADER,
                 'Content-Type': 'application/json'
               }
             }
@@ -514,13 +555,19 @@ export default async function handler(req, res) {
       
       try {
         // First, we need to look up the database user ID using google_id or email
+        // Build dynamic OR filter similar to path handler
+        const filters2 = [`email.eq.${encodeURIComponent(decoded.email)}`];
+        if (userId && /^[0-9a-fA-F-]{36}$/.test(userId)) {
+          filters2.push(`id.eq.${encodeURIComponent(userId)}`);
+          filters2.push(`google_id.eq.${encodeURIComponent(userId)}`);
+        }
         const userLookupResponse = await fetch(
-          `${supabaseUrl}/rest/v1/users?select=id,email,google_id&or=(email.eq.${encodeURIComponent(decoded.email)},google_id.eq.${encodeURIComponent(userId)})`, 
+          `${supabaseUrl}/rest/v1/users?select=id,email,google_id&or=(${filters2.join(',')})`, 
           {
             method: 'GET',
             headers: {
               'apikey': supabaseKey,
-              'Authorization': `Bearer ${supabaseKey}`,
+              'Authorization': AUTH_HEADER,
               'Content-Type': 'application/json'
             }
           }
@@ -546,7 +593,7 @@ export default async function handler(req, res) {
               method: 'POST',
               headers: {
                 'apikey': supabaseKey,
-                'Authorization': `Bearer ${supabaseKey}`,
+                'Authorization': AUTH_HEADER,
                 'Content-Type': 'application/json',
                 'Prefer': 'return=representation'
               },
@@ -582,7 +629,7 @@ export default async function handler(req, res) {
             method: 'POST',
             headers: {
               'apikey': supabaseKey,
-              'Authorization': `Bearer ${supabaseKey}`,
+              'Authorization': AUTH_HEADER,
               'Content-Type': 'application/json',
               'Prefer': 'return=representation'
             },

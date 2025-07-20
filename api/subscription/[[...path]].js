@@ -80,8 +80,23 @@ export default async function handler(req, res) {
       
       // First, look up the database user ID
       try {
+        // Build dynamic OR filter to avoid passing non-UUID google IDs to a uuid column
+        const filters = [
+          `email.eq.${encodeURIComponent(decoded.email)}`
+        ];
+        // Add id filter (internal UUID)
+        if (userId && /^[0-9a-fA-F-]{36}$/.test(userId)) {
+          filters.push(`id.eq.${encodeURIComponent(userId)}`);
+        }
+        // Only include google_id filter if it looks like a UUID (Supabase column type is uuid)
+        if (userId && /^[0-9a-fA-F-]{36}$/.test(userId)) {
+          filters.push(`google_id.eq.${encodeURIComponent(userId)}`);
+        }
+
+        const filterString = filters.join(',');
+
         const userLookupResponse = await fetch(
-          `${supabaseUrl}/rest/v1/users?select=id,email,google_id&or=(email.eq.${encodeURIComponent(decoded.email)},google_id.eq.${encodeURIComponent(userId)})`, 
+          `${supabaseUrl}/rest/v1/users?select=id,email,google_id&or=(${filterString})`, 
           {
             method: 'GET',
             headers: {

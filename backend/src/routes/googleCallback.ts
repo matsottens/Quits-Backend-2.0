@@ -1,8 +1,8 @@
 import { Request, Response } from 'express';
 import { google } from 'googleapis';
-import { supabase } from '../config/supabase.js';
-import { generateToken } from '../utils/jwt.js';
-import { upsertUser } from '../services/database.js';
+import { supabase } from '../config/supabase';
+import { generateToken } from '../utils/jwt';
+import { upsertUser } from '../services/database';
 
 // Handle OPTIONS requests for the Google callback endpoint
 export const handleGoogleCallbackOptions = (req: Request, res: Response) => {
@@ -34,6 +34,7 @@ export const handleGoogleCallback = async (req: Request, res: Response) => {
   console.log('Full URL:', req.protocol + '://' + req.get('host') + req.originalUrl);
   console.log('Headers:', JSON.stringify(req.headers, null, 2));
   console.log('Query params:', JSON.stringify(req.query, null, 2));
+  console.log('GOOGLE_REDIRECT_URI from env:', process.env.GOOGLE_REDIRECT_URI);
   
   try {
     // Extract request parameters
@@ -143,11 +144,11 @@ export const handleGoogleCallback = async (req: Request, res: Response) => {
   
       // Create or update user in database
       const user = await upsertUser({
-        id: userInfo.id,
+        google_id: userInfo.id,
         email: userInfo.email,
         name: userInfo.name || undefined,
         picture: userInfo.picture || undefined,
-        verified_email: userInfo.verified_email || undefined
+        // verified_email not stored in local dev schema
       });
       
       console.log('User upserted in database:', {
@@ -161,12 +162,10 @@ export const handleGoogleCallback = async (req: Request, res: Response) => {
           .from('user_tokens')
           .upsert({
             user_id: user.id,
-            provider: 'google',
             access_token: tokens.access_token,
             refresh_token: tokens.refresh_token, 
-            expires_at: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,
-            scopes: tokens.scope
-          }, { onConflict: 'user_id, provider' });
+            expires_at: tokens.expiry_date || null
+          }, { onConflict: 'user_id' });
     
         if (tokenStoreError) {
           console.error('Error storing user tokens:', tokenStoreError);
@@ -189,7 +188,7 @@ export const handleGoogleCallback = async (req: Request, res: Response) => {
             id: user.id,
             email: user.email,
             name: user.name,
-            picture: user.picture
+            picture: user.avatar_url
           }
         };
         console.log('Sending JSONP response');
@@ -205,7 +204,7 @@ export const handleGoogleCallback = async (req: Request, res: Response) => {
             id: user.id,
             email: user.email,
             name: user.name,
-            picture: user.picture
+            picture: user.avatar_url
           }
         });
       }
@@ -292,12 +291,10 @@ function getFrontendUrl(
       // Invalid URL format
     }
   }
-  
   // If origin header provided
   if (originHeader) {
     return originHeader;
   }
-  
   // If referer header provided
   if (refererHeader) {
     try {
@@ -307,8 +304,10 @@ function getFrontendUrl(
       // Invalid URL format
     }
   }
-  
   // Default frontend URL
+  if (process.env.NODE_ENV !== 'production') {
+    return 'http://localhost:5173';
+  }
   return 'https://www.quits.cc';
 }
 
@@ -321,7 +320,9 @@ function getRedirectUrl(redirectParam?: string): string {
     }
     return redirectParam;
   }
-  
   // Default dashboard URL
+  if (process.env.NODE_ENV !== 'production') {
+    return 'http://localhost:5173/dashboard';
+  }
   return 'https://www.quits.cc/dashboard';
 } 

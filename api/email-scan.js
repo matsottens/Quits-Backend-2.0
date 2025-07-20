@@ -1281,7 +1281,7 @@ const storeSubscriptionExample = async (sender, subject, analysisResult) => {
 };
 
 // Function to create a scan record
-const createScanRecord = async (userId, decoded) => {
+const createScanRecord = async (req, userId, decoded) => {
   console.log('SCAN-DEBUG: Creating scan record for user:', userId);
   
   try {
@@ -1330,7 +1330,7 @@ const createScanRecord = async (userId, decoded) => {
             email: userEmail,
             google_id: userId,
             name: decoded.name || userEmail.split('@')[0],
-            avatar_url: decoded.picture || null,
+            avatar_url: decoded.picture || null, // Use avatar_url which matches schema
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
           })
@@ -1373,7 +1373,7 @@ const createScanRecord = async (userId, decoded) => {
       method: 'POST',
       headers: {
         'apikey': supabaseKey,
-        'Authorization': `Bearer ${supabaseKey}`,
+        'Authorization': req.headers.authorization || `Bearer ${supabaseKey}`,
         'Content-Type': 'application/json',
         'Prefer': 'return=representation'
       },
@@ -1773,14 +1773,12 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
               console.log('SCAN-DEBUG: Scan still in ready_for_analysis status after 2 minutes');
               console.log('SCAN-DEBUG: Completing scan automatically since pattern matching detected subscriptions');
               
-              // Complete the scan
+              // Keep scan in ready_for_analysis; do not mark completed automatically
     await updateScanStatus(scanId, userId, {
-      status: 'completed',
-      completed_at: new Date().toISOString(),
+                status: 'ready_for_analysis',
       updated_at: new Date().toISOString()
     });
-    
-              console.log('SCAN-DEBUG: Scan completed automatically via fallback mechanism');
+              console.log('SCAN-DEBUG: Scan left in ready_for_analysis via fallback; trigger will handle completion');
             } else {
               console.log('SCAN-DEBUG: Scan status changed, no fallback needed');
             }
@@ -1989,7 +1987,7 @@ export default async function handler(req, res) {
 
     console.log('SCAN-DEBUG: About to create scan record...');
     // Create scan record
-    const { scanId, dbUserId } = await createScanRecord(userId, decoded);
+    const { scanId, dbUserId } = await createScanRecord(req, userId, decoded);
     console.log('SCAN-DEBUG: Created scan record with ID:', scanId);
     console.log('SCAN-DEBUG: Using database user ID:', dbUserId);
 

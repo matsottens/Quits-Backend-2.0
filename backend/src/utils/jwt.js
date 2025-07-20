@@ -27,8 +27,14 @@ export const generateToken = async (payload) => {
   const jwtModule = await initJwt();
   const secret = getJwtSecret();
   
+  // Ensure the 'sub' claim is set to the user's ID for Supabase RLS (auth.uid())
+  const tokenPayload = {
+    ...payload,
+    sub: payload.id
+  };
+
   console.log(`Generating JWT token with secret: ${secret.substring(0, 3)}... (${secret.length} chars)`);
-  return jwtModule.sign(payload, secret, { expiresIn: '7d' });
+  return jwtModule.sign(tokenPayload, secret, { expiresIn: '7d' });
 };
 
 // Verify a JWT token

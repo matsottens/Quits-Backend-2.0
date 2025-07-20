@@ -1,9 +1,6 @@
 import express, { Response, RequestHandler } from 'express';
-import { supabase } from '../config/supabase.js';
-import { authenticateUser, AuthRequest } from '../middleware/auth.js';
-import {
-  createSubscription, getUserSubscriptions, updateSubscription, deleteSubscription
-} from '../services/database.js';
+import { supabase } from '../config/supabase';
+import { authenticateUser, AuthRequest } from '../middleware/auth';
 
 const router = express.Router();
 
@@ -23,7 +20,8 @@ router.get('/', (async (req: AuthRequest, res) => {
       return res.status(500).json({ error: 'Failed to fetch subscriptions' });
     }
     
-    return res.json(subscriptions);
+    // Wrap in an object to match frontend expectation
+    return res.json({ subscriptions });
   } catch (err) {
     console.error('Error fetching subscriptions:', err);
     return res.status(500).json({ error: 'An error occurred while fetching subscriptions' });
