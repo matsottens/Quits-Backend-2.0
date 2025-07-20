@@ -351,7 +351,43 @@ export default async function handler(req, res) {
                 // Continue with user creation even if email reading fails
               }
             } else {
-              console.log('No Gmail token provided, skipping email reading for new user');
+              console.log('No Gmail token provided – creating placeholder scan record');
+
+              try {
+                const placeholderRes = await fetch(
+                  `${supabaseUrl}/rest/v1/scan_history`,
+                  {
+                    method: 'POST',
+                    headers: {
+                      'apikey': supabaseKey,
+                      'Authorization': INSERT_AUTH,
+                      'Content-Type': 'application/json',
+                      'Prefer': 'return=representation'
+                    },
+                    body: JSON.stringify({
+                      scan_id: `scan_${Date.now()}_${dbUserId}`,
+                      user_id: dbUserId,
+                      status: 'pending',
+                      progress: 0,
+                      emails_found: 0,
+                      emails_to_process: 0,
+                      emails_processed: 0,
+                      emails_scanned: 0,
+                      subscriptions_found: 0,
+                      created_at: new Date().toISOString(),
+                      updated_at: new Date().toISOString()
+                    })
+                  }
+                );
+                if (placeholderRes.ok) {
+                  const createdScan = await placeholderRes.json();
+                  console.log('Placeholder scan created with ID:', createdScan[0].scan_id);
+                } else {
+                  console.error('Failed to create placeholder scan:', await placeholderRes.text());
+                }
+              } catch (phErr) {
+                console.error('Error creating placeholder scan:', phErr);
+              }
             }
 
             // No longer create mock subscription - real analysis will provide actual subscriptions
