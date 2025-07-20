@@ -47,16 +47,16 @@ export const upsertUser = async (userInfo: any) => {
         .single();
       data = retry.data;
       error = retry.error;
-      
+
       // If fallback succeeded, try to update google_id separately
       if (!error && sanitizedUserInfo.google_id) {
-        try {
-          await supabase
-            .from('users')
+      try {
+        await supabase
+          .from('users')
             .update({ google_id: sanitizedUserInfo.google_id })
-            .eq('id', sanitizedUserInfo.id);
-        } catch (colErr) {
-          // Swallow column-missing errors
+          .eq('id', sanitizedUserInfo.id);
+      } catch (colErr) {
+        // Swallow column-missing errors
         }
       }
     }

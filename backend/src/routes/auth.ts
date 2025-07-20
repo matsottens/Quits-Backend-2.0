@@ -232,7 +232,7 @@ const handleGoogleCallback: RequestHandler = async (req: Request, res: Response)
           id: user.id,
           email: user.email,
           name: user.name,
-          picture: user.picture
+          picture: user.avatar_url
         }
       };
       res.send(`${callback}(${JSON.stringify(responseData)})`);
@@ -247,7 +247,7 @@ const handleGoogleCallback: RequestHandler = async (req: Request, res: Response)
           id: user.id,
           email: user.email,
           name: user.name,
-          picture: user.picture
+          picture: user.avatar_url
         }
       });
       return;
@@ -382,7 +382,7 @@ router.get('/google/callback/jsonp', (async (req: Request, res: Response) => {
           id: user.id,
           email: user.email,
           name: user.name,
-          picture: user.picture
+          picture: user.avatar_url
         }
       };
       
