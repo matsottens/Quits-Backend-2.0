@@ -15,6 +15,8 @@ const supabaseKey = supabaseServiceRoleKey || supabaseServiceKey;
 
 // Use caller JWT if provided, else fall back to service/anon key – needed for RLS on Vercel
 const AUTH_HEADER = req.headers && req.headers.authorization ? req.headers.authorization : `Bearer ${supabaseKey}`;
+// Use service-role key for inserts if we have it; otherwise fall back to caller JWT
+const INSERT_AUTH = supabaseKey && supabaseKey.includes('service_role') ? `Bearer ${supabaseKey}` : AUTH_HEADER;
 
 console.log(`Supabase URL defined: ${!!supabaseUrl}`);
 console.log(`Supabase key defined: ${!!supabaseKey}`);
@@ -165,7 +167,7 @@ export default async function handler(req, res) {
                     method: 'POST',
                     headers: {
                       'apikey': supabaseKey,
-                      'Authorization': AUTH_HEADER,
+                      'Authorization': INSERT_AUTH,
                       'Content-Type': 'application/json',
                       'Prefer': 'return=representation'
                     },
