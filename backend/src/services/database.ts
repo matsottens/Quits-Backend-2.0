@@ -67,10 +67,25 @@ export const upsertUser = async (userInfo: any) => {
       return {
         id: sanitizedUserInfo.id,
         email: sanitizedUserInfo.email,
-        name: sanitizedUserInfo.name || 'User',
-        picture: sanitizedUserInfo.avatar_url || null
+        name: sanitizedUserInfo.name ?? 'User',
+        avatar_url: sanitizedUserInfo.avatar_url ?? null
       };
     }
+    // main success return
+return {
+  id: data.id,
+  email: data.email,
+  name: data.name,
+  avatar_url: data.avatar_url ?? sanitizedUserInfo.avatar_url ?? null
+};
+
+// final catch fallback
+return {
+  id: userInfo.id,
+  email: userInfo.email,
+  name: userInfo.name ?? 'User',
+  avatar_url: userInfo.avatar_url ?? null
+};
 
     // Check if this is a new user (created_at == updated_at or created_at is very recent)
     if (data && data.created_at && data.updated_at && data.created_at === data.updated_at) {
@@ -108,7 +123,7 @@ export const upsertUser = async (userInfo: any) => {
       email: data.email,
       name: data.name,
       // Use avatar_url from database or fall back to original picture
-      picture: data.avatar_url || sanitizedUserInfo.avatar_url || null
+      avatar_url: data.avatar_url || sanitizedUserInfo.avatar_url || null
     };
   } catch (error) {
     console.error('Error upserting user:', error);
@@ -116,8 +131,8 @@ export const upsertUser = async (userInfo: any) => {
     return {
       id: userInfo.id,
       email: userInfo.email,
-      name: userInfo.name || 'User', 
-      picture: userInfo.picture || userInfo.avatar_url || null
+      name: userInfo.name ?? 'User', 
+      avatar_url: userInfo.picture || userInfo.avatar_url || null
       // fallback uses avatar_url if available
       // picture retained for backward compatibility but property may be undefined
     };

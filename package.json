@@ -28,6 +28,7 @@
     "node-fetch": "^3.3.2"
   },
   "devDependencies": {
-    "concurrently": "^8.0.1"
+    "concurrently": "^8.0.1",
+    "typescript": "^5.8.3"
   }
 }
