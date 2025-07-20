@@ -12,6 +12,8 @@ export const upsertUser = async (userInfo: any) => {
       name: userInfo.name || null,
       avatar_url: userInfo.picture || null, // Use avatar_url which matches the actual schema
       google_id: userInfo.google_id || userInfo.id || null, // Use google_id which exists in schema
+      // maintain legacy property to satisfy other code paths
+      picture: userInfo.picture || null,
       verified_email: typeof userInfo.verified_email === 'boolean' ? userInfo.verified_email : null
     };
 
