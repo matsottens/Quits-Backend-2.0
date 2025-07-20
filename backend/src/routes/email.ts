@@ -517,12 +517,23 @@ async function processEmails(userId: string, scanId: string, accessToken: string
         }
       }
     }
-    // Update status to 'ready_for_analysis' so the trigger can pick it up
+    // After setting status ready_for_analysis
     await supabase.from('scan_history').update({ 
       status: 'ready_for_analysis', 
       emails_found: filteredEmails.length,
       updated_at: new Date().toISOString() 
     }).eq('id', scanId);
+
+    // Fire the trigger endpoint immediately to avoid waiting for cron
+    (async () => {
+      try {
+        const triggerUrl = `http://localhost:${PORT || 3000}/api/trigger-gemini-scan`;
+        console.log('EMAIL ROUTE: Manually hitting trigger endpoint at', triggerUrl);
+        await fetch(triggerUrl, { method: 'GET' });
+      } catch (triggerErr) {
+        console.warn('EMAIL ROUTE: Failed to hit trigger endpoint:', triggerErr);
+      }
+    })();
 
     console.log(`Triggering Gemini analysis for scan ${scanId}`);
     try {
