@@ -1281,7 +1281,7 @@ const storeSubscriptionExample = async (sender, subject, analysisResult) => {
 };
 
 // Function to create a scan record
-const createScanRecord = async (userId, decoded) => {
+const createScanRecord = async (req, userId, decoded) => {
   console.log('SCAN-DEBUG: Creating scan record for user:', userId);
   
   try {
@@ -1373,7 +1373,7 @@ const createScanRecord = async (userId, decoded) => {
       method: 'POST',
       headers: {
         'apikey': supabaseKey,
-        'Authorization': `Bearer ${supabaseKey}`,
+        'Authorization': req.headers.authorization || `Bearer ${supabaseKey}`,
         'Content-Type': 'application/json',
         'Prefer': 'return=representation'
       },
@@ -1987,7 +1987,7 @@ export default async function handler(req, res) {
 
     console.log('SCAN-DEBUG: About to create scan record...');
     // Create scan record
-    const { scanId, dbUserId } = await createScanRecord(userId, decoded);
+    const { scanId, dbUserId } = await createScanRecord(req, userId, decoded);
     console.log('SCAN-DEBUG: Created scan record with ID:', scanId);
     console.log('SCAN-DEBUG: Using database user ID:', dbUserId);
 
