@@ -98,11 +98,37 @@ export default async function handler(req, res) {
 
     // Look up the user in the database to get the UUID
     console.log('SCAN-STATUS-DEBUG: Looking up user with Google ID:', googleId);
-    const { data: user, error: userError } = await supabase
+    
+    // Try multiple lookup strategies for user resolution
+    let user, userError;
+    
+    // Try google_id lookup first (this is what exists in the schema)
+    const { data: userByGoogleId, error: googleIdError } = await supabase
       .from('users')
       .select('id')
       .eq('google_id', googleId)
-      .single();
+      .maybeSingle();
+    
+    if (!googleIdError && userByGoogleId) {
+      user = userByGoogleId;
+      userError = null;
+    } else {
+      // Fallback to email lookup
+      const userEmail = decoded.email;
+      if (userEmail) {
+        const { data: userByEmail, error: emailError } = await supabase
+          .from('users')
+          .select('id')
+          .eq('email', userEmail)
+          .maybeSingle();
+        
+        user = userByEmail;
+        userError = emailError;
+      } else {
+        user = null;
+        userError = googleIdError;
+      }
+    }
 
     if (userError || !user) {
       console.error('SCAN-STATUS-DEBUG: User lookup error:', userError);
@@ -139,11 +165,12 @@ export default async function handler(req, res) {
     if (scanId && scanId !== 'latest') {
       // Query by specific scan ID
       console.log('SCAN-STATUS-DEBUG: Querying by specific scan ID:', scanId);
+      // If a specific scan ID is provided, look it up directly without user filter
+      // This matches the behavior of the new backend
       const { data, error: scanError } = await supabase
         .from('scan_history')
         .select('*')
         .eq('scan_id', scanId)
-        .eq('user_id', userId)
         .single();
       
       scan = data;

@@ -1330,7 +1330,7 @@ const createScanRecord = async (userId, decoded) => {
             email: userEmail,
             google_id: userId,
             name: decoded.name || userEmail.split('@')[0],
-            avatar_url: decoded.picture || null,
+            avatar_url: decoded.picture || null, // Use avatar_url which matches schema
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
           })

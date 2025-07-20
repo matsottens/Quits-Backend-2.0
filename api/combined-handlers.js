@@ -42,6 +42,7 @@ const routeMap = {
   '/api/scan': () => import('./email-scan.js').then(m => m.default || m),
   '/api/email-scan': () => import('./email-scan.js').then(m => m.default || m),
   '/api/scan-status': () => import('./scan-status.js').then(m => m.default || m),
+  '/api/email/status': () => import('./scan-status.js').then(m => m.default || m),
   // Route all /api/subscription and /api/subscription/[id] to the catch-all handler
   '/api/subscription': () => import('./subscription/[[...path]].js').then(m => m.default || m),
   '/api/auth/google/url': () => import('./google-auth-url.js').then(m => m.default || m),

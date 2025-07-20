@@ -184,7 +184,7 @@ router.get('/status',
           const { data: userTmp, error: userLookupError } = await supabase
             .from('users')
             .select('id')
-            .or(`google_user_id.eq.${req.user?.id},google_id.eq.${req.user?.id}`)
+            .eq('google_id', req.user?.id)
             .maybeSingle();
 
           userRecord = userTmp || null;
@@ -192,7 +192,7 @@ router.get('/status',
           if (userLookupError) {
             error = userLookupError;
           } else if (!userRecord) {
-            // Fall back to email match if google_user_id is not yet stored.
+            // Fall back to email match if google_id is not yet stored.
             const { data: userByEmail, error: emailLookupError } = await supabase
               .from('users')
               .select('id')
@@ -517,28 +517,23 @@ async function processEmails(userId: string, scanId: string, accessToken: string
         }
       }
     }
-    // Update status to 'analyzing' so edge function expects it
-    await supabase.from('scan_history').update({ status: 'analyzing', updated_at: new Date().toISOString() }).eq('id', scanId);
+    // Update status to 'ready_for_analysis' so the trigger can pick it up
+    await supabase.from('scan_history').update({ 
+      status: 'ready_for_analysis', 
+      emails_found: filteredEmails.length,
+      updated_at: new Date().toISOString() 
+    }).eq('id', scanId);
 
     console.log(`Triggering Gemini analysis for scan ${scanId}`);
     try {
-      const { data: invokeResult, error: invokeError } = await supabase.functions.invoke('gemini-scan', {
-        body: {
-          scan_ids: [scanId],
-          user_ids: [userId]
-        }
-      });
-      if (invokeError) {
-        console.error('Edge function invoke error:', invokeError);
-      } else {
-        console.log('Edge function response:', invokeResult);
-      }
+      // Don't call edge function directly - let the trigger handle it
+      // This ensures proper queuing and retry logic
+      console.log(`Scan ${scanId} marked as ready_for_analysis - trigger will pick it up`);
     } catch (invokeEx) {
       console.error('Failed to invoke Gemini edge function:', invokeEx);
     }
 
-    // Edge function will mark scan to completed; we can fallback set to ready_for_analysis
-    await supabase.from('scan_history').update({ updated_at: new Date().toISOString() }).eq('id', scanId);
+    // Trigger will handle the analysis and completion
     console.log(`Scan ${scanId} analysis triggered.`);
   } catch (error) {
     console.error('Error processing emails:', error);
