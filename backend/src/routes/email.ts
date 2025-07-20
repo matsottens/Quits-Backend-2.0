@@ -167,30 +167,92 @@ router.get('/status',
       // Optional legacy parameter ?scanId=scan_xxx
       const requestedId = typeof req.query.scanId === 'string' ? req.query.scanId : null;
 
-      const query = supabase
-        .from('scan_history')
-        .select('*')
-        .eq('user_id', req.user?.id)
-        .order('created_at', { ascending: false })
-        .limit(1);
+      let scan;
+      let error;
 
-      if (requestedId) {
-        // for legacy IDs scan_id column stores the value
-        query.eq('scan_id', requestedId);
+      try {
+        if (requestedId) {
+          // If a specific scan ID is provided we can look it up directly without knowing the user UUID.
+          ({ data: scan, error } = await supabase
+            .from('scan_history')
+            .select('*')
+            .eq('scan_id', requestedId)
+            .single());
+        } else {
+          // We only have the Google user ID (from the JWT). Resolve it to the internal UUID stored in the users table.
+          let userRecord;
+          const { data: userTmp, error: userLookupError } = await supabase
+            .from('users')
+            .select('id')
+            .or(`google_user_id.eq.${req.user?.id},google_id.eq.${req.user?.id}`)
+            .maybeSingle();
+
+          userRecord = userTmp || null;
+
+          if (userLookupError) {
+            error = userLookupError;
+          } else if (!userRecord) {
+            // Fall back to email match if google_user_id is not yet stored.
+            const { data: userByEmail, error: emailLookupError } = await supabase
+              .from('users')
+              .select('id')
+              .eq('email', req.user?.email)
+              .maybeSingle();
+
+            if (emailLookupError) {
+              error = emailLookupError;
+            }
+
+            if (userByEmail) {
+              scan = undefined; // will be fetched below
+              userRecord = userByEmail;
+            }
+          }
+
+          if (!error && userRecord?.id) {
+            ({ data: scan, error } = await supabase
+              .from('scan_history')
+              .select('*')
+              .eq('user_id', userRecord.id)
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .single());
+          }
+        }
+      } catch (e) {
+        console.error('Error querying scan history:', e);
+        return res.status(500).json({ error: 'Failed to query scan history' });
       }
 
-      const { data: scan, error } = await query.single();
       if (error) {
+        if (error.code === 'PGRST116') {
+          return res.status(404).json({ error: 'No scan found' });
+        }
+        console.error('Error fetching scan:', error);
+        return res.status(500).json({ error: 'Failed to get scan status' });
+      }
+
+      if (!scan) {
         return res.status(404).json({ error: 'No scan found' });
       }
 
+      // Safeguard division by zero
+      const totalEmails = scan.emails_to_process || 0;
+      const processedEmails = scan.emails_processed || 0;
+      const progressPct = totalEmails > 0 ? Math.round((processedEmails / totalEmails) * 100) : 0;
+
       res.json({
         status: scan.status,
-        progress: Math.round((scan.emails_processed / scan.emails_to_process) * 100),
-        total_emails: scan.emails_to_process,
-        processed_emails: scan.emails_processed,
+        progress: progressPct,
+        stats: {
+          emails_found: scan.emails_found,
+          emails_to_process: scan.emails_to_process,
+          emails_processed: scan.emails_processed,
+          subscriptions_found: scan.subscriptions_found
+        },
         scan_id: scan.scan_id || scan.id
       });
+      return;
     } catch (error) {
       console.error('Error getting scan status:', error);
       res.status(500).json({ error: 'Failed to get scan status' });
