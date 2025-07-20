@@ -65,9 +65,33 @@ export const upsertUser = async (userInfo: any) => {
     
     if (error) {
       console.error('Supabase upsert error:', error);
-      // Fallback to mock implementation if database operation fails
+
+      // If duplicate email, fetch existing user so we return correct UUID
+      if (error.code === '23505') {
+        try {
+          const { data: existing, error: fetchErr } = await supabase
+            .from('users')
+            .select('id, email, name, avatar_url')
+            .eq('email', sanitizedUserInfo.email)
+            .single();
+
+          if (!fetchErr && existing) {
+            console.log('Found existing user after duplicate email:', existing.id);
+            return {
+              id: existing.id,
+              email: existing.email,
+              name: existing.name,
+              avatar_url: existing.avatar_url
+            };
+          }
+        } catch (lookupErr) {
+          console.error('Lookup existing user failed:', lookupErr);
+        }
+      }
+
+      // Generic fallback
       return {
-        id: sanitizedUserInfo.id,
+        id: sanitizedUserInfo.id || null,
         email: sanitizedUserInfo.email,
         name: sanitizedUserInfo.name ?? 'User',
         avatar_url: sanitizedUserInfo.avatar_url ?? null
