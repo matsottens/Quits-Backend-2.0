@@ -514,8 +514,14 @@ export default async function handler(req, res) {
       
       try {
         // First, we need to look up the database user ID using google_id or email
+        // Build dynamic OR filter similar to path handler
+        const filters2 = [`email.eq.${encodeURIComponent(decoded.email)}`];
+        if (userId && /^[0-9a-fA-F-]{36}$/.test(userId)) {
+          filters2.push(`id.eq.${encodeURIComponent(userId)}`);
+          filters2.push(`google_id.eq.${encodeURIComponent(userId)}`);
+        }
         const userLookupResponse = await fetch(
-          `${supabaseUrl}/rest/v1/users?select=id,email,google_id&or=(email.eq.${encodeURIComponent(decoded.email)},google_id.eq.${encodeURIComponent(userId)},id.eq.${encodeURIComponent(userId)})`, 
+          `${supabaseUrl}/rest/v1/users?select=id,email,google_id&or=(${filters2.join(',')})`, 
           {
             method: 'GET',
             headers: {

@@ -174,13 +174,75 @@ export default async function handler(req, res) {
             throw new Error('Failed to retrieve user information');
           }
           
-          // Generate a JWT token
+          // ------------------------------------------------------------------
+          // Ensure we use the internal UUID from Supabase for the token's `id`.
+          // ------------------------------------------------------------------
+          let internalId = null;
+          try {
+            const supabaseUrl = process.env.SUPABASE_URL;
+            const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+            if (!supabaseUrl || !supabaseKey) {
+              throw new Error('Missing Supabase configuration');
+            }
+
+            // Try lookup by email first
+            const lookupRes = await fetchNode(
+              `${supabaseUrl}/rest/v1/users?select=id,email&email=eq.${encodeURIComponent(userInfo.email)}`,
+              {
+                headers: {
+                  apikey: supabaseKey,
+                  Authorization: `Bearer ${supabaseKey}`
+                }
+              }
+            );
+            if (lookupRes.ok) {
+              const existing = await lookupRes.json();
+              if (existing && existing.length > 0) {
+                internalId = existing[0].id;
+              }
+            }
+
+            // If not found, create user row
+            if (!internalId) {
+              const createRes = await fetchNode(`${supabaseUrl}/rest/v1/users`, {
+                method: 'POST',
+                headers: {
+                  apikey: supabaseKey,
+                  Authorization: `Bearer ${supabaseKey}`,
+                  'Content-Type': 'application/json',
+                  Prefer: 'return=representation'
+                },
+                body: JSON.stringify({
+                  email: userInfo.email,
+                  google_id: userInfo.id,
+                  name: userInfo.name || userInfo.email.split('@')[0],
+                  avatar_url: userInfo.picture || null,
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString()
+                })
+              });
+              if (createRes.ok) {
+                const created = await createRes.json();
+                internalId = created[0].id;
+              } else {
+                const txt = await createRes.text();
+                throw new Error(`Failed to create user: ${txt}`);
+              }
+            }
+          } catch (supErr) {
+            console.error('Supabase user lookup/create failed:', supErr);
+          }
+
+          // Fallback to Google ID if Supabase fails (avoids total breakage)
+          if (!internalId) internalId = userInfo.id;
+
+          // Generate a JWT token with the correct internalId
           const jwt = await import('jsonwebtoken');
-          console.log('Generating JWT token');
-          
+          console.log('Generating JWT token with internal id:', internalId);
+
           const token = jwt.default.sign(
             {
-              id: userInfo.id,
+              id: internalId,
               email: userInfo.email,
               name: userInfo.name,
               picture: userInfo.picture,
