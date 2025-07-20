@@ -116,6 +116,8 @@ export const upsertUser = async (userInfo: any) => {
       email: userInfo.email,
       name: userInfo.name || 'User', 
       picture: userInfo.picture || userInfo.avatar_url || null
+      // fallback uses avatar_url if available
+      // picture retained for backward compatibility but property may be undefined
     };
   }
 }; 

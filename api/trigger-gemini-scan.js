@@ -42,13 +42,23 @@ export default async function handler(req, res) {
 
     // Check for scans that are ready for analysis (exclude completed scans)
     console.log('TRIGGER-DEBUG: Checking for scans ready for analysis...');
+    
+    // First, let's see what scans exist with debug info
+    const { data: allRecentScans, error: debugError } = await supabase
+      .from('scan_history')
+      .select('scan_id, user_id, status, emails_processed, subscriptions_found, created_at')
+      .order('created_at', { ascending: false })
+      .limit(10);
+    
+    console.log('TRIGGER-DEBUG: Recent scans in database:', allRecentScans);
+    
+    // Now look for scans that need analysis
     let { data: readyScans, error: scanError } = await supabase
       .from('scan_history')
       .select('scan_id, user_id, created_at, emails_processed, subscriptions_found, status')
       .eq('status', 'ready_for_analysis')
-      .not('status', 'eq', 'completed') // Exclude completed scans
       .order('created_at', { ascending: true })
-      .limit(5); // Process up to 5 scans at a time
+      .limit(5);
 
     if (scanError) {
       console.error('TRIGGER-DEBUG: Error fetching ready scans:', scanError);
@@ -56,16 +66,66 @@ export default async function handler(req, res) {
     }
 
     console.log('TRIGGER-DEBUG: Raw scan query result:', readyScans);
+    console.log('TRIGGER-DEBUG: Found', readyScans?.length || 0, 'scans with ready_for_analysis status');
 
     if (!readyScans || readyScans.length === 0) {
-      console.log('TRIGGER-DEBUG: No scans ready for analysis');
+      console.log('TRIGGER-DEBUG: No scans ready for analysis found');
       
-      // NO STUCK SCAN DETECTION - Let Edge Function handle completion
-      console.log('TRIGGER-DEBUG: No automatic scan completion - Edge Function must complete analysis');
+      // Check if there are scans that might have been missed
+      const { data: completedScansWithoutAnalysis, error: completedError } = await supabase
+        .from('scan_history')
+        .select('scan_id, status, subscriptions_found, created_at')
+        .eq('status', 'completed')
+        .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()) // Last 24 hours
+        .order('created_at', { ascending: false })
+        .limit(5);
+      
+      console.log('TRIGGER-DEBUG: Recent completed scans:', completedScansWithoutAnalysis);
+      
+      // If we find recent completed scans that might need AI analysis, let's check them
+      if (completedScansWithoutAnalysis && completedScansWithoutAnalysis.length > 0) {
+        console.log('TRIGGER-DEBUG: Found recent completed scans - checking if they need AI analysis');
+        
+        // Look for subscription_analysis records for these scans
+        for (const scan of completedScansWithoutAnalysis) {
+          const { data: analysisRecords, error: analysisError } = await supabase
+            .from('subscription_analysis')
+            .select('id, analysis_status')
+            .eq('scan_id', scan.scan_id);
+          
+          console.log(`TRIGGER-DEBUG: Scan ${scan.scan_id} has ${analysisRecords?.length || 0} analysis records`);
+          
+          // If there are pending analysis records, force this scan back to ready_for_analysis
+          if (analysisRecords && analysisRecords.length > 0) {
+            const pendingCount = analysisRecords.filter(r => r.analysis_status === 'pending').length;
+            if (pendingCount > 0) {
+              console.log(`TRIGGER-DEBUG: Scan ${scan.scan_id} has ${pendingCount} pending analysis records - forcing back to ready_for_analysis`);
+              
+              await supabase
+                .from('scan_history')
+                .update({ 
+                  status: 'ready_for_analysis',
+                  updated_at: new Date().toISOString()
+                })
+                .eq('scan_id', scan.scan_id);
+              
+              // Restart the trigger process to pick up this scan
+              console.log('TRIGGER-DEBUG: Restarting trigger process to pick up rescued scan');
+              return res.status(200).json({ 
+                success: true, 
+                message: `Rescued scan ${scan.scan_id} for analysis - trigger will rerun`,
+                rescued_scan: scan.scan_id
+              });
+            }
+          }
+        }
+      }
+      
+      console.log('TRIGGER-DEBUG: No ready scans - may have been already processed or completed prematurely');
       
       return res.status(200).json({ 
         success: true, 
-        message: 'No scans ready for analysis',
+        message: 'No scans ready for analysis found',
         scans_processed: 0
       });
     }
