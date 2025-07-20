@@ -13,6 +13,9 @@ const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
 const supabaseKey = supabaseServiceRoleKey || supabaseServiceKey;
 
+// Use caller JWT if provided, else fall back to service/anon key – needed for RLS on Vercel
+const AUTH_HEADER = req.headers && req.headers.authorization ? req.headers.authorization : `Bearer ${supabaseKey}`;
+
 console.log(`Supabase URL defined: ${!!supabaseUrl}`);
 console.log(`Supabase key defined: ${!!supabaseKey}`);
 console.log(`Using SUPABASE_SERVICE_ROLE_KEY: ${!!supabaseServiceRoleKey}`);
@@ -84,7 +87,7 @@ export default async function handler(req, res) {
               method: 'GET',
               headers: {
                 'apikey': supabaseKey,
-                'Authorization': `Bearer ${supabaseKey}`,
+                'Authorization': AUTH_HEADER,
                 'Content-Type': 'application/json'
               }
             }
@@ -123,7 +126,7 @@ export default async function handler(req, res) {
                 method: 'POST',
                 headers: {
                   'apikey': supabaseKey,
-                  'Authorization': `Bearer ${supabaseKey}`,
+                  'Authorization': AUTH_HEADER,
                   'Content-Type': 'application/json',
                   'Prefer': 'return=representation'
                 },
@@ -162,7 +165,7 @@ export default async function handler(req, res) {
                     method: 'POST',
                     headers: {
                       'apikey': supabaseKey,
-                      'Authorization': `Bearer ${supabaseKey}`,
+                      'Authorization': AUTH_HEADER,
                       'Content-Type': 'application/json',
                       'Prefer': 'return=representation'
                     },
@@ -211,7 +214,7 @@ export default async function handler(req, res) {
                       method: 'PATCH',
                       headers: {
                         'apikey': supabaseKey,
-                        'Authorization': `Bearer ${supabaseKey}`,
+                        'Authorization': AUTH_HEADER,
                         'Content-Type': 'application/json'
                       },
                       body: JSON.stringify({
@@ -265,7 +268,7 @@ export default async function handler(req, res) {
                           method: 'POST',
                           headers: {
                             'apikey': supabaseKey,
-                            'Authorization': `Bearer ${supabaseKey}`,
+                            'Authorization': AUTH_HEADER,
                             'Content-Type': 'application/json',
                             'Prefer': 'return=representation'
                           },
@@ -297,7 +300,7 @@ export default async function handler(req, res) {
                           method: 'PATCH',
                           headers: {
                             'apikey': supabaseKey,
-                            'Authorization': `Bearer ${supabaseKey}`,
+                            'Authorization': AUTH_HEADER,
                             'Content-Type': 'application/json'
                           },
                           body: JSON.stringify({
@@ -323,7 +326,7 @@ export default async function handler(req, res) {
                       method: 'PATCH',
                       headers: {
                         'apikey': supabaseKey,
-                        'Authorization': `Bearer ${supabaseKey}`,
+                        'Authorization': AUTH_HEADER,
                         'Content-Type': 'application/json'
                       },
                       body: JSON.stringify({
@@ -362,7 +365,7 @@ export default async function handler(req, res) {
               method: 'GET',
               headers: {
                 'apikey': supabaseKey,
-                'Authorization': `Bearer ${supabaseKey}`,
+                'Authorization': AUTH_HEADER,
                 'Content-Type': 'application/json'
               }
             }
@@ -382,7 +385,7 @@ export default async function handler(req, res) {
               method: 'GET',
               headers: {
                 'apikey': supabaseKey,
-                'Authorization': `Bearer ${supabaseKey}`,
+                'Authorization': AUTH_HEADER,
                 'Content-Type': 'application/json'
               }
             }
@@ -526,7 +529,7 @@ export default async function handler(req, res) {
             method: 'GET',
             headers: {
               'apikey': supabaseKey,
-              'Authorization': `Bearer ${supabaseKey}`,
+              'Authorization': AUTH_HEADER,
               'Content-Type': 'application/json'
             }
           }
@@ -552,7 +555,7 @@ export default async function handler(req, res) {
               method: 'POST',
               headers: {
                 'apikey': supabaseKey,
-                'Authorization': `Bearer ${supabaseKey}`,
+                'Authorization': AUTH_HEADER,
                 'Content-Type': 'application/json',
                 'Prefer': 'return=representation'
               },
@@ -588,7 +591,7 @@ export default async function handler(req, res) {
             method: 'POST',
             headers: {
               'apikey': supabaseKey,
-              'Authorization': `Bearer ${supabaseKey}`,
+              'Authorization': AUTH_HEADER,
               'Content-Type': 'application/json',
               'Prefer': 'return=representation'
             },
