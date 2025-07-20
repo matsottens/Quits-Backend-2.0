@@ -527,7 +527,8 @@ async function processEmails(userId: string, scanId: string, accessToken: string
     // Fire the trigger endpoint immediately to avoid waiting for cron
     (async () => {
       try {
-        const triggerUrl = `http://localhost:${PORT || 3000}/api/trigger-gemini-scan`;
+        const triggerPort = process.env.PORT || 3000;
+        const triggerUrl = `http://localhost:${triggerPort}/api/trigger-gemini-scan`;
         console.log('EMAIL ROUTE: Manually hitting trigger endpoint at', triggerUrl);
         await fetch(triggerUrl, { method: 'GET' });
       } catch (triggerErr) {
