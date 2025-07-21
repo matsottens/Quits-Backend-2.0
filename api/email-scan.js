@@ -145,50 +145,10 @@ const extractGmailToken = (token) => {
 
 // Helper function to fetch subscription examples
 const fetchSubscriptionExamples = async () => {
-  console.log('SCAN-DEBUG: Fetching subscription examples...');
-  console.log('SCAN-DEBUG: Function called at:', new Date().toISOString());
-  console.log('SCAN-DEBUG: Supabase URL:', supabaseUrl ? 'defined' : 'undefined');
-  console.log('SCAN-DEBUG: Supabase key:', supabaseKey ? 'defined' : 'undefined');
-  
-  try {
-    // Add timeout to prevent hanging
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-    
-    console.log('SCAN-DEBUG: About to make REST API call to fetch subscription examples...');
-    
-    // Use direct fetch instead of Supabase client to avoid hanging
-    const response = await fetch(`${supabaseUrl}/rest/v1/subscription_examples?select=service_name,sender_pattern,subject_pattern`, {
-      method: 'GET',
-      headers: {
-        'apikey': supabaseKey,
-        'Authorization': `Bearer ${supabaseKey}`,
-        'Content-Type': 'application/json'
-      },
-      signal: controller.signal
-    });
-    
-    clearTimeout(timeoutId);
-    
-    console.log('SCAN-DEBUG: Subscription examples API response status:', response.status);
-    
-    if (!response.ok) {
-      console.error('SCAN-DEBUG: Error fetching subscription examples:', response.status, response.statusText);
-      return [];
-    }
-    
-    const data = await response.json();
-    console.log(`SCAN-DEBUG: Found ${data.length} subscription examples`);
-    return data || [];
-  } catch (error) {
-    if (error.name === 'AbortError') {
-      console.error('SCAN-DEBUG: Subscription examples fetch timed out');
-    } else {
-      console.error('SCAN-DEBUG: Exception fetching subscription examples:', error);
-      console.error('SCAN-DEBUG: Error stack:', error.stack);
-    }
-    return [];
-  }
+  // Subscription examples are no longer used. Return an empty array to skip any
+  // calls to the deprecated `subscription_examples` table.
+  console.log('SCAN-DEBUG: Subscription examples deprecated; skipping fetch.');
+  return [];
 };
 
 // Helper function to fetch emails from Gmail
