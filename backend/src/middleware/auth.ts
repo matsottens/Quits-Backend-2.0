@@ -26,45 +26,18 @@ export const authenticateUser = async (req: AuthRequest, res: Response, next: Ne
 
   try {
     const payload: any = await verifyToken(token);
-    if (!payload || !payload.id) {
-      return res.status(403).json({ error: 'Invalid token' });
+    // The 'sub' claim holds our internal database UUID. This is the source of truth.
+    if (!payload || !payload.sub) {
+      return res.status(403).json({ error: 'Invalid token payload' });
     }
 
     req.user = {
-      id: payload.id,
+      id: payload.id, // This is the Google ID, which can be useful elsewhere
       email: payload.email || ''
     };
 
-    /* --- Resolve internal UUID (dbUserId) --- */
-    try {
-      let uuid: string | null = null;
-
-      // google_id
-      if (payload.id) {
-        const { data } = await supabase
-          .from('users')
-          .select('id')
-          .eq('google_id', payload.id)
-          .maybeSingle();
-        if (data?.id) uuid = data.id;
-      }
-
-      // fallback email
-      if (!uuid && payload.email) {
-        const { data } = await supabase
-          .from('users')
-          .select('id')
-          .eq('email', payload.email)
-          .maybeSingle();
-        if (data?.id) uuid = data.id;
-      }
-
-      (req as any).dbUserId = uuid;
-    } catch (e) {
-      console.error('Failed to map Google ID to internal UUID:', e);
-      (req as any).dbUserId = null;
-    }
-    /* ---------------------------------------- */
+    // Attach the internal database UUID to the request for use in queries.
+    (req as any).dbUserId = payload.sub;
 
     next();
   } catch (error) {
