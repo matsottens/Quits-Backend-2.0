@@ -51,8 +51,8 @@ router.get('/:id', (async (req: AuthRequest, res) => {
       return res.status(404).json({ subscription: null, error: 'Subscription not found' });
     }
 
-    // If we have an authenticated user, enforce ownership check
-    if (dbUserId && subscription.user_id !== dbUserId) {
+    // If both IDs are present, enforce ownership
+    if (dbUserId && subscription.user_id && subscription.user_id !== dbUserId) {
       return res.status(403).json({ subscription: null, error: 'Access denied: subscription belongs to another user' });
     }
 
