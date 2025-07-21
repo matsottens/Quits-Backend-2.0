@@ -44,7 +44,7 @@ router.get('/:id', (async (req: AuthRequest, res) => {
       return res.status(404).json({ error: 'Subscription not found' });
     }
     
-    return res.json(subscription);
+    return res.json({ subscription });
   } catch (err) {
     console.error('Error fetching subscription:', err);
     return res.status(500).json({ error: 'An error occurred while fetching the subscription' });
