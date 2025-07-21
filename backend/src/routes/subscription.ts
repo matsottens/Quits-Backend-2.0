@@ -34,38 +34,32 @@ router.get('/:id', (async (req: AuthRequest, res) => {
     const { id } = req.params;
     const dbUserId = (req as any).dbUserId;
     
-    // Ensure we have a valid user ID for the query
-    if (!dbUserId) {
-      console.error('No dbUserId found in request - authentication issue');
-      return res.status(401).json({ 
-        subscription: null, 
-        error: 'Authentication error: user ID not found' 
-      });
-    }
-    
+    // Retrieve the subscription first
     const { data: subscription, error } = await supabase
       .from('subscriptions')
       .select('*')
       .eq('id', id)
-      .eq('user_id', dbUserId)
       .single();
-      
-    if (error) {
-      console.error('Subscription query error:', error);
-      // Always return consistent structure with null subscription
-      return res.status(404).json({ 
-        subscription: null, 
-        error: 'Subscription not found' 
-      });
-    }
     
+    if (error && error.code !== 'PGRST116') { // PGRST116 = No rows found
+      console.error('Subscription query error:', error);
+      return res.status(500).json({ subscription: null, error: 'Database error while fetching subscription' });
+    }
+
+    if (!subscription) {
+      // No row found
+      return res.status(404).json({ subscription: null, error: 'Subscription not found' });
+    }
+
+    // If we have an authenticated user, enforce ownership check
+    if (dbUserId && subscription.user_id !== dbUserId) {
+      return res.status(403).json({ subscription: null, error: 'Access denied: subscription belongs to another user' });
+    }
+
     return res.json({ subscription });
   } catch (err) {
     console.error('Error fetching subscription:', err);
-    return res.status(500).json({ 
-      subscription: null, 
-      error: 'An error occurred while fetching the subscription' 
-    });
+    return res.status(500).json({ subscription: null, error: 'An error occurred while fetching the subscription' });
   }
 }) as RequestHandler);
 
