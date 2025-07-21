@@ -14,7 +14,7 @@ router.get('/', (async (req: AuthRequest, res) => {
     const { data: subscriptions, error } = await supabase
       .from('subscriptions')
       .select('*')
-      .eq('user_id', req.user?.id);
+      .eq('user_id', (req as any).dbUserId);
 
     if (error) {
       return res.status(500).json({ error: 'Failed to fetch subscriptions' });
@@ -37,7 +37,7 @@ router.get('/:id', (async (req: AuthRequest, res) => {
       .from('subscriptions')
       .select('*')
       .eq('id', id)
-      .eq('user_id', req.user?.id)
+      .eq('user_id', (req as any).dbUserId)
       .single();
       
     if (error) {
@@ -95,7 +95,7 @@ router.put('/:id', (async (req: AuthRequest, res) => {
       .from('subscriptions')
       .select('id')
       .eq('id', id)
-      .eq('user_id', req.user?.id)
+      .eq('user_id', (req as any).dbUserId)
       .single();
       
     if (fetchError) {
@@ -138,7 +138,7 @@ router.delete('/:id', (async (req: AuthRequest, res) => {
       .from('subscriptions')
       .select('id')
       .eq('id', id)
-      .eq('user_id', req.user?.id)
+      .eq('user_id', (req as any).dbUserId)
       .single();
       
     if (fetchError) {

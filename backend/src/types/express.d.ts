@@ -7,6 +7,9 @@ declare global {
       // This is a hack to make TypeScript accept returning Response from RequestHandler
       // without having to use 'as unknown as RequestHandler' everywhere
     }
+    interface Request {
+      dbUserId?: string | null;
+    }
   }
 }
 
