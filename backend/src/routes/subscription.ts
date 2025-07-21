@@ -32,22 +32,40 @@ router.get('/', (async (req: AuthRequest, res) => {
 router.get('/:id', (async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
+    const dbUserId = (req as any).dbUserId;
+    
+    // Ensure we have a valid user ID for the query
+    if (!dbUserId) {
+      console.error('No dbUserId found in request - authentication issue');
+      return res.status(401).json({ 
+        subscription: null, 
+        error: 'Authentication error: user ID not found' 
+      });
+    }
     
     const { data: subscription, error } = await supabase
       .from('subscriptions')
       .select('*')
       .eq('id', id)
-      .eq('user_id', (req as any).dbUserId)
+      .eq('user_id', dbUserId)
       .single();
       
     if (error) {
-      return res.status(404).json({ error: 'Subscription not found' });
+      console.error('Subscription query error:', error);
+      // Always return consistent structure with null subscription
+      return res.status(404).json({ 
+        subscription: null, 
+        error: 'Subscription not found' 
+      });
     }
     
     return res.json({ subscription });
   } catch (err) {
     console.error('Error fetching subscription:', err);
-    return res.status(500).json({ error: 'An error occurred while fetching the subscription' });
+    return res.status(500).json({ 
+      subscription: null, 
+      error: 'An error occurred while fetching the subscription' 
+    });
   }
 }) as RequestHandler);
 

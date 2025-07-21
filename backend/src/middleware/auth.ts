@@ -26,18 +26,32 @@ export const authenticateUser = async (req: AuthRequest, res: Response, next: Ne
 
   try {
     const payload: any = await verifyToken(token);
-    // The 'sub' claim holds our internal database UUID. This is the source of truth.
-    if (!payload || !payload.sub) {
-      return res.status(403).json({ error: 'Invalid token payload' });
+    
+    if (!payload) {
+      return res.status(403).json({ error: 'Invalid token' });
     }
 
+    // Set basic user info
     req.user = {
-      id: payload.id, // This is the Google ID, which can be useful elsewhere
+      id: payload.id || payload.sub, // Fallback to sub if id not present
       email: payload.email || ''
     };
 
-    // Attach the internal database UUID to the request for use in queries.
-    (req as any).dbUserId = payload.sub;
+    // Determine the internal database UUID for queries
+    // Priority: 1) payload.sub (recommended), 2) payload.id if it's a UUID, 3) fallback
+    let dbUserId = null;
+    
+    if (payload.sub) {
+      dbUserId = payload.sub;
+    } else if (payload.id && /^[0-9a-fA-F-]{36}$/.test(payload.id)) {
+      // If payload.id looks like a UUID, use it
+      dbUserId = payload.id;
+    }
+    
+    (req as any).dbUserId = dbUserId;
+
+    // Log auth success with minimal info for debugging
+    console.log(`Auth success: user ${payload.email}, dbUserId: ${dbUserId ? 'present' : 'missing'}`);
 
     next();
   } catch (error) {
