@@ -593,7 +593,7 @@ serve(async (req) => {
         
         /* NEW: update progress for this scan based on processed emails */
         try {
-          const progressNow = 60 + Math.floor((processedCount / Math.max(1, validEmails.length)) * 40);
+          const progressNow = 30 + Math.floor((processedCount / Math.max(1, validEmails.length)) * 70);
           await supabase.from("scan_history").update({
             progress: Math.min(99, progressNow),
             updated_at: new Date().toISOString()
