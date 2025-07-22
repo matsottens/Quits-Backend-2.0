@@ -419,7 +419,7 @@ serve(async (req) => {
       
       // Use batch size 1 for small scans so progress increments per email,
       // otherwise default to 5 to stay efficient.
-      const BATCH_SIZE = validEmails.length <= 6 ? 1 : 5;
+      const BATCH_SIZE = validEmails.length <= 9 ? 1 : 5;
 
       for (let i = 0; i < validEmails.length; i += BATCH_SIZE) {
         const batch = validEmails.slice(i, i + BATCH_SIZE);
