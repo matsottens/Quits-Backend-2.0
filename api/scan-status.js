@@ -339,27 +339,28 @@ const calculateProgress = (scan) => {
       progress = 0;
       break;
     case 'in_progress':
-      // Use the actual progress value from the database
-      progress = Math.min(80, scan.progress || 0);
+      // Show 10% while the initial email fetching is running
+      progress = 10;
       break;
     case 'ready_for_analysis':
-      progress = 85;
+      // Email fetching finished, waiting for Edge Function analysis
+      progress = 30;
       break;
     case 'analyzing':
-      // Show 90% while Edge Function is analyzing with Gemini
-      progress = 90;
+      // Edge Function is analyzing subscriptions with Gemini
+      progress = 60;
       break;
     case 'quota_exhausted':
-      // Keep progress at current level but indicate temporary pause
-      progress = Math.min(95, scan.progress || 90);
+      // Analysis paused due to quota – keep it at analysing step
+      progress = 60;
       break;
     case 'completed':
       // Only show 100% when scan is actually completed
       progress = 100;
       break;
     case 'failed':
-      // Keep the progress where it failed, but cap at 95%
-      progress = Math.min(95, scan.progress || 0);
+      // Indicate failure without falsely showing full completion
+      progress = Math.min(60, scan.progress || 0);
       break;
     default:
       progress = scan.progress || 0;
