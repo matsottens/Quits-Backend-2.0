@@ -233,18 +233,33 @@ export default async function handler(req, res) {
                 });
               }
               
-              // Format the subscription data
-              const subscription = subscriptions[0];
+              // Format the subscription data – keep DB column names intact
+              const s = subscriptions[0];
               const formattedSubscription = {
-                id: subscription.id,
-                name: subscription.name,
-                price: parseFloat(subscription.price),
-                billingCycle: subscription.billing_cycle,
-                nextBillingDate: subscription.next_billing_date,
-                category: subscription.category || 'other',
-                is_manual: subscription.is_manual || false,
-                createdAt: subscription.created_at,
-                updatedAt: subscription.updated_at
+                // UUID & core info
+                id: s.id,
+                name: s.name,
+
+                // Pricing
+                price: Number(s.price),
+                billing_cycle: s.billing_cycle,           // snake_case preferred by frontend
+                billingCycle: s.billing_cycle,            // camelCase fallback
+                monthly_cost: s.monthly_cost ?? null,
+
+                // Dates
+                next_billing_date: s.next_billing_date,
+                nextBillingDate: s.next_billing_date,
+                start_date: s.start_date,
+                end_date: s.end_date,
+
+                // Categorisation
+                provider: s.provider,
+                category: s.category || 'other',
+
+                // Flags / meta
+                is_manual: s.is_manual || false,
+                created_at: s.created_at,
+                updated_at: s.updated_at
               };
               
               return res.status(200).json({
@@ -436,15 +451,21 @@ export default async function handler(req, res) {
               const formattedSubscriptions = allSubscriptions.map(sub => ({
                 id: sub.id,
                 name: sub.name,
-                price: parseFloat(sub.price || 0),
-                billingCycle: sub.billing_cycle,
+                price: Number(sub.price || 0),
+                billing_cycle: sub.billing_cycle,
+                billingCycle: sub.billing_cycle,  // camelCase backup
+                next_billing_date: sub.next_billing_date,
                 nextBillingDate: sub.next_billing_date,
+                provider: sub.provider,
                 category: sub.category || 'other',
+                start_date: sub.start_date,
+                end_date: sub.end_date,
+                monthly_cost: sub.monthly_cost ?? null,
                 is_manual: sub.is_manual || false,
-                is_detected: sub.source === 'email_scan' || sub.id?.startsWith('analysis_'),
+                is_detected: sub.source === 'email_scan' || (sub.id && String(sub.id).startsWith('analysis_')),
                 confidence: sub.confidence_score,
-                createdAt: sub.created_at,
-                updatedAt: sub.updated_at
+                created_at: sub.created_at,
+                updated_at: sub.updated_at
               }));
               
               return res.status(200).json({
