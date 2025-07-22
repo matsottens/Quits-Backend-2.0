@@ -561,6 +561,7 @@ serve(async (req) => {
                 const progressNow = 30 + Math.floor((processedCount / Math.max(1, validEmails.length)) * 70);
                 await supabase.from("scan_history").update({
                   progress: Math.min(99, progressNow),
+                  emails_processed: processedCount,
                   updated_at: new Date().toISOString()
                 }).eq("id", scan.id);
                 console.log(`Updated progress for scan ${scan.scan_id}: ${Math.min(99, progressNow)}% (${processedCount}/${validEmails.length})`);
@@ -601,6 +602,7 @@ serve(async (req) => {
               const progressNow = 30 + Math.floor((processedCount / Math.max(1, validEmails.length)) * 70);
               await supabase.from("scan_history").update({
                 progress: Math.min(99, progressNow),
+                emails_processed: processedCount,
                 updated_at: new Date().toISOString()
               }).eq("id", scan.id);
               console.log(`Updated progress for scan ${scan.scan_id}: ${Math.min(99, progressNow)}% (${processedCount}/${validEmails.length})`);
@@ -615,6 +617,7 @@ serve(async (req) => {
               const progressNow = 30 + Math.floor((processedCount / Math.max(1, validEmails.length)) * 70);
               await supabase.from("scan_history").update({
                 progress: Math.min(99, progressNow),
+                emails_processed: processedCount,
                 updated_at: new Date().toISOString()
               }).eq("id", scan.id);
               console.log(`Updated progress for scan ${scan.scan_id}: ${Math.min(99, progressNow)}% (${processedCount}/${validEmails.length})`);
