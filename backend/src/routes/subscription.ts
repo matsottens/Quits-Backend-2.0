@@ -33,6 +33,8 @@ router.get('/:id', (async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
     const dbUserId = (req as any).dbUserId;
+
+    console.log(`[SUB] Fetching subscription id=${id}, dbUserId=${dbUserId}`);
     
     // Retrieve the subscription first
     const { data: subscription, error } = await supabase
@@ -41,6 +43,10 @@ router.get('/:id', (async (req: AuthRequest, res) => {
       .eq('id', id)
       .single();
     
+    if (error) {
+      console.error('[SUB] Supabase error fetching by id:', error);
+    }
+
     if (error && error.code !== 'PGRST116') { // PGRST116 = No rows found
       console.error('Subscription query error:', error);
       return res.status(500).json({ subscription: null, error: 'Database error while fetching subscription' });

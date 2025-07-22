@@ -42,8 +42,19 @@ export default async function handler(req, res) {
   try {
     // Parse the path to determine which operation to perform
     const path = req.query.path || [];
-    const isSpecificSubscription = path.length > 0;
-    const subscriptionId = isSpecificSubscription ? path[0] : null;
+    let isSpecificSubscription = path.length > 0;
+    let subscriptionId = isSpecificSubscription ? path[0] : null;
+
+    // Fallback: if the dynamic path param didn't populate (Vercel quirk) extract it from the URL
+    if (!isSpecificSubscription) {
+      const urlParts = req.url.split('/').filter(Boolean); // e.g. ['', 'api', 'subscriptions', ':id'] → ['api','subscriptions',':id']
+      const subsIdx = urlParts.indexOf('subscriptions');
+      if (subsIdx !== -1 && urlParts.length > subsIdx + 1) {
+        subscriptionId = urlParts[subsIdx + 1];
+        isSpecificSubscription = true;
+        console.log(`[PATH] Fallback extracted subscriptionId from URL: ${subscriptionId}`);
+      }
+    }
     
     // Check if Supabase configuration is available
     if (!supabaseUrl || !supabaseKey) {
