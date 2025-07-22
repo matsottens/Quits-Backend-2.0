@@ -556,6 +556,17 @@ serve(async (req) => {
             if (alreadyExists) {
               console.log(`Subscription ${geminiResult.subscription_name} at price ${geminiResult.price} already exists for user ${scan.user_id}, skipping`);
               processedCount++;
+              /* Incremental progress update per email */
+              try {
+                const progressNow = 30 + Math.floor((processedCount / Math.max(1, validEmails.length)) * 70);
+                await supabase.from("scan_history").update({
+                  progress: Math.min(99, progressNow),
+                  updated_at: new Date().toISOString()
+                }).eq("id", scan.id);
+                console.log(`Updated progress for scan ${scan.scan_id}: ${Math.min(99, progressNow)}% (${processedCount}/${validEmails.length})`);
+              } catch (progressErr) {
+                console.error(`Failed to update progress for scan ${scan.scan_id}:`, progressErr);
+              }
               continue;
             }
             
@@ -585,22 +596,32 @@ serve(async (req) => {
             console.log(`Successfully inserted subscription: ${geminiResult.subscription_name} for user ${scan.user_id}`);
             subscriptionsFound++;
             processedCount++;
+            /* Incremental progress update per email */
+            try {
+              const progressNow = 30 + Math.floor((processedCount / Math.max(1, validEmails.length)) * 70);
+              await supabase.from("scan_history").update({
+                progress: Math.min(99, progressNow),
+                updated_at: new Date().toISOString()
+              }).eq("id", scan.id);
+              console.log(`Updated progress for scan ${scan.scan_id}: ${Math.min(99, progressNow)}% (${processedCount}/${validEmails.length})`);
+            } catch (progressErr) {
+              console.error(`Failed to update progress for scan ${scan.scan_id}:`, progressErr);
+            }
           } else {
             console.log(`Email ${email.analysisId} is not a subscription`);
             processedCount++;
+            /* Incremental progress update per email (non-subscriptions) */
+            try {
+              const progressNow = 30 + Math.floor((processedCount / Math.max(1, validEmails.length)) * 70);
+              await supabase.from("scan_history").update({
+                progress: Math.min(99, progressNow),
+                updated_at: new Date().toISOString()
+              }).eq("id", scan.id);
+              console.log(`Updated progress for scan ${scan.scan_id}: ${Math.min(99, progressNow)}% (${processedCount}/${validEmails.length})`);
+            } catch (progressErr) {
+              console.error(`Failed to update progress for scan ${scan.scan_id}:`, progressErr);
+            }
           }
-        }
-        
-        /* NEW: update progress for this scan based on processed emails */
-        try {
-          const progressNow = 30 + Math.floor((processedCount / Math.max(1, validEmails.length)) * 70);
-          await supabase.from("scan_history").update({
-            progress: Math.min(99, progressNow),
-            updated_at: new Date().toISOString()
-          }).eq("id", scan.id);
-          console.log(`Updated progress for scan ${scan.scan_id}: ${Math.min(99, progressNow)}% (${processedCount}/${validEmails.length})`);
-        } catch (progressErr) {
-          console.error(`Failed to update progress for scan ${scan.scan_id}:`, progressErr);
         }
         
         // Add a small delay between batches to be respectful to the API
