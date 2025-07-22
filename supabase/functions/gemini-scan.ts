@@ -591,6 +591,18 @@ serve(async (req) => {
           }
         }
         
+        /* NEW: update progress for this scan based on processed emails */
+        try {
+          const progressNow = 60 + Math.floor((processedCount / Math.max(1, validEmails.length)) * 40);
+          await supabase.from("scan_history").update({
+            progress: Math.min(99, progressNow),
+            updated_at: new Date().toISOString()
+          }).eq("id", scan.id);
+          console.log(`Updated progress for scan ${scan.scan_id}: ${Math.min(99, progressNow)}% (${processedCount}/${validEmails.length})`);
+        } catch (progressErr) {
+          console.error(`Failed to update progress for scan ${scan.scan_id}:`, progressErr);
+        }
+        
         // Add a small delay between batches to be respectful to the API
         if (i + BATCH_SIZE < validEmails.length) {
           await new Promise(resolve => setTimeout(resolve, 2000));

@@ -347,8 +347,8 @@ const calculateProgress = (scan) => {
       progress = 30;
       break;
     case 'analyzing':
-      // Edge Function is analyzing subscriptions with Gemini
-      progress = 60;
+      // Use dynamic progress saved by the Edge Function (60-99)
+      progress = scan.progress || 60;
       break;
     case 'quota_exhausted':
       // Analysis paused due to quota – keep it at analysing step
