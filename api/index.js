@@ -690,7 +690,7 @@ async function handleEmailStatus(req, res) {
         message: 'No authorization token provided'
       });
     }
-
+    
     /*
      * Instead of proxying this request to the separate backend service,
      * we can serve the scan status directly via the local scan-status
