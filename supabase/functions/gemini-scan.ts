@@ -417,10 +417,25 @@ serve(async (req) => {
       
       console.log(`Processing ${validEmails.length} valid emails for scan ${scan.scan_id}`);
       
-      // Process emails in batches of 5 (reasonable batch size for Gemini)
-      const BATCH_SIZE = 5;
+      // Use batch size 1 for small scans so progress increments per email,
+      // otherwise default to 5 to stay efficient.
+      const BATCH_SIZE = validEmails.length <= 6 ? 1 : 5;
+
       for (let i = 0; i < validEmails.length; i += BATCH_SIZE) {
         const batch = validEmails.slice(i, i + BATCH_SIZE);
+
+        // Optimistic progress update before sending the batch to Gemini so the UI
+        // doesn’t stay stuck at 30 % while Gemini works.
+        try {
+          const progressNowPre = 30 + Math.floor((processedCount / Math.max(1, validEmails.length)) * 70);
+          await supabase.from("scan_history").update({
+            progress: Math.max(31, Math.min(99, progressNowPre)),
+            emails_processed: processedCount,
+            updated_at: new Date().toISOString()
+          }).eq("id", scan.id);
+        } catch (errPre) {
+          console.error(`Failed to write pre-batch progress for scan ${scan.scan_id}:`, errPre);
+        }
         
         // Check for timeout
         if (Date.now() - startTime > maxExecutionTime) {
