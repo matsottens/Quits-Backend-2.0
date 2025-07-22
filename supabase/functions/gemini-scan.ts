@@ -550,6 +550,24 @@ serve(async (req) => {
           console.log(`Processing result for email ${email.analysisId}:`, geminiResult);
 
           if (geminiResult && geminiResult.is_subscription && geminiResult.subscription_name) {
+            // Ignore free subscriptions (price 0)
+            const priceNum = Number(geminiResult.price ?? 0);
+            if (priceNum === 0) {
+              console.log(`Skipping ${geminiResult.subscription_name} – price is 0`);
+              processedCount++;
+              /* Incremental progress update per email */
+              try {
+                const progressNow = 30 + Math.floor((processedCount / Math.max(1, validEmails.length)) * 70);
+                await supabase.from("scan_history").update({
+                  progress: Math.min(99, progressNow),
+                  emails_processed: processedCount,
+                  updated_at: new Date().toISOString()
+                }).eq("id", scan.id);
+              } catch (progressErr) {
+                console.error(`Failed to update progress for scan ${scan.scan_id}:`, progressErr);
+              }
+              continue;
+            }
             console.log(`Found subscription: ${geminiResult.subscription_name} with price ${geminiResult.price} ${geminiResult.currency}`);
             
             const normalizedServiceName = normalizeServiceName(geminiResult.subscription_name);
@@ -579,7 +597,6 @@ serve(async (req) => {
                   emails_processed: processedCount,
                   updated_at: new Date().toISOString()
                 }).eq("id", scan.id);
-                console.log(`Updated progress for scan ${scan.scan_id}: ${Math.min(99, progressNow)}% (${processedCount}/${validEmails.length})`);
               } catch (progressErr) {
                 console.error(`Failed to update progress for scan ${scan.scan_id}:`, progressErr);
               }
