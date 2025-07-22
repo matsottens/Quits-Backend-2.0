@@ -550,12 +550,18 @@ serve(async (req) => {
           console.log(`Processing result for email ${email.analysisId}:`, geminiResult);
 
           if (geminiResult && geminiResult.is_subscription && geminiResult.subscription_name) {
-            // Ignore free subscriptions (price 0)
-            const priceNum = Number(geminiResult.price ?? 0);
-            if (priceNum === 0) {
-              console.log(`Skipping ${geminiResult.subscription_name} – price is 0`);
+            // Ignore subscriptions with non-positive or missing price
+            const priceNum = Number(geminiResult.price);
+            if (!priceNum || priceNum <= 0) {
+              console.log(`Ignoring ${geminiResult.subscription_name} – price is zero / not provided`);
+              // Mark analysis record as completed but flag as free so we don't treat scan as stuck
+              await supabase.from("subscription_analysis").update({
+                analysis_status: 'completed',
+                gemini_response: JSON.stringify({ ...geminiResult, skipped_free: true }),
+                updated_at: new Date().toISOString()
+              }).eq("id", email.analysisId);
+
               processedCount++;
-              /* Incremental progress update per email */
               try {
                 const progressNow = 30 + Math.floor((processedCount / Math.max(1, validEmails.length)) * 70);
                 await supabase.from("scan_history").update({
@@ -566,7 +572,7 @@ serve(async (req) => {
               } catch (progressErr) {
                 console.error(`Failed to update progress for scan ${scan.scan_id}:`, progressErr);
               }
-              continue;
+              continue; // Skip DB insertion / counting
             }
             console.log(`Found subscription: ${geminiResult.subscription_name} with price ${geminiResult.price} ${geminiResult.currency}`);
             
