@@ -3,6 +3,7 @@ import jsonwebtoken from 'jsonwebtoken';
 import fetch from 'node-fetch';
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
+import { randomUUID } from 'crypto';
 import { extractEmailBody, analyzeEmailForSubscriptions, parseEmailHeaders } from './email-utils.js';
 import { google } from 'googleapis';
 const { verify } = jsonwebtoken;
@@ -1311,12 +1312,15 @@ const createScanRecord = async (req, userId, decoded) => {
       console.log(`SCAN-DEBUG: Found existing user with ID: ${dbUserId}`);
     }
     
+    // Generate database primary key (UUID) and separate business identifier with human-readable prefix
+    const id = randomUUID();
     const scanId = 'scan_' + Math.random().toString(36).substring(2, 15);
     const timestamp = new Date().toISOString();
     
     const scanRecordData = {
-      scan_id: scanId,
-      user_id: dbUserId, // Use the database user ID (UUID)
+      id,                 // primary key (UUID expected by DB)
+      scan_id: scanId,    // external/business identifier
+      user_id: dbUserId,  // FK to users table (UUID)
       status: 'pending',
       progress: 0,
       emails_found: 0,
@@ -1332,7 +1336,7 @@ const createScanRecord = async (req, userId, decoded) => {
     const { data: scanRecord, error: scanError } = await supabase
       .from('scan_history')
       .insert({
-        id: scanId,
+        id,           // UUID primary key
         scan_id: scanId,
         user_id: dbUserId,
         status: 'pending',
