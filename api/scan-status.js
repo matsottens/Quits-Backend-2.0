@@ -215,9 +215,9 @@ export default async function handler(req, res) {
         console.log('SCAN-STATUS-DEBUG: Found scans for user:', allScans);
         
         // If the specific scan was not found yet, it may still be initializing.
-        // Do NOT substitute another scan; instead return a placeholder response so the client keeps polling.
+        // Return placeholder with status 'pending' so frontend recognises it.
         return res.status(200).json({
-          status: 'initializing',
+          status: 'pending',
           scan_id: scanId,
           progress: 0,
           stats: {
