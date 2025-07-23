@@ -12,9 +12,15 @@ export default async function handler(req, res) {
     ? `http://${req.headers.host}`
     : `https://${req.headers.host}`;
 
+  // Build headers without duplicating content-type
+  const fwdHeaders = { 'Content-Type': 'application/json' };
+  for (const [k, v] of Object.entries(req.headers)) {
+    if (k.toLowerCase() !== 'content-type') fwdHeaders[k] = v as string;
+  }
+
   fetch(`${origin}/api/email-scan-background`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...req.headers },
+    headers: fwdHeaders,
     body: JSON.stringify(req.body ?? {}),
   }).catch(err => console.error('bg scan invoke error', err));
 
