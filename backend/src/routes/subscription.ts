@@ -81,6 +81,8 @@ router.post('/', (async (req: AuthRequest, res) => {
     // Use internal UUID (dbUserId) for the FK relationship
     const dbUserId = (req as any).dbUserId || req.user?.id;
 
+    console.log('[SUB] Creating subscription for dbUserId:', dbUserId);
+
     const { data: subscription, error } = await supabase
       .from('subscriptions')
       .insert({
@@ -95,7 +97,8 @@ router.post('/', (async (req: AuthRequest, res) => {
       .single();
       
     if (error) {
-      return res.status(500).json({ error: 'Failed to create subscription' });
+      console.error('[SUB] Supabase insert error:', error);
+      return res.status(500).json({ error: 'Failed to create subscription', details: error.message || error });
     }
     
     // Wrap in object for consistent frontend handling
