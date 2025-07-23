@@ -1393,11 +1393,11 @@ const updateScanStatus = async (scanId, dbUserId, updates) => {
     }
 
     console.log(`SCAN-DEBUG: Successfully updated scan status for ${scanId}`);
-  } catch (error) {
+    } catch (error) {
     console.error(`SCAN-DEBUG: General error in updateScanStatus for scan ${scanId}:`, error);
     // The calling function is responsible for handling this error.
-    throw error;
-  }
+        throw error;
+      }
 };
 
 const searchEmails = async (gmail, query) => {
@@ -1627,14 +1627,14 @@ console.log('SCAN-DEBUG: - Function is async:', processEmailsAsync.constructor.n
 export default async function handler(req, res) {
   try {
     console.log('SCAN-DEBUG: ===== EMAIL SCAN ENDPOINT CALLED (BACKGROUND) =====');
-    console.log('SCAN-DEBUG: Method:', req.method);
-    console.log('SCAN-DEBUG: URL:', req.url);
-    console.log('SCAN-DEBUG: Headers:', {
-      'content-type': req.headers['content-type'],
+  console.log('SCAN-DEBUG: Method:', req.method);
+  console.log('SCAN-DEBUG: URL:', req.url);
+  console.log('SCAN-DEBUG: Headers:', {
+    'content-type': req.headers['content-type'],
       authorization: req.headers.authorization ? 'Present' : 'Not Present'
-    });
-    console.log('SCAN-DEBUG: Body keys:', Object.keys(req.body || {}));
-
+  });
+  console.log('SCAN-DEBUG: Body keys:', Object.keys(req.body || {}));
+  
     // --- 1. Extract Scan ID and Authenticate ---
     const { scan_id: scanId } = req.body;
     if (!scanId) {
