@@ -34,7 +34,23 @@ export default async function handler(req, res) {
     const decoded = jsonwebtoken.verify(token, process.env.JWT_SECRET);
     const userId = decoded.id;
 
-    // --- 2. Create the Scan Record (Synchronously) ---
+    // --- 2. Check for a recent existing scan to prevent duplicates ---
+    const sixtySecondsAgo = new Date(Date.now() - 60000).toISOString();
+    const { data: recentScan, error: recentScanError } = await supabase
+      .from('scan_history')
+      .select('scan_id')
+      .eq('user_id', userId)
+      .gte('created_at', sixtySecondsAgo)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (recentScan) {
+      console.log(`Found recent scan (${recentScan.scan_id}) for user ${userId}. Returning existing scan to prevent duplicate.`);
+      return res.status(200).json({ message: 'Recent scan already in progress', scanId: recentScan.scan_id, isExisting: true });
+    }
+
+    // --- 3. Create the Scan Record (Synchronously) ---
     const id = randomUUID();
     const scanId = 'scan_' + Math.random().toString(36).substring(2, 15);
     const { data, error } = await supabase
@@ -55,7 +71,7 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: 'Failed to create scan record', details: error.message });
     }
 
-    // --- 3. Trigger the Background Job (Asynchronously) ---
+    // --- 4. Trigger the Background Job (Asynchronously) ---
     const origin = req.headers.host?.startsWith('localhost') ? `http://${req.headers.host}` : `https://${req.headers.host}`;
     const fwdHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
     fetch(`${origin}/api/email-scan-background`, {
@@ -64,7 +80,7 @@ export default async function handler(req, res) {
       body: JSON.stringify({ scan_id: scanId }), // Pass only the essential ID
     }).catch(err => console.error('bg scan invoke error', err));
 
-    // --- 4. Respond to the Client Immediately ---
+    // --- 5. Respond to the Client Immediately ---
     res.status(202).json({ message: 'Scan started – processing in background', scanId });
 
   } catch (error) {

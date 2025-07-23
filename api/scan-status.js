@@ -193,54 +193,30 @@ export default async function handler(req, res) {
     }
 
     if (error) {
-      console.error('Error fetching scan:', error);
-      
-      // If no scan found, let's see what scans exist for this user
+      console.error('Error fetching scan:', error.message);
+      // It's expected that the scan might not be found initially.
+      // Do not return an error. The client will continue polling.
+      // The 'pending' status will be shown on the frontend.
       if (error.code === 'PGRST116') {
-        console.log('SCAN-STATUS-DEBUG: No scan found with ID:', scanId);
-        console.log('SCAN-STATUS-DEBUG: Looking for scans for user ID:', userId);
-        
-        const { data: allScans, error: allScansError } = await supabase
-          .from('scan_history')
-          .select('scan_id, status, created_at')
-          .eq('user_id', userId)
-          .order('created_at', { ascending: false })
-          .limit(5);
-        
-        if (allScansError) {
-          console.error('SCAN-STATUS-DEBUG: Error fetching all scans:', allScansError);
-          return res.status(500).json({ error: allScansError.message });
-        }
-        
-        console.log('SCAN-STATUS-DEBUG: Found scans for user:', allScans);
-        
-        // If the specific scan was not found yet, it may still be initializing.
-        // Return placeholder with status 'pending' so frontend recognises it.
         return res.status(200).json({
           status: 'pending',
-          scan_id: scanId,
           progress: 0,
-          stats: {
-            emails_found: 0,
-            emails_to_process: 0,
-            emails_processed: 0,
-            subscriptions_found: 0
-          },
-          message: 'Scan is being set up, please wait...'
+          scan_id: scanId,
+          message: 'Scan record not yet available. The system is initializing the process.'
         });
-        // If we returned above, execution stops; otherwise fall through.
-      } else {
-        // Some other error occurred
-        return res.status(500).json({ error: error.message });
       }
-    }
-    
-    if (!scan) {
-      return res.status(404).json({ error: 'No scan found' });
+      // For other, unexpected errors, return a 500 status.
+      return res.status(500).json({ error: 'Failed to fetch scan status', details: error.message });
     }
 
-    // Calculate progress based on status
-    let progress = calculateProgress(scan);
+    if (!scan) {
+      // This case should ideally not be reached if the above logic is correct,
+      // but as a fallback, we indicate that the scan is not found.
+      return res.status(404).json({ error: 'No scan found for the given ID' });
+    }
+
+    // If the scan is found, return its data.
+    const progress = calculateProgress(scan);
 
     // Get stats for the scan
     const stats = {

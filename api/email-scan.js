@@ -1372,182 +1372,32 @@ const createScanRecord = async (req, userId, decoded) => {
 
 // Function to update scan status
 const updateScanStatus = async (scanId, dbUserId, updates) => {
-  const maxRetries = 3;
-  let lastError = null;
-  
-  console.log(`SCAN-DEBUG: updateScanStatus called at ${new Date().toISOString()}`);
-  console.log(`SCAN-DEBUG: updateScanStatus called for scan ${scanId}, user ${dbUserId}`);
-  console.log(`SCAN-DEBUG: Updates to apply:`, JSON.stringify(updates, null, 2));
-  
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      console.log(`SCAN-DEBUG: updateScanStatus attempt ${attempt}/${maxRetries}`);
-      console.log(`SCAN-DEBUG: updateScanStatus called for scan ${scanId}, user ${dbUserId} (attempt ${attempt}/${maxRetries})`);
-      console.log(`SCAN-DEBUG: Updates to apply:`, JSON.stringify(updates, null, 2));
-      
-      const timestamp = new Date().toISOString();
-      
-      // Filter out any fields that might not exist in the scan_history table
-      const allowedFields = [
-        'status', 'progress', 'emails_found', 'emails_to_process', 
-        'emails_processed', 'subscriptions_found', 'error_message', 
-        'completed_at', 'updated_at'
-      ];
-      
-      const filteredUpdates = {};
-      Object.keys(updates).forEach(key => {
-        if (allowedFields.includes(key)) {
-          filteredUpdates[key] = updates[key];
-        } else {
-          console.log(`SCAN-DEBUG: Skipping field '${key}' as it may not exist in scan_history table`);
-        }
-      });
-      
-      // Always include updated_at timestamp
-      filteredUpdates.updated_at = timestamp;
+  console.log(`SCAN-DEBUG: updateScanStatus called for scan ${scanId} with updates:`, updates);
 
-      // Ensure email stats are properly initialized
-      if (filteredUpdates.emails_found === undefined && filteredUpdates.emails_to_process === undefined && filteredUpdates.emails_processed === undefined) {
-        // Only fetch current scan status if ALL email stats are missing AND we're not just updating status/progress
-        const isStatusOnlyUpdate = Object.keys(filteredUpdates).every(key => 
-          ['status', 'progress', 'updated_at'].includes(key)
-        );
-        
-        if (!isStatusOnlyUpdate) {
-          console.log('SCAN-DEBUG: All email stats missing and not a status-only update, fetching current scan status');
-          
-          // Add timeout to prevent hanging
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-          
-          try {
-            const currentScan = await fetch(`${supabaseUrl}/rest/v1/scan_history?scan_id=eq.${scanId}`, {
-              headers: {
-                'apikey': supabaseKey,
-                'Authorization': `Bearer ${supabaseKey}`,
-                'Content-Type': 'application/json'
-              },
-              signal: controller.signal
-            });
-            
-            clearTimeout(timeoutId);
+  // Ensure 'updated_at' is always included
+  const updatesWithTimestamp = {
+    ...updates,
+    updated_at: new Date().toISOString(),
+  };
 
-            if (currentScan.ok) {
-              try {
-                const responseText = await currentScan.text();
-                if (responseText && responseText.trim()) {
-                  const currentData = JSON.parse(responseText);
-                  if (currentData && currentData.length > 0) {
-                    const current = currentData[0];
-                    // Use existing values or sensible defaults
-                    filteredUpdates.emails_found = current.emails_found || 0;
-                    filteredUpdates.emails_to_process = current.emails_to_process || 0;
-                    filteredUpdates.emails_processed = current.emails_processed || 0;
-                    console.log('SCAN-DEBUG: Initialized email stats from current scan:', {
-                      emails_found: filteredUpdates.emails_found,
-                      emails_to_process: filteredUpdates.emails_to_process,
-                      emails_processed: filteredUpdates.emails_processed
-                    });
-                  }
-                } else {
-                  console.log('SCAN-DEBUG: Empty response from current scan fetch, using defaults');
-                }
-              } catch (parseError) {
-                console.log('SCAN-DEBUG: Error parsing current scan response, using defaults:', parseError.message);
-              }
-            }
-          } catch (fetchError) {
-            clearTimeout(timeoutId);
-            if (fetchError.name === 'AbortError') {
-              console.log('SCAN-DEBUG: Current scan fetch timed out, using defaults');
-            } else {
-              console.log('SCAN-DEBUG: Error fetching current scan, using defaults:', fetchError.message);
-            }
-          }
-        } else {
-          console.log('SCAN-DEBUG: Status-only update, skipping email stats fetch');
-        }
-      } else {
-        // Ensure we have at least default values for missing stats
-        if (filteredUpdates.emails_found === undefined) {
-          filteredUpdates.emails_found = 0;
-        }
-        if (filteredUpdates.emails_to_process === undefined) {
-          filteredUpdates.emails_to_process = 0;
-        }
-        if (filteredUpdates.emails_processed === undefined) {
-          filteredUpdates.emails_processed = 0;
-        }
-      }
+  try {
+    const { error } = await supabase
+      .from('scan_history')
+      .update(updatesWithTimestamp)
+      .eq('scan_id', scanId);
 
-      console.log('SCAN-DEBUG: Final update data:', JSON.stringify(filteredUpdates, null, 2));
-
-      // Add timeout to prevent hanging
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
-      
-      const response = await fetch(`${supabaseUrl}/rest/v1/scan_history?scan_id=eq.${scanId}`, {
-        method: 'PATCH',
-        headers: {
-          'apikey': supabaseKey,
-          'Authorization': `Bearer ${supabaseKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(filteredUpdates),
-        signal: controller.signal
-      });
-      
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('SCAN-DEBUG: Failed to update scan status:', errorText);
-        console.error('SCAN-DEBUG: Response status:', response.status);
-        console.error('SCAN-DEBUG: Response headers:', Object.fromEntries(response.headers.entries()));
-        throw new Error(`Failed to update scan status: ${errorText}`);
-      }
-
-      // Handle the response more carefully
-      try {
-        const responseText = await response.text();
-        if (responseText && responseText.trim()) {
-          const responseData = JSON.parse(responseText);
-          console.log('SCAN-DEBUG: Successfully updated scan status. Response:', JSON.stringify(responseData, null, 2));
-        } else {
-          console.log('SCAN-DEBUG: Successfully updated scan status. Empty response (this is normal for PATCH operations).');
-        }
-      } catch (parseError) {
-        console.log('SCAN-DEBUG: Successfully updated scan status. Could not parse response (this is normal for PATCH operations):', parseError.message);
-      }
-      
-      // If we get here, the update was successful
-      return;
-      
-    } catch (error) {
-      lastError = error;
-      console.error(`SCAN-DEBUG: Error updating scan status (attempt ${attempt}/${maxRetries}):`, error);
-      
-      // Check if this is a retryable error
-      const isRetryableError = error.message.includes('EPIPE') || 
-                              error.message.includes('ECONNRESET') || 
-                              error.message.includes('socket hang up') ||
-                              error.message.includes('network') ||
-                              error.message.includes('timeout') ||
-                              error.name === 'AbortError';
-      
-      if (attempt < maxRetries && isRetryableError) {
-        const delay = Math.pow(2, attempt) * 1000; // Exponential backoff: 2s, 4s, 8s
-        console.log(`SCAN-DEBUG: Retrying in ${delay}ms...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-      } else {
-        console.error('SCAN-DEBUG: Max retries reached or non-retryable error, giving up');
-        throw error;
-      }
+    if (error) {
+      console.error(`SCAN-DEBUG: Supabase client error updating scan status for ${scanId}:`, error);
+      // Throw the error so the calling function's retry logic can handle it
+      throw error;
     }
+
+    console.log(`SCAN-DEBUG: Successfully updated scan status for ${scanId}`);
+  } catch (error) {
+    console.error(`SCAN-DEBUG: General error in updateScanStatus for scan ${scanId}:`, error);
+    // The calling function is responsible for handling this error.
+    throw error;
   }
-  
-  // If we get here, all retries failed
-  throw lastError;
 };
 
 const searchEmails = async (gmail, query) => {
