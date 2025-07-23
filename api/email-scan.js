@@ -1486,12 +1486,10 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
     console.log('SCAN-DEBUG: Fetched subscription examples:', subscriptionExamples.length);
     
     // Update progress
-    console.log('SCAN-DEBUG: About to update progress to 15...');
     await updateScanStatus(scanId, userId, {
       progress: 15,
       updated_at: new Date().toISOString()
     });
-    console.log('SCAN-DEBUG: Successfully updated progress to 15');
     
     console.log('SCAN-DEBUG: About to fetch emails from Gmail...');
     console.log('SCAN-DEBUG: Calling fetchEmailsFromGmail function...');
@@ -1500,15 +1498,7 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
     console.log('SCAN-DEBUG: Fetched emails from Gmail:', emails.length);
     console.log('SCAN-DEBUG: Email IDs sample:', emails.slice(0, 3));
     
-    // Update scan status with email count
-    console.log('SCAN-DEBUG: About to update scan status with email count...');
-    await updateScanStatus(scanId, userId, {
-      progress: 20,
-      emails_found: emails.length,
-      emails_to_process: emails.length,
-      updated_at: new Date().toISOString()
-    });
-    console.log('SCAN-DEBUG: Successfully updated scan status with email count');
+    // Record number of emails fetched in local variables instead of DB mid-run.
     
     if (emails.length === 0) {
       console.log('SCAN-DEBUG: No emails found, completing scan');
@@ -1543,14 +1533,7 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
     console.log('SCAN-DEBUG: Processed emails for subscriptions:', processedCount);
     console.log('SCAN-DEBUG: Found subscription emails:', subscriptionEmails.length);
     
-    // Update scan status with processing results
-    await updateScanStatus(scanId, userId, {
-      progress: 90,
-      emails_processed: processedCount,
-      emails_scanned: processedCount,
-      subscriptions_found: subscriptionEmails.length,
-      updated_at: new Date().toISOString()
-    });
+    // No mid-processing DB update; will write final status below.
     
     if (subscriptionEmails.length === 0) {
       console.log('SCAN-DEBUG: No subscriptions found, completing scan');
