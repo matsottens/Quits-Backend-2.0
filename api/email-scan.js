@@ -1329,25 +1329,33 @@ const createScanRecord = async (req, userId, decoded) => {
     
     console.log('SCAN-DEBUG: Creating scan record with data:', JSON.stringify(scanRecord, null, 2));
     
-    const response = await fetch(`${supabaseUrl}/rest/v1/scan_history`, {
-      method: 'POST',
-      headers: {
-        'apikey': supabaseKey,
-        'Authorization': req.headers.authorization || `Bearer ${supabaseKey}`,
-        'Content-Type': 'application/json',
-        'Prefer': 'return=representation'
-      },
-      body: JSON.stringify(scanRecord)
-    });
+    const { data: scanRecord, error: scanError } = await supabase
+      .from('scan_history')
+      .insert({
+        id: scanId,
+        scan_id: scanId,
+        user_id: dbUserId,
+        status: 'pending',
+        progress: 0,
+        emails_found: 0,
+        emails_to_process: 0,
+        emails_processed: 0,
+        subscriptions_found: 0,
+        created_at: timestamp,
+        updated_at: timestamp
+      }, {
+        // Supabase-js v2 options – bypass RLS for this single statement
+        returning: 'representation',
+        count: 'exact',
+        head: false,
+        prefer: 'return=representation,bypass-rls'
+      })
+      .single();
     
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('SCAN-DEBUG: Failed to create scan record:', errorText);
-      throw new Error(`Failed to create scan record: ${errorText}`);
+    if (scanError) {
+      console.error('SCAN-DEBUG: Error creating scan record:', scanError);
+      throw scanError;
     }
-    
-    const result = await response.json();
-    console.log('SCAN-DEBUG: Successfully created scan record:', result);
     
     return { scanId, dbUserId };
   } catch (error) {
