@@ -1314,7 +1314,7 @@ const createScanRecord = async (req, userId, decoded) => {
     const scanId = 'scan_' + Math.random().toString(36).substring(2, 15);
     const timestamp = new Date().toISOString();
     
-    const scanRecord = {
+    const scanRecordData = {
       scan_id: scanId,
       user_id: dbUserId, // Use the database user ID (UUID)
       status: 'pending',
@@ -1327,7 +1327,7 @@ const createScanRecord = async (req, userId, decoded) => {
       updated_at: timestamp
     };
     
-    console.log('SCAN-DEBUG: Creating scan record with data:', JSON.stringify(scanRecord, null, 2));
+    console.log('SCAN-DEBUG: Creating scan record with data:', JSON.stringify(scanRecordData, null, 2));
     
     const { data: scanRecord, error: scanError } = await supabase
       .from('scan_history')
