@@ -7,6 +7,15 @@ export default async function handler(req, res) {
 
   if (req.method === 'OPTIONS') return res.status(204).end();
 
+  const host = req.headers.host || '';
+  const isLocal = host.startsWith('localhost') || host.startsWith('127.0.0.1');
+
+  if (isLocal) {
+    // In local dev (no Vercel background), run heavy scan directly
+    const realScanHandler = (await import('../email-scan.js')).default;
+    return await realScanHandler(req, res);
+  }
+
   // Forward the request body & headers to the background function
   const origin = req.headers.host?.startsWith('localhost')
     ? `http://${req.headers.host}`
@@ -15,7 +24,7 @@ export default async function handler(req, res) {
   // Build headers without duplicating content-type
   const fwdHeaders = { 'Content-Type': 'application/json' };
   for (const [k, v] of Object.entries(req.headers)) {
-    if (k.toLowerCase() !== 'content-type') fwdHeaders[k] = v as string;
+    if (k.toLowerCase() !== 'content-type') fwdHeaders[k] = v;
   }
 
   fetch(`${origin}/api/email-scan-background`, {
