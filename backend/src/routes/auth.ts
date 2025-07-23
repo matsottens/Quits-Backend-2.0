@@ -5,7 +5,7 @@ import { supabase } from '../config/supabase';
 import { authenticateUser, AuthRequest } from '../middleware/auth';
 import { generateToken } from '../utils/jwt';
 import { upsertUser } from '../services/database';
-import { hashPassword, comparePassword } from '../utils/password.js';
+import { hashPassword, comparePassword } from '../utils/password';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = express.Router();

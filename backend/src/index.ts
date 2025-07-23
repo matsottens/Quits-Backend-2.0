@@ -14,16 +14,28 @@ import { handleGoogleProxy } from './routes/proxy';
 // Robust dotenv loading logic
 const env = process.env.NODE_ENV || 'development';
 const envFile = `.env.${env}`;
-let envPath = fs.existsSync(path.join(__dirname, '..', envFile))
-  ? path.join(__dirname, '..', envFile)
-  : fs.existsSync(path.join(__dirname, '..', '.env'))
-    ? path.join(__dirname, '..', '.env')
-    : undefined;
+let envPath: string | undefined;
 
-// Fallback: look two levels up (project root) for a generic .env
+// 1) Backend folder (.env.development / .env.production)
+if (fs.existsSync(path.join(__dirname, '..', envFile))) {
+  envPath = path.join(__dirname, '..', envFile);
+}
+
+// 2) Project root (.env.development / .env.production)
+if (!envPath && fs.existsSync(path.join(__dirname, '..', '..', envFile))) {
+  envPath = path.join(__dirname, '..', '..', envFile);
+}
+
+// 3) Backend folder (.env)
+if (!envPath && fs.existsSync(path.join(__dirname, '..', '.env'))) {
+  envPath = path.join(__dirname, '..', '.env');
+}
+
+// 4) Project root (.env)
 if (!envPath && fs.existsSync(path.join(__dirname, '..', '..', '.env'))) {
   envPath = path.join(__dirname, '..', '..', '.env');
 }
+
 if (envPath) {
   dotenv.config({ path: envPath });
 } else {
