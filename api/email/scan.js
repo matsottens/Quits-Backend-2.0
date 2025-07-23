@@ -74,7 +74,7 @@ export default async function handler(req, res) {
     // --- 4. Trigger the Background Job (Asynchronously) ---
     const origin = req.headers.host?.startsWith('localhost') ? `http://${req.headers.host}` : `https://${req.headers.host}`;
     const fwdHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
-    fetch(`${origin}/api/email-scan-background`, {
+    fetch(`${origin}/api/email-scan-bg`, {
       method: 'POST',
       headers: fwdHeaders,
       body: JSON.stringify({ scan_id: scanId }), // Pass only the essential ID
