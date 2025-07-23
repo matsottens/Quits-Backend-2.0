@@ -1,5 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
 
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseFnClient = createClient(supabaseUrl, supabaseServiceRoleKey);
+
 export default async function handler(req, res) {
   console.log('TRIGGER-DEBUG: ===== GEMINI SCAN TRIGGER CALLED =====');
   console.log('TRIGGER-DEBUG: Method:', req.method);
@@ -177,18 +181,21 @@ export default async function handler(req, res) {
     console.log('TRIGGER-DEBUG: Edge Function URL: https://dstsluflwxzkwouxcjkh.supabase.co/functions/v1/gemini-scan');
     
     // Fire-and-forget Edge Function call (no long wait)
-    fetch("https://dstsluflwxzkwouxcjkh.supabase.co/functions/v1/gemini-scan", {
-      method: "POST",
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
-      },
-      body: JSON.stringify({
-        scan_ids: scansToProcess.map(s => s.scan_id),
-        user_ids: scansToProcess.map(s => s.user_id)
-      })
-    }).then(r => console.log('TRIGGER-DEBUG: Edge Function invoked, status', r.status))
-      .catch(err => console.error('TRIGGER-DEBUG: Edge Function invoke error', err));
+    try {
+      const { data: fnData, error: fnErr } = await supabaseFnClient.functions.invoke('gemini-scan', {
+        body: {
+          scan_ids: scansToProcess.map(s => s.scan_id),
+          user_ids: scansToProcess.map(s => s.user_id)
+        }
+      });
+      if (fnErr) {
+        console.error('TRIGGER-DEBUG: Edge Function invoke error', fnErr);
+      } else {
+        console.log('TRIGGER-DEBUG: Edge Function invoke success');
+      }
+    } catch (invokeErr) {
+      console.error('TRIGGER-DEBUG: Edge Function invoke exception', invokeErr);
+    }
 
     return res.status(200).json({
       success: true,
