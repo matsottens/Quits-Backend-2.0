@@ -79,6 +79,13 @@ export const upsertUser = async (userInfo: any) => {
 
           if (!fetchErr && existing) {
             console.log('Found existing user after duplicate email:', existing.id);
+            // If we attempted to set a password and existing row lacks it, update
+            if (sanitizedUserInfo.password_hash && !existing.password_hash) {
+              await supabase
+                .from('users')
+                .update({ password_hash: sanitizedUserInfo.password_hash })
+                .eq('id', existing.id);
+            }
             return {
               id: existing.id,
               email: existing.email,
