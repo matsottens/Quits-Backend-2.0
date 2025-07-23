@@ -228,9 +228,7 @@ export default async function handler(req, res) {
           },
           message: 'Scan is being set up, please wait...'
         });
-         
-        // If no scans found at all, return 404 (this return is unreachable now)
-        }
+        // If we returned above, execution stops; otherwise fall through.
       } else {
         // Some other error occurred
         return res.status(500).json({ error: error.message });
