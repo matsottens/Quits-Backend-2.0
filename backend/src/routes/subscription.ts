@@ -95,7 +95,8 @@ router.post('/', (async (req: AuthRequest, res) => {
       return res.status(500).json({ error: 'Failed to create subscription' });
     }
     
-    return res.status(201).json(subscription);
+    // Wrap in object for consistent frontend handling
+    return res.status(201).json({ subscription });
   } catch (err) {
     console.error('Error creating subscription:', err);
     return res.status(500).json({ error: 'An error occurred while creating the subscription' });
@@ -139,7 +140,8 @@ router.put('/:id', (async (req: AuthRequest, res) => {
       return res.status(500).json({ error: 'Failed to update subscription' });
     }
     
-    return res.json(subscription);
+    // Wrap in object for consistent frontend handling
+    return res.json({ subscription });
   } catch (err) {
     console.error('Error updating subscription:', err);
     return res.status(500).json({ error: 'An error occurred while updating the subscription' });
