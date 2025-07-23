@@ -214,50 +214,22 @@ export default async function handler(req, res) {
         
         console.log('SCAN-STATUS-DEBUG: Found scans for user:', allScans);
         
-        // If we found scans, return the latest one instead of error
-        if (allScans && allScans.length > 0) {
-          const latestScan = allScans[0];
-          console.log('SCAN-STATUS-DEBUG: Returning latest scan instead:', latestScan.scan_id, ',', req.url);
-          
-          // Get the full scan data for the latest scan
-          const { data: fullScan, error: fullScanError } = await supabase
-            .from('scan_history')
-            .select('*')
-            .eq('scan_id', latestScan.scan_id)
-            .single();
-          
-          if (fullScanError) {
-            console.error('SCAN-STATUS-DEBUG: Error fetching full scan data:', fullScanError);
-            return res.status(500).json({ error: fullScanError.message });
-          }
-          
-          // Use the latest scan data
-          scan = fullScan;
-          error = null;
-          
-          // Add a warning in the response that we're returning a different scan
-          const responseData = {
-            status: scan.status, 
-            scan_id: scan.scan_id, 
-            created_at: scan.created_at,
-            progress: calculateProgress(scan),
-            stats: {
-              emails_found: scan.emails_found || 0,
-              emails_to_process: scan.emails_to_process || 0,
-              emails_processed: scan.emails_processed || 0,
-              subscriptions_found: scan.subscriptions_found || 0
-            },
-            warning: `Requested scan ID '${scanId}' not found. Returning latest scan '${scan.scan_id}' instead.`
-          };
-          
-          return res.status(200).json(responseData);
-        } else {
-          // No scans found at all
-          return res.status(404).json({ 
-            error: 'No scans found for user',
-            requested_scan_id: scanId,
-            user_id: userId
-          });
+        // If the specific scan was not found yet, it may still be initializing.
+        // Do NOT substitute another scan; instead return a placeholder response so the client keeps polling.
+        return res.status(200).json({
+          status: 'initializing',
+          scan_id: scanId,
+          progress: 0,
+          stats: {
+            emails_found: 0,
+            emails_to_process: 0,
+            emails_processed: 0,
+            subscriptions_found: 0
+          },
+          message: 'Scan is being set up, please wait...'
+        });
+         
+        // If no scans found at all, return 404 (this return is unreachable now)
         }
       } else {
         // Some other error occurred
