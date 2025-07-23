@@ -2,16 +2,6 @@
   "version": 2,
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "functions": {
-    "api/*.js": {
-      "memory": 2048,
-      "maxDuration": 30
-    },
-    "api/auth/**/*.js": {
-      "memory": 1024,
-      "maxDuration": 10
-    }
-  },
   "env": {
     "SUPABASE_URL": "https://dstsluflwxzkwouxcjkh.supabase.co",
     "SUPABASE_SERVICE_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRzdHNsdWZsd3h6a3dvdXhjamtoIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0NDAzMDE2NiwiZXhwIjoyMDU5NjA2MTY2fQ.wTG6R5ch0KvVMfpYqG2rvi3jPrU41pcvd1ZUmsLQ8",
@@ -65,7 +55,7 @@
     { "source": "/api/test-gemini-direct", "destination": "/api/test-gemini-direct.js" },
     { "source": "/api/trigger-analysis", "destination": "/api/trigger-analysis.js" },
     { "source": "/api/trigger-gemini-scan", "destination": "/api/combined-handlers.js" },
-    { "source": "/api/(.*)", "destination": "/api/combined-handlers.js" },
+    { "source": "/api/(.*)", "destination": "https://api-quits-2-0.vercel.app/api/$1" },
     { "source": "/((?!.*\\..*).*)", "destination": "/frontend/$1" }
   ],
   "crons": [
