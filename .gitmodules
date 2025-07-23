@@ -1,0 +1,3 @@
+[submodule "frontend"]
+	path = frontend
+	url = https://github.com/matsottens/Quits-frontend-2.0
