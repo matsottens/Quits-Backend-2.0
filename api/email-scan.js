@@ -1313,8 +1313,10 @@ const createScanRecord = async (req, userId, decoded) => {
     }
     
     // Generate database primary key (UUID) and separate business identifier with human-readable prefix
+    // If the caller already generated a scan_id, reuse it so the frontend can track status immediately.
+    const providedScanId = req.body?.scan_id;
     const id = randomUUID();
-    const scanId = 'scan_' + Math.random().toString(36).substring(2, 15);
+    const scanId = providedScanId && typeof providedScanId === 'string' ? providedScanId : 'scan_' + Math.random().toString(36).substring(2, 15);
     const timestamp = new Date().toISOString();
     
     const scanRecordData = {
