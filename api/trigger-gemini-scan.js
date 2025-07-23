@@ -256,12 +256,13 @@ export default async function handler(req, res) {
     // If all retries failed, reset scan status and return error
     console.error('TRIGGER-DEBUG: All Edge Function attempts failed');
     
-    // Reset scan status back to ready_for_analysis if Edge Function fails
+    // Mark scans as error to avoid infinite retry loops and provide visibility into the failure
     for (const scan of scansToProcess) {
       await supabase
         .from('scan_history')
         .update({ 
-          status: 'ready_for_analysis',
+          status: 'error',
+          error_message: lastError?.message || 'Edge Function failed after all retries',
           updated_at: new Date().toISOString()
         })
         .eq('scan_id', scan.scan_id);

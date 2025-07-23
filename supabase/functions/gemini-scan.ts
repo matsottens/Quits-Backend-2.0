@@ -20,6 +20,14 @@ const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
+// ===== Runtime Environment Validation (executes at import time) =====
+if (!GEMINI_API_KEY) {
+  console.warn("[gemini-scan] Warning: GEMINI_API_KEY is not set – analysis requests will fail. Scans will be marked as error.");
+}
+if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+  console.error("[gemini-scan] Error: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY missing – Edge Function cannot access database and will exit early.");
+}
+
 let requestCount = 0;
 let lastQuotaReset = Date.now();
 
@@ -40,6 +48,11 @@ function checkQuota(): boolean {
 
 // Improved batch analysis function with better prompt and error handling
 async function analyzeEmailsBatchWithGemini(emails: Array<{id: string, content: string, subject: string, sender: string}>) {
+  // Immediately abort if the key is not present – prevents unnecessary fetch attempts and clearer error reporting
+  if (!GEMINI_API_KEY) {
+    return { error: "Missing GEMINI_API_KEY", results: [] } as const;
+  }
+
   if (!checkQuota()) {
     return { error: "Rate limit reached", results: [] };
   }
@@ -299,6 +312,14 @@ Return ONLY the JSON array, no other text:`;
 }
 
 serve(async (req) => {
+  // Validate essential env variables once per invocation
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    console.error("[gemini-scan] Fatal: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not configured");
+    return new Response(JSON.stringify({
+      error: "Server misconfiguration: missing SUPABASE credentials"
+    }), { status: 500, headers: corsHeaders });
+  }
+
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
   try {
@@ -364,6 +385,19 @@ serve(async (req) => {
         .select("*")
         .eq("scan_id", scan.scan_id)
         .eq("analysis_status", "pending");
+
+      // If there are *no* pending analyses for this scan after email collection, finish early to avoid getting stuck in "analyzing"
+      if (!subscriptionError && (!potentialSubscriptions || potentialSubscriptions.length === 0)) {
+        console.log(`[gemini-scan] No pending analyses for scan ${scan.scan_id} – marking as completed (0 subscriptions found)`);
+        await supabase.from("scan_history").update({
+          status: "completed",
+          completed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          subscriptions_found: 0
+        }).eq("id", scan.id);
+        totalProcessed++;
+        continue; // move to next scan
+      }
 
       if (subscriptionError) {
         console.error(`Failed to fetch potential subscriptions for scan ${scan.scan_id}:`, subscriptionError);
@@ -445,6 +479,14 @@ serve(async (req) => {
         });
         
         if (batchError) {
+          // Provide clearer error propagation to the parent scan record so the dashboard can surface it
+          await supabase.from("scan_history").update({
+            status: "error",
+            // Cast batchError to any to safely access message in non-strict Deno environment
+            error_message: typeof batchError === "string" ? batchError : JSON.stringify(batchError as any),
+            updated_at: new Date().toISOString()
+          }).eq("id", scan.id);
+
           if (typeof batchError === 'object' && batchError.quota_exhausted) {
               quotaExhausted = true;
             console.log(`Quota exhausted for scan ${scan.scan_id}`);
