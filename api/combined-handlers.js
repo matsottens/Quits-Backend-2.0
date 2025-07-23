@@ -52,7 +52,6 @@ const routeMap = {
   '/api/manual-subscription': () => import('./manual-subscription.js').then(m => m.default || m),
   '/api/email/suggestions': () => import('./email/suggestions.js').then(m => m.default || m),
   '/api/email/scan': () => import('./email/scan.js').then(m => m.default || m),
-  '/api/email-scan-background': () => import('./email-scan-background.js').then(m => m.default || m),
   '/api/export-subscriptions': () => import('./export-subscriptions.js').then(m => m.default || m),
   '/api/health': () => import('./health.js').then(m => m.default || m),
   // New Gemini analysis endpoints
