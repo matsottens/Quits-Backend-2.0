@@ -5,6 +5,8 @@ import { supabase } from '../config/supabase';
 import { authenticateUser, AuthRequest } from '../middleware/auth';
 import { generateToken } from '../utils/jwt';
 import { upsertUser } from '../services/database';
+import { hashPassword, comparePassword } from '../utils/password.js';
+import { v4 as uuidv4 } from 'uuid';
 
 const router = express.Router();
 
@@ -635,3 +637,154 @@ router.options('/google/callback/direct2-test', ((req: Request, res: Response) =
 // });
 
 export default router; 
+
+// ---------------------------
+// Email & Password Auth Flow
+// ---------------------------
+
+// Create account (signup)
+router.post('/signup', async (req: Request, res: Response) => {
+  try {
+    const { email, password, name } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+
+    // Check existing user
+    const { data: existing } = await supabase
+      .from('users')
+      .select('id, password_hash')
+      .eq('email', email)
+      .single();
+
+    if (existing && existing.password_hash) {
+      return res.status(400).json({ error: 'User already exists. Please log in.' });
+    }
+
+    const password_hash = await hashPassword(password);
+
+    const user = await upsertUser({ email, name, password_hash });
+
+    const token = await generateToken({ id: user.id, email: user.email });
+
+    return res.status(201).json({ token, user });
+  } catch (error: any) {
+    console.error('/signup error:', error.message);
+    return res.status(500).json({ error: 'Signup failed' });
+  }
+});
+
+// Login with email/password
+router.post('/login', async (req: Request, res: Response) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('id, email, name, avatar_url, password_hash')
+      .eq('email', email)
+      .single();
+
+    if (error || !user) {
+      return res.status(400).json({ error: 'Invalid credentials' });
+    }
+
+    if (!user.password_hash) {
+      return res.status(400).json({ error: 'Please use Google login for this account' });
+    }
+
+    const valid = await comparePassword(password, user.password_hash);
+    if (!valid) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const token = await generateToken({ id: user.id, email: user.email });
+
+    // Omit password_hash from response
+    const { password_hash, ...safeUser } = user as any;
+
+    return res.json({ token, user: safeUser });
+  } catch (error: any) {
+    console.error('/login error:', error.message);
+    return res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+// Forgot password - generate reset token
+router.post('/forgot-password', async (req: Request, res: Response) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email is required' });
+
+    const { data: user } = await supabase
+      .from('users')
+      .select('id')
+      .eq('email', email)
+      .single();
+
+    if (!user) {
+      // Do not reveal user existence
+      return res.json({ success: true });
+    }
+
+    const token = uuidv4();
+    const expires_at = new Date(Date.now() + 1000 * 60 * 60).toISOString(); // 1h
+
+    await supabase.from('password_reset_tokens').insert({ user_id: user.id, token, expires_at });
+
+    // TODO: send email with reset link containing the token
+
+    // For development, return token
+    return res.json({ success: true, token: process.env.NODE_ENV !== 'production' ? token : undefined });
+  } catch (error: any) {
+    console.error('/forgot-password error:', error.message);
+    return res.status(500).json({ error: 'Failed to initiate password reset' });
+  }
+});
+
+// Reset password
+router.post('/reset-password', async (req: Request, res: Response) => {
+  try {
+    const { token, password } = req.body;
+    if (!token || !password) return res.status(400).json({ error: 'Token and new password are required' });
+
+    const { data: tokenRow } = await supabase
+      .from('password_reset_tokens')
+      .select('id, user_id, expires_at')
+      .eq('token', token)
+      .single();
+
+    if (!tokenRow) {
+      return res.status(400).json({ error: 'Invalid token' });
+    }
+
+    if (new Date(tokenRow.expires_at) < new Date()) {
+      return res.status(400).json({ error: 'Token expired' });
+    }
+
+    const password_hash = await hashPassword(password);
+    await supabase.from('users').update({ password_hash }).eq('id', tokenRow.user_id);
+
+    // Delete token
+    await supabase.from('password_reset_tokens').delete().eq('id', tokenRow.id);
+
+    // Fetch user & issue token
+    const { data: user } = await supabase
+      .from('users')
+      .select('id, email, name, avatar_url')
+      .eq('id', tokenRow.user_id)
+      .single();
+
+    const jwt = await generateToken({ id: user.id, email: user.email });
+
+    return res.json({ token: jwt, user });
+  } catch (error: any) {
+    console.error('/reset-password error:', error.message);
+    return res.status(500).json({ error: 'Failed to reset password' });
+  }
+}); 

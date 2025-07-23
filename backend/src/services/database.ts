@@ -14,6 +14,8 @@ export const upsertUser = async (userInfo: any) => {
       // maintain legacy picture property for callers that still expect it
       picture: userInfo.picture || null,
       verified_email: typeof userInfo.verified_email === 'boolean' ? userInfo.verified_email : null,
+      // Only set password_hash if supplied (avoids overwriting existing hashes)
+      ...(userInfo.password_hash ? { password_hash: userInfo.password_hash } : {}),
     };
 
     // If caller provided a valid UUID, keep it so we can upsert on primary key
