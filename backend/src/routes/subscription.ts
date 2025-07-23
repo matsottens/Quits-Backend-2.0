@@ -78,10 +78,13 @@ router.post('/', (async (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'Missing required fields' });
     }
     
+    // Use internal UUID (dbUserId) for the FK relationship
+    const dbUserId = (req as any).dbUserId || req.user?.id;
+
     const { data: subscription, error } = await supabase
       .from('subscriptions')
       .insert({
-        user_id: req.user?.id,
+        user_id: dbUserId,
         name,
         price,
         currency,
