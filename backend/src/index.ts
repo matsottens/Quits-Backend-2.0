@@ -10,6 +10,7 @@ import subscriptionRoutes from './routes/subscription';
 import scanRoutes from './routes/scan';
 import { handleGoogleCallback } from './routes/googleCallback';
 import { handleGoogleProxy } from './routes/proxy';
+import listEndpoints from 'express-list-endpoints';
 
 // Robust dotenv loading logic
 const env = process.env.NODE_ENV || 'development';
@@ -242,4 +243,13 @@ app.get('/api/health', (req: Request, res: Response) => {
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Test OAuth page available at: http://localhost:${PORT}/test-oauth.html`);
+}); 
+
+// Add a debug route to list all registered endpoints
+app.get('/api/debug/routes', (req: Request, res: Response) => {
+  const routes = listEndpoints(app);
+  res.status(200).json({
+    message: 'Available routes on the Express backend:',
+    routes,
+  });
 }); 
