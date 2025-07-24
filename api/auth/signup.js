@@ -1,13 +1,11 @@
-import fetch from 'node-fetch';
-
 export default async function handler(req, res) {
   const backendUrl = process.env.BACKEND_URL || 'https://api-quits-2-0.vercel.app';
   const target = `${backendUrl}/api/auth/signup`;
 
   const options = {
     method: req.method,
-    headers: { ...req.headers, host: undefined },
-    body: req.method === 'GET' || req.method === 'HEAD' ? undefined : JSON.stringify(req.body)
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(req.body)
   };
 
   try {
