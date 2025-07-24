@@ -89,6 +89,10 @@ export default async function handler(req, res) {
   // Parse request body for non-GET requests
   await parseBody(req);
   
+  console.log(`[combined-handlers] Body parsing completed`);
+  console.log(`[combined-handlers] Request body:`, req.body);
+  console.log(`[combined-handlers] Content-Type:`, req.headers['content-type']);
+  
   // Parse the request URL
   const parsedUrl = url.parse(req.url, true);
   let path = parsedUrl.pathname;
