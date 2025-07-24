@@ -86,8 +86,13 @@ export default async function handler(req, res) {
 
     console.log('[signup] User created successfully, generating JWT...');
     // Generate JWT
+    const tokenPayload = {
+      id: user.id,
+      email: user.email,
+      name: user.name
+    };
     const token = jwt.sign(
-      { userId: user.id, email: user.email },
+      tokenPayload,
       process.env.JWT_SECRET,
       { expiresIn: '24h' }
     );

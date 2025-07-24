@@ -236,6 +236,35 @@ export default async function handler(req, res) {
           // Fallback to Google ID if Supabase fails (avoids total breakage)
           if (!internalId) internalId = userInfo.id;
 
+          // Update Supabase user row with Google credentials (linking Gmail to existing account)
+          try {
+            if (internalId && tokens.refresh_token) {
+              const supabaseUrl = process.env.SUPABASE_URL;
+              const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+              if (supabaseUrl && supabaseKey) {
+                console.log('Updating user row with Gmail credentials');
+                const updateRes = await fetchNode(`${supabaseUrl}/rest/v1/users?id=eq.${internalId}`, {
+                  method: 'PATCH',
+                  headers: {
+                    apikey: supabaseKey,
+                    Authorization: `Bearer ${supabaseKey}`,
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({
+                    google_id: userInfo.id,
+                    gmail_refresh_token: tokens.refresh_token,
+                    gmail_access_token: tokens.access_token,
+                    gmail_token_expires_at: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,
+                    profile_picture: userInfo.picture
+                  })
+                });
+                console.log('Supabase update status:', updateRes.status);
+              }
+            }
+          } catch (updateError) {
+            console.error('Error updating Supabase user with Gmail tokens:', updateError);
+          }
+
           // Generate a JWT token with the correct internalId
           const jwt = await import('jsonwebtoken');
           console.log('Generating JWT token with internal id:', internalId);
