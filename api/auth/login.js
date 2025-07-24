@@ -1,5 +1,5 @@
 export default async function handler(req, res) {
-  const backendUrl = process.env.BACKEND_URL || 'https://api-quits-2-0.vercel.app';
+  const backendUrl = process.env.BACKEND_URL || 'https://quits-backend-2-0-1bblh2ud0-mats-ottens-hotmailcoms-projects.vercel.app';
   const target = `${backendUrl}/api/auth/login`;
 
   const options = {
