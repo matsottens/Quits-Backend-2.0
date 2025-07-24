@@ -60,7 +60,11 @@ const routeMap = {
   '/api/trigger-gemini-scan': () => import('./trigger-gemini-scan.js').then(m => m.default || m),
   // Debug endpoints
   '/api/debug-scan-status': () => import('./debug-scan-status.js').then(m => m.default || m),
-  '/api/check-gemini-quota': () => import('./check-gemini-quota.js').then(m => m.default || m)
+  '/api/check-gemini-quota': () => import('./check-gemini-quota.js').then(m => m.default || m),
+  '/api/auth/signup': () => import('./auth/signup.js').then(m => m.default || m),
+  '/api/auth/login': () => import('./auth/login.js').then(m => m.default || m),
+  '/api/auth/forgot-password': () => import('./auth/forgot-password.js').then(m => m.default || m),
+  '/api/auth/reset-password': () => import('./auth/reset-password.js').then(m => m.default || m)
 };
 
 // Cache for loaded handlers

@@ -2,7 +2,7 @@ import fetch from 'node-fetch';
 
 export default async function handler(req, res) {
   const backendUrl = process.env.BACKEND_URL || 'https://api-quits-2-0.vercel.app';
-  const target = `${backendUrl}/api/auth/signup`;
+  const target = `${backendUrl}/api/auth/login`;
 
   const options = {
     method: req.method,
