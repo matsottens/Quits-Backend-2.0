@@ -99,4 +99,61 @@ export default async function handler(req, res) {
   }
   
   console.log(`[combined-handlers] ===== REQUEST RECEIVED =====`);
-  console.log(`
+  console.log(`[combined-handlers] Path: ${path}`);
+  console.log(`[combined-handlers] Method: ${req.method}`);
+  console.log(`[combined-handlers] URL: ${req.url}`);
+  console.log(`[combined-handlers] Headers:`, Object.keys(req.headers));
+  console.log(`[combined-handlers] Origin: ${req.headers.origin}`);
+  console.log(`[combined-handlers] Referer: ${req.headers.referer}`);
+
+  // Special handling for trigger-gemini-scan endpoint
+  if (path === '/api/trigger-gemini-scan') {
+    console.log(`[combined-handlers] === TRIGGER-GEMINI-SCAN SPECIAL HANDLING ===`);
+    console.log(`[combined-handlers] Method: ${req.method}`);
+    console.log(`[combined-handlers] Body:`, req.body);
+    console.log(`[combined-handlers] Query:`, parsedUrl.query);
+  }
+
+  try {
+    const matchedHandler = await findHandler(path);
+
+    if (matchedHandler) {
+      console.log(`[combined-handlers] Found handler for path: ${path}`);
+      return await matchedHandler(req, res);
+    }
+
+    console.log(`[combined-handlers] No handler found for path: ${path}`);
+    return res.status(404).json({ error: 'API endpoint not found' });
+  } catch (error) {
+    console.error(`[combined-handlers] Error executing handler for ${path}:`, error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+}
+
+// Helper to load the appropriate handler
+async function findHandler(path) {
+  console.log(`[combined-handlers] findHandler called for path: ${path}`);
+
+  // Cached?
+  if (handlerCache[path]) {
+    return handlerCache[path];
+  }
+
+  // Exact match
+  if (routeMap[path]) {
+    const handler = await routeMap[path]();
+    handlerCache[path] = handler;
+    return handler;
+  }
+
+  // Nested match (e.g., /api/subscription/123)
+  for (const routePath in routeMap) {
+    if (path.startsWith(routePath + '/')) {
+      const handler = await routeMap[routePath]();
+      handlerCache[path] = handler;
+      return handler;
+    }
+  }
+
+  return null;
+}
