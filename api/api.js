@@ -90,6 +90,66 @@ const getDebugHandler = async (path) => {
   return null;
 };
 
+// Function to extract the original path from Vercel rewrite
+function extractOriginalPath(req, parsedUrl) {
+  let path = parsedUrl.pathname;
+  
+  // If we're at the api.js endpoint, we need to reconstruct the original path
+  if (path === '/api/api.js') {
+    // Try multiple methods to get the original path
+    
+    // Method 1: Check for Vercel-specific headers
+    const originalPath = req.headers['x-vercel-original-path'] || 
+                        req.headers['x-original-path'] ||
+                        req.headers['x-vercel-rewrite-path'];
+    
+    if (originalPath) {
+      console.log(`[api] Found original path in headers: ${originalPath}`);
+      return originalPath;
+    }
+    
+    // Method 2: Try to extract from the host header and referer
+    const host = req.headers.host;
+    const referer = req.headers.referer;
+    
+    if (referer && host) {
+      try {
+        const refererUrl = new URL(referer);
+        if (refererUrl.hostname === host.split(':')[0]) {
+          const refererPath = refererUrl.pathname;
+          if (refererPath.startsWith('/api/')) {
+            console.log(`[api] Extracted path from referer: ${refererPath}`);
+            return refererPath;
+          }
+        }
+      } catch (e) {
+        console.log(`[api] Could not parse referer URL: ${referer}`);
+      }
+    }
+    
+    // Method 3: Try to get from the original URL if available
+    const originalUrl = req.headers['x-vercel-original-url'] || req.url;
+    if (originalUrl && originalUrl !== req.url) {
+      try {
+        const originalParsed = url.parse(originalUrl);
+        if (originalParsed.pathname && originalParsed.pathname.startsWith('/api/')) {
+          console.log(`[api] Extracted path from original URL: ${originalParsed.pathname}`);
+          return originalParsed.pathname;
+        }
+      } catch (e) {
+        console.log(`[api] Could not parse original URL: ${originalUrl}`);
+      }
+    }
+    
+    // Method 4: Fallback - try to reconstruct from the request context
+    // This is a last resort and may not work perfectly
+    console.log(`[api] Could not determine original path, using fallback`);
+    return '/api/unknown';
+  }
+  
+  return path;
+}
+
 export default async function handler(req, res) {
   try {
     // Apply CORS middleware first
@@ -97,9 +157,14 @@ export default async function handler(req, res) {
     
     // Parse the URL
     const parsedUrl = url.parse(req.url, true);
-    const path = parsedUrl.pathname;
+    let path = extractOriginalPath(req, parsedUrl);
     
     console.log(`[api] Request received for: ${path}`);
+    console.log(`[api] Original URL: ${req.url}`);
+    console.log(`[api] Query params:`, parsedUrl.query);
+    console.log(`[api] Headers:`, Object.keys(req.headers));
+    console.log(`[api] Host: ${req.headers.host}`);
+    console.log(`[api] Referer: ${req.headers.referer}`);
     
     // Handle simple/static responses first
     if (simpleHandlers[path]) {
@@ -123,7 +188,16 @@ export default async function handler(req, res) {
     // If we get here, no handler was found
     return res.status(404).json({
       error: 'Not Found',
-      message: `No API handler found for path: ${path}`
+      message: `No API handler found for path: ${path}`,
+      debug: {
+        originalUrl: req.url,
+        parsedPath: parsedUrl.pathname,
+        reconstructedPath: path,
+        queryParams: parsedUrl.query,
+        headers: Object.keys(req.headers),
+        host: req.headers.host,
+        referer: req.headers.referer
+      }
     });
   } catch (error) {
     console.error('Unhandled error in API gateway:', error);

@@ -8,7 +8,6 @@
     }
   },
   "rewrites": [
-    { "source": "/api", "destination": "/api/api.js" },
     { "source": "/api/(.*)", "destination": "/api/api.js" },
     { "source": "/favicon.ico", "destination": "/api/api.js" }
   ],

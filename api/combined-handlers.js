@@ -93,18 +93,24 @@ export default async function handler(req, res) {
   const parsedUrl = url.parse(req.url, true);
   let path = parsedUrl.pathname;
 
-  // Normalize double /api prefix that can happen after Vercel rewrites
-  if (path.startsWith('/api/api/')) {
-    path = path.replace('/api/api/', '/api/');
-  }
-  
+  // Enhanced path normalization for Vercel rewrites
   console.log(`[combined-handlers] ===== REQUEST RECEIVED =====`);
-  console.log(`[combined-handlers] Path: ${path}`);
+  console.log(`[combined-handlers] Original path: ${path}`);
   console.log(`[combined-handlers] Method: ${req.method}`);
   console.log(`[combined-handlers] URL: ${req.url}`);
+  console.log(`[combined-handlers] Query params:`, parsedUrl.query);
   console.log(`[combined-handlers] Headers:`, Object.keys(req.headers));
   console.log(`[combined-handlers] Origin: ${req.headers.origin}`);
   console.log(`[combined-handlers] Referer: ${req.headers.referer}`);
+
+  // The path should already be normalized by api.js, but let's handle edge cases
+  if (path.startsWith('/api/api/')) {
+    // Double /api prefix from Vercel rewrites
+    path = path.replace('/api/api/', '/api/');
+    console.log(`[combined-handlers] Fixed double /api prefix: ${path}`);
+  }
+
+  console.log(`[combined-handlers] Final normalized path: ${path}`);
 
   // Special handling for trigger-gemini-scan endpoint
   if (path === '/api/trigger-gemini-scan') {
@@ -123,7 +129,16 @@ export default async function handler(req, res) {
     }
 
     console.log(`[combined-handlers] No handler found for path: ${path}`);
-    return res.status(404).json({ error: 'API endpoint not found' });
+    console.log(`[combined-handlers] Available routes:`, Object.keys(routeMap));
+    return res.status(404).json({ 
+      error: 'API endpoint not found',
+      debug: {
+        requestedPath: path,
+        originalUrl: req.url,
+        availableRoutes: Object.keys(routeMap),
+        queryParams: parsedUrl.query
+      }
+    });
   } catch (error) {
     console.error(`[combined-handlers] Error executing handler for ${path}:`, error);
     return res.status(500).json({ error: 'Internal server error' });
