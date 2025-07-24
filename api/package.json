@@ -12,8 +12,10 @@
   "description": "Quits API backend",
   "dependencies": {
     "@supabase/supabase-js": "^2.50.5",
+    "bcryptjs": "^2.4.3",
     "googleapis": "^126.0.1",
     "jsonwebtoken": "^9.0.2",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^3.3.2",
+    "uuid": "^9.0.1"
   }
 }
