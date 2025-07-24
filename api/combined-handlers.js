@@ -39,31 +39,36 @@ function parseBody(req) {
 // Define the route map with lazy-loaded handlers
 const routeMap = {
   // Core API routes
-  '/scan': () => import('./email-scan.js').then(m => m.default || m),
-  '/email-scan': () => import('./email-scan.js').then(m => m.default || m),
-  '/scan-status': () => import('./scan-status.js').then(m => m.default || m),
-  '/email/status': () => import('./scan-status.js').then(m => m.default || m),
+  '/api/scan': () => import('./email-scan.js').then(m => m.default || m),
+  '/api/email-scan': () => import('./email-scan.js').then(m => m.default || m),
+  '/api/scan-status': () => import('./scan-status.js').then(m => m.default || m),
+  '/api/email/status': () => import('./scan-status.js').then(m => m.default || m),
   // Route all /api/subscription and /api/subscription/[id] to the catch-all handler
-  '/subscription': () => import('./subscription/[[...path]].js').then(m => m.default || m),
-  '/subscriptions': () => import('./subscription/[[...path]].js').then(m => m.default || m),
-  '/auth/google/url': () => import('./google-auth-url.js').then(m => m.default || m),
-  '/auth/google/callback': () => import('./auth-callback.js').then(m => m.default || m),
-  '/auth/me': () => import('./auth-me.js').then(m => m.default || m),
-  '/manual-subscription': () => import('./manual-subscription.js').then(m => m.default || m),
-  '/email/suggestions': () => import('./email/suggestions.js').then(m => m.default || m),
-  '/email/scan': () => import('./email/scan.js').then(m => m.default || m),
-  '/export-subscriptions': () => import('./export-subscriptions.js').then(m => m.default || m),
-  '/health': () => import('./health.js').then(m => m.default || m),
+  '/api/subscription': () => import('./subscription/[[...path]].js').then(m => m.default || m),
+  '/api/subscriptions': () => import('./subscription/[[...path]].js').then(m => m.default || m),
+  '/api/auth/google/url': () => import('./google-auth-url.js').then(m => m.default || m),
+  '/api/auth/google/callback': () => import('./auth-callback.js').then(m => m.default || m),
+  '/api/auth/me': () => import('./auth-me.js').then(m => m.default || m),
+  '/api/manual-subscription': () => import('./manual-subscription.js').then(m => m.default || m),
+  '/api/email/suggestions': () => import('./email/suggestions.js').then(m => m.default || m),
+  '/api/email/scan': () => import('./email/scan.js').then(m => m.default || m),
+  '/api/export-subscriptions': () => import('./export-subscriptions.js').then(m => m.default || m),
+  '/api/health': () => import('./health.js').then(m => m.default || m),
   // New Gemini analysis endpoints
-  '/analyze-emails': () => import('./analyze-emails.js').then(m => m.default || m),
-  '/analyzed-subscriptions': () => import('./analyzed-subscriptions.js').then(m => m.default || m),
-  '/trigger-gemini-scan': () => import('./trigger-gemini-scan.js').then(m => m.default || m),
+  '/api/analyze-emails': () => import('./analyze-emails.js').then(m => m.default || m),
+  '/api/analyzed-subscriptions': () => import('./analyzed-subscriptions.js').then(m => m.default || m),
+  '/api/trigger-gemini-scan': () => import('./trigger-gemini-scan.js').then(m => m.default || m),
   // Debug endpoints
-  '/debug-scan-status': () => import('./debug-scan-status.js').then(m => m.default || m),
-  '/check-gemini-quota': () => import('./check-gemini-quota.js').then(m => m.default || m),
+  '/api/debug-scan-status': () => import('./debug-scan-status.js').then(m => m.default || m),
+  '/api/check-gemini-quota': () => import('./check-gemini-quota.js').then(m => m.default || m),
+  // Auth routes - handle both with and without /api prefix due to Vercel path stripping
+  '/api/auth/signup': () => import('./auth/signup.js').then(m => m.default || m),
   '/auth/signup': () => import('./auth/signup.js').then(m => m.default || m),
+  '/api/auth/login': () => import('./auth/login.js').then(m => m.default || m),
   '/auth/login': () => import('./auth/login.js').then(m => m.default || m),
+  '/api/auth/forgot-password': () => import('./auth/forgot-password.js').then(m => m.default || m),
   '/auth/forgot-password': () => import('./auth/forgot-password.js').then(m => m.default || m),
+  '/api/auth/reset-password': () => import('./auth/reset-password.js').then(m => m.default || m),
   '/auth/reset-password': () => import('./auth/reset-password.js').then(m => m.default || m)
 };
 
