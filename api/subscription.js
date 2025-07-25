@@ -13,10 +13,22 @@ const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
 const supabaseKey = supabaseServiceRoleKey || supabaseServiceKey;
 
-// Use caller JWT if provided, else fall back to service/anon key – needed for RLS on Vercel
-const AUTH_HEADER = req.headers && req.headers.authorization ? req.headers.authorization : `Bearer ${supabaseKey}`;
-// Use service-role key for inserts if we have it; otherwise fall back to caller JWT
-const INSERT_AUTH = supabaseKey && supabaseKey.includes('service_role') ? `Bearer ${supabaseKey}` : AUTH_HEADER;
+// NOTE: We must NOT reference `req` before the handler is invoked, because `req` is only
+// available at runtime. Define helpers that can compute the appropriate auth headers once
+// we have the request object.
+const buildAuthHeaders = (req) => {
+  // Use caller JWT if provided, else fall back to service/anon key – needed for RLS on Vercel
+  const AUTH_HEADER = req.headers && req.headers.authorization
+    ? req.headers.authorization
+    : `Bearer ${supabaseKey}`;
+
+  // Use service-role key for inserts if we have it; otherwise fall back to caller JWT
+  const INSERT_AUTH = supabaseKey && supabaseKey.includes('service_role')
+    ? `Bearer ${supabaseKey}`
+    : AUTH_HEADER;
+
+  return { AUTH_HEADER, INSERT_AUTH };
+};
 
 console.log(`Supabase URL defined: ${!!supabaseUrl}`);
 console.log(`Supabase key defined: ${!!supabaseKey}`);
@@ -28,6 +40,9 @@ console.log(`Supabase key role: ${supabaseKey ? (supabaseKey.includes('role":"se
 const supabase = createClient(supabaseUrl, supabaseKey); 
 
 export default async function handler(req, res) {
+  // Build request-scoped auth headers (cannot do this at module scope)
+  const { AUTH_HEADER, INSERT_AUTH } = buildAuthHeaders(req);
+
   // Set CORS headers for all response types
   res.setHeader('Access-Control-Allow-Origin', 'https://www.quits.cc');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH');
