@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { setCorsHeaders } from '../cors-middleware.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -17,7 +18,8 @@ export default async function handler(req, res) {
   console.log('[signup] - SUPABASE_SERVICE_ROLE_KEY:', process.env.SUPABASE_SERVICE_ROLE_KEY ? 'SET' : 'MISSING');
   console.log('[signup] - JWT_SECRET:', process.env.JWT_SECRET ? 'SET' : 'MISSING');
 
-  // CORS headers are already set by the middleware, so we don't need to set them again
+  // Apply shared CORS headers
+  setCorsHeaders(req, res);
   
   if (req.method === 'OPTIONS') {
     console.log('[signup] OPTIONS request, returning 200');

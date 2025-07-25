@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { setCorsHeaders } from '../cors-middleware.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -8,10 +9,8 @@ const supabase = createClient(
 );
 
 export default async function handler(req, res) {
-  // Enable CORS
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  // Use shared CORS headers (mirrors request origin, allows credentials)
+  setCorsHeaders(req, res);
   
   if (req.method === 'OPTIONS') {
     res.status(200).end();
