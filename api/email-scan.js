@@ -1250,8 +1250,10 @@ const createScanRecord = async (req, userId, decoded) => {
     
     const userEmail = decoded.email;
     
+    // Search by email, google_id OR the internal UUID (id) from the JWT to avoid
+    // creating duplicate rows when the Gmail address differs from the sign-up e-mail.
     const userLookupResponse = await fetch(
-      `${supabaseUrl}/rest/v1/users?select=id,email,google_id&or=(email.eq.${encodeURIComponent(userEmail)},google_id.eq.${encodeURIComponent(userId)})`, 
+      `${supabaseUrl}/rest/v1/users?select=id,email,google_id&or=(email.eq.${encodeURIComponent(userEmail)},google_id.eq.${encodeURIComponent(userId)},id.eq.${encodeURIComponent(userId)})`, 
       {
         method: 'GET',
         headers: {
@@ -1275,6 +1277,11 @@ const createScanRecord = async (req, userId, decoded) => {
     if (!users || users.length === 0) {
       console.log(`SCAN-DEBUG: User not found in database, creating new user for: ${userEmail}`);
       
+      // Use service-role key for inserts to bypass RLS
+      const insertAuth = supabaseServiceRoleKey
+        ? `Bearer ${supabaseServiceRoleKey}`
+        : `Bearer ${supabaseKey}`;
+
       // Create a new user
       const createUserResponse = await fetch(
         `${supabaseUrl}/rest/v1/users`, 
@@ -1282,7 +1289,7 @@ const createScanRecord = async (req, userId, decoded) => {
           method: 'POST',
           headers: {
             'apikey': supabaseKey,
-            'Authorization': `Bearer ${supabaseKey}`,
+            'Authorization': insertAuth,
             'Content-Type': 'application/json',
             'Prefer': 'return=representation'
           },
@@ -1329,24 +1336,27 @@ const createScanRecord = async (req, userId, decoded) => {
     
     console.log('SCAN-DEBUG: Creating scan record with data:', JSON.stringify(scanRecord, null, 2));
     
-    const response = await fetch(`${supabaseUrl}/rest/v1/scan_history`, {
-      method: 'POST',
-      headers: {
-        'apikey': supabaseKey,
-        'Authorization': req.headers.authorization || `Bearer ${supabaseKey}`,
-        'Content-Type': 'application/json',
-        'Prefer': 'return=representation'
-      },
-      body: JSON.stringify(scanRecord)
-    });
+    const scanRecordResponse = await fetch(
+      `${supabaseUrl}/rest/v1/scan_history`,
+      {
+        method: 'POST',
+        headers: {
+          'apikey': supabaseKey,
+          'Authorization': insertAuth,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation'
+        },
+        body: JSON.stringify(scanRecord)
+      }
+    );
     
-    if (!response.ok) {
-      const errorText = await response.text();
+    if (!scanRecordResponse.ok) {
+      const errorText = await scanRecordResponse.text();
       console.error('SCAN-DEBUG: Failed to create scan record:', errorText);
       throw new Error(`Failed to create scan record: ${errorText}`);
     }
     
-    const result = await response.json();
+    const result = await scanRecordResponse.json();
     console.log('SCAN-DEBUG: Successfully created scan record:', result);
     
     return { scanId, dbUserId };
