@@ -185,6 +185,16 @@ const handleGoogleCallback: RequestHandler = async (req: Request, res: Response)
     // Set credentials on the client for subsequent API calls
     tokenExchangeOauth2Client.setCredentials(tokens);
 
+    // Extract optional state param for account linking (e.g. "uid:123e4567-e89b-12d3-a456-426614174000")
+    let linkUserId: string | undefined;
+    if (typeof req.query.state === 'string' && req.query.state.startsWith('uid:')) {
+      const potentialId = req.query.state.substring(4);
+      if (/^[0-9a-fA-F-]{36}$/.test(potentialId)) {
+        linkUserId = potentialId;
+        console.log('OAuth callback received linkUserId via state param:', linkUserId);
+      }
+    }
+
     // Get user info from Google
     const oauth2 = google.oauth2('v2');
     const userInfoResponse = await oauth2.userinfo.get({
@@ -197,10 +207,33 @@ const handleGoogleCallback: RequestHandler = async (req: Request, res: Response)
         throw new Error('Failed to retrieve user ID or email from Google.');
     }
 
+    // Determine which email to store. If we're linking to an existing user and
+    // their e-mail differs from the Gmail address we keep the original e-mail
+    // to ensure their email/password login still works.
+    let emailToStore = userInfo.email;
+
+    if (linkUserId) {
+      try {
+        const { data: existingUser } = await supabase
+          .from('users')
+          .select('email')
+          .eq('id', linkUserId)
+          .single();
+
+        if (existingUser && existingUser.email && existingUser.email !== userInfo.email) {
+          console.log('Preserving existing primary email while linking Google account');
+          emailToStore = existingUser.email;
+        }
+      } catch (fetchErr) {
+        console.warn('Failed to fetch existing user for email preservation:', fetchErr.message || fetchErr);
+      }
+    }
+
     // Create or update user in database
     const user = await upsertUser({
+        ...(linkUserId ? { id: linkUserId } : {}),
         google_id: userInfo.id,
-        email: userInfo.email,
+        email: emailToStore,
         name: userInfo.name,
         picture: userInfo.picture,
         // verified_email omitted – not present in local schema
