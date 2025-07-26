@@ -1244,6 +1244,11 @@ const storeSubscriptionExample = async (sender, subject, analysisResult) => {
 const createScanRecord = async (req, userId, decoded) => {
   console.log('SCAN-DEBUG: Creating scan record for user:', userId);
   
+  // Use service-role key if available to bypass RLS for all insert operations
+  const insertAuth = supabaseServiceRoleKey
+    ? `Bearer ${supabaseServiceRoleKey}`
+    : `Bearer ${supabaseKey}`;
+  
   try {
     // First, look up the database user ID using google_id or email
     console.log('SCAN-DEBUG: Looking up database user ID for Google user ID:', userId);
@@ -1277,11 +1282,6 @@ const createScanRecord = async (req, userId, decoded) => {
     if (!users || users.length === 0) {
       console.log(`SCAN-DEBUG: User not found in database, creating new user for: ${userEmail}`);
       
-      // Use service-role key for inserts to bypass RLS
-      const insertAuth = supabaseServiceRoleKey
-        ? `Bearer ${supabaseServiceRoleKey}`
-        : `Bearer ${supabaseKey}`;
-
       // Create a new user
       const createUserResponse = await fetch(
         `${supabaseUrl}/rest/v1/users`, 
