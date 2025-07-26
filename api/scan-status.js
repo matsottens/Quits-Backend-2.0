@@ -111,7 +111,7 @@ export default async function handler(req, res) {
     const { data: user, error: userError } = await supabase
       .from('users')
       .select('id')
-      .or(`(${filters.join(',')})`)
+      .or(filters.join(','))
       .maybeSingle();
  
     if (userError || !user) {
