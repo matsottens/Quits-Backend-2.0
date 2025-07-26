@@ -17,15 +17,18 @@ const supabaseKey = supabaseServiceRoleKey || supabaseServiceKey;
 // available at runtime. Define helpers that can compute the appropriate auth headers once
 // we have the request object.
 const buildAuthHeaders = (req) => {
-  // Use caller JWT if provided, else fall back to service/anon key – needed for RLS on Vercel
-  const AUTH_HEADER = req.headers && req.headers.authorization
-    ? req.headers.authorization
-    : `Bearer ${supabaseKey}`;
+  // Always use the service-role key when available so that RLS policies do not
+  // block access.  We authenticate the caller separately with verify(token)
+  // below, so it’s safe to query with elevated privileges here.
+
+  const AUTH_HEADER = supabaseKey
+    ? `Bearer ${supabaseKey}`
+    : (req.headers && req.headers.authorization ? req.headers.authorization : '');
 
   // Use service-role key for inserts if we have it; otherwise fall back to caller JWT
   const INSERT_AUTH = supabaseKey && supabaseKey.includes('service_role')
     ? `Bearer ${supabaseKey}`
-    : AUTH_HEADER;
+    : (req.headers && req.headers.authorization ? req.headers.authorization : AUTH_HEADER);
 
   return { AUTH_HEADER, INSERT_AUTH };
 };
