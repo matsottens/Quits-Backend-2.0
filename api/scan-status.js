@@ -96,40 +96,24 @@ export default async function handler(req, res) {
     console.log('SCAN-STATUS-DEBUG: Scan ID from path:', scanIdFromPath);
     console.log('SCAN-STATUS-DEBUG: Final scan ID:', scanId);
 
-    // Look up the user in the database to get the UUID
-    console.log('SCAN-STATUS-DEBUG: Looking up user with Google ID:', googleId);
-    
-    // Try multiple lookup strategies for user resolution
-    let user, userError;
-    
-    // Try google_id lookup first (this is what exists in the schema)
-    const { data: userByGoogleId, error: googleIdError } = await supabase
+    // Look up the user in the database to get the canonical UUID
+    console.log('SCAN-STATUS-DEBUG: Resolving user – internalId:', decoded.id, 'googleId:', googleId);
+
+    const userEmail = decoded.email;
+
+    // Build OR filter that covers id, google_id and email
+    const filters = [
+      `id.eq.${encodeURIComponent(decoded.id)}`,
+      `google_id.eq.${encodeURIComponent(googleId)}`
+    ];
+    if (userEmail) filters.push(`email.eq.${encodeURIComponent(userEmail)}`);
+
+    const { data: user, error: userError } = await supabase
       .from('users')
       .select('id')
-      .eq('google_id', googleId)
+      .or(`(${filters.join(',')})`)
       .maybeSingle();
-    
-    if (!googleIdError && userByGoogleId) {
-      user = userByGoogleId;
-      userError = null;
-    } else {
-      // Fallback to email lookup
-      const userEmail = decoded.email;
-      if (userEmail) {
-        const { data: userByEmail, error: emailError } = await supabase
-          .from('users')
-          .select('id')
-          .eq('email', userEmail)
-          .maybeSingle();
-        
-        user = userByEmail;
-        userError = emailError;
-      } else {
-        user = null;
-        userError = googleIdError;
-      }
-    }
-
+ 
     if (userError || !user) {
       console.error('SCAN-STATUS-DEBUG: User lookup error:', userError);
       console.error('SCAN-STATUS-DEBUG: User data:', user);
