@@ -164,24 +164,99 @@ export default async function handler(req, res) {
 
     console.log(`User authenticated: ${userInfo.email}`);
 
-    // Generate a JWT token
-    console.log('Generating JWT token');
+    // ------------------------------------------------------------------
+    // 1) Link or create Supabase user row
+    // ------------------------------------------------------------------
+
+    const { createClient } = await import('@supabase/supabase-js');
+    const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
+
+    if (!supabaseUrl || !supabaseKey) {
+      throw new Error('Missing Supabase credentials in environment variables');
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // Parse optional state param for account linking (uid:<uuid>)
+    let linkUserId;
+    if (typeof req.query.state === 'string' && req.query.state.startsWith('uid:')) {
+      const possible = req.query.state.substring(4);
+      if (/^[0-9a-fA-F-]{36}$/.test(possible)) {
+        linkUserId = possible;
+        console.log('[OAuth] Linking Google account to existing user id:', linkUserId);
+      }
+    }
+
+    // Optionally preserve the existing email if linking
+    let emailToStore = userInfo.email;
+    if (linkUserId) {
+      const { data: existing } = await supabase
+        .from('users')
+        .select('email')
+        .eq('id', linkUserId)
+        .single();
+      if (existing && existing.email && existing.email !== userInfo.email) {
+        console.log('[OAuth] Preserving original account email while linking');
+        emailToStore = existing.email;
+      }
+    }
+
+    // Upsert user row (conflict on id when provided, else email)
+    const upsertPayload = {
+      ...(linkUserId ? { id: linkUserId } : {}),
+      google_id: userInfo.id,
+      email: emailToStore,
+      name: userInfo.name || emailToStore.split('@')[0],
+      avatar_url: userInfo.picture || null,
+      updated_at: new Date().toISOString()
+    };
+
+    if (!upsertPayload.id) {
+      // Ensure deterministic UUID: if user already exists by email attach google_id
+      const { data: existingByEmail } = await supabase
+        .from('users')
+        .select('id, google_id')
+        .eq('email', emailToStore)
+        .single();
+      if (existingByEmail) {
+        upsertPayload.id = existingByEmail.id;
+      }
+    }
+
+    const { data: userRow, error: upsertErr } = await supabase
+      .from('users')
+      .upsert(upsertPayload, { onConflict: upsertPayload.id ? 'id' : 'email' })
+      .select('id')
+      .single();
+
+    if (upsertErr) {
+      console.error('[OAuth] Failed to upsert user:', upsertErr);
+      throw new Error('Database upsert failed');
+    }
+
+    console.log('[OAuth] User row ready with id:', userRow.id);
+
+    // ------------------------------------------------------------------
+    // 2) Generate application JWT referencing the Supabase user UUID
+    // ------------------------------------------------------------------
+
+    console.log('Generating application JWT');
     const jwtSecret = process.env.JWT_SECRET;
-    
+
     const token = jwt.default.sign(
-      { 
-        id: userInfo.id,
-        email: userInfo.email,
+      {
+        id: userRow.id,
+        email: emailToStore,
         gmail_token: tokens.access_token,
         refresh_token: tokens.refresh_token || null,
         createdAt: new Date().toISOString(),
-        // Include the Gmail email address to ensure we're accessing the right account
         gmail_email: userInfo.email
       },
       jwtSecret,
       { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
     );
-    console.log('JWT token generated successfully, length:', token.length);
+    console.log('JWT token generated, length:', token.length);
 
     // Check if the client accepts JSON
     if (req.headers.accept && req.headers.accept.includes('application/json')) {
