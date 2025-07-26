@@ -18,6 +18,8 @@
     "@google-cloud/vertexai": "^1.9.3",
     "@google/generative-ai": "^0.24.0",
     "@supabase/supabase-js": "^2.49.4",
+    "@types/express-list-endpoints": "^6.0.3",
+    "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^5.1.0",
@@ -34,9 +36,12 @@
     "@types/express": "^5.0.1",
     "@types/jsonwebtoken": "^9.0.9",
     "@types/node": "^22.14.0",
+    "express-list-endpoints": "^7.1.1",
+    "node-fetch": "^3.3.2",
     "nodemon": "^3.1.9",
     "ts-node": "^10.9.2",
     "ttypescript": "^1.5.15",
-    "typescript-transform-paths": "^3.4.6"
+    "typescript-transform-paths": "^3.4.6",
+    "uuid": "^9.0.1"
   }
 }

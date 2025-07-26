@@ -14,6 +14,8 @@ export const upsertUser = async (userInfo: any) => {
       // maintain legacy picture property for callers that still expect it
       picture: userInfo.picture || null,
       verified_email: typeof userInfo.verified_email === 'boolean' ? userInfo.verified_email : null,
+      // Only set password_hash if supplied (avoids overwriting existing hashes)
+      ...(userInfo.password_hash ? { password_hash: userInfo.password_hash } : {}),
     };
 
     // If caller provided a valid UUID, keep it so we can upsert on primary key
@@ -22,7 +24,44 @@ export const upsertUser = async (userInfo: any) => {
     }
 
     // Decide which column to use for conflict resolution
-    const conflictTarget = sanitizedUserInfo.id ? 'id' : sanitizedUserInfo.google_id ? 'google_id' : 'email';
+    // If the caller provided an explicit UUID we use it. Otherwise we always
+    // resolve conflicts on the e-mail column.  This guarantees that when a
+    // user first signs up with e-mail/password and later links Google, the
+    // second call (which now contains a google_id) updates the existing row
+    // instead of inserting a brand-new one with the same e-mail but different
+    // primary key.  Linking accounts is therefore deterministic and duplicate
+    // rows are avoided.
+
+    const conflictTarget = sanitizedUserInfo.id ? 'id' : 'email';
+
+    // --- PRE-LINK CHECK ---------------------------------------------------
+    // If a google_id is present we proactively attach it to any existing user
+    // that matches by e-mail but currently has no google_id set.  This keeps
+    // the data model clean even when the existing row was created before the
+    // google_id column existed or when the first sign-up was via e-mail only.
+    if (sanitizedUserInfo.google_id) {
+      try {
+        const { data: existingByEmail } = await supabase
+          .from('users')
+          .select('id, google_id')
+          .eq('email', sanitizedUserInfo.email)
+          .single();
+
+        if (existingByEmail && !existingByEmail.google_id) {
+          await supabase
+            .from('users')
+            .update({
+              google_id: sanitizedUserInfo.google_id,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', existingByEmail.id);
+          console.log('Linked google_id to existing user row', existingByEmail.id);
+        }
+      } catch (linkErr) {
+        // Non-fatal – proceed with regular upsert if lookup fails
+        console.warn('google_id pre-link check failed:', linkErr.message || linkErr);
+      }
+    }
 
     let { data, error } = await supabase
       .from('users')
@@ -77,6 +116,13 @@ export const upsertUser = async (userInfo: any) => {
 
           if (!fetchErr && existing) {
             console.log('Found existing user after duplicate email:', existing.id);
+            // If we attempted to set a password and existing row lacks it, update
+            if (sanitizedUserInfo.password_hash && !existing.password_hash) {
+              await supabase
+                .from('users')
+                .update({ password_hash: sanitizedUserInfo.password_hash })
+                .eq('id', existing.id);
+            }
             return {
               id: existing.id,
               email: existing.email,

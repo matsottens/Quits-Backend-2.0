@@ -324,7 +324,7 @@ export default async function handler(req, res) {
               
               // Also fetch auto-detected subscriptions from analysis results
               const analysisResponse = await fetch(
-                `${supabaseUrl}/rest/v1/subscription_analysis?user_id=eq.${dbUserId}&analysis_status=eq.completed&select=*`,
+                `${supabaseUrl}/rest/v1/subscription_analysis?user_id=eq.${dbUserId}&select=*`,
                 {
                   method: 'GET',
                   headers: {
@@ -338,7 +338,7 @@ export default async function handler(req, res) {
               let analysisSubscriptions = [];
               if (analysisResponse.ok) {
                 analysisSubscriptions = await analysisResponse.json();
-                console.log(`[PATH] Found ${analysisSubscriptions.length} auto-detected subscriptions from analysis`);
+                console.log(`[PATH] Found ${analysisSubscriptions.length} auto-detected subscriptions (any status)`);
               }
               
               // If no analysis results yet, wait a bit and retry (for new users)
@@ -383,6 +383,7 @@ export default async function handler(req, res) {
                     next_billing_date: analysis.next_billing_date,
                     category: 'auto-detected',
                     is_manual: false,
+                    is_pending: analysis.analysis_status !== 'completed',
                     source_analysis_id: analysis.id,
                     service_provider: analysis.service_provider,
                     confidence_score: analysis.confidence_score,
