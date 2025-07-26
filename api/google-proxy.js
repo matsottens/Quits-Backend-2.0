@@ -174,10 +174,21 @@ export default async function handler(req, res) {
             throw new Error('Failed to retrieve user information');
           }
           
-          // ------------------------------------------------------------------
-          // Ensure we use the internal UUID from Supabase for the token's `id`.
-          // ------------------------------------------------------------------
+          // --------------------------------------------------------------
+          // Determine which Quits user this Google account should link to
+          // --------------------------------------------------------------
           let internalId = null;
+
+          // If the original OAuth request contained state=uid:<uuid>, honour it
+          // so we merge into the existing row even when the Gmail address differs
+          if (typeof req.query.state === 'string' && req.query.state.startsWith('uid:')) {
+            const possible = req.query.state.substring(4);
+            if (/^[0-9a-fA-F-]{36}$/.test(possible)) {
+              internalId = possible;
+              console.log('[google-proxy] Using linkUserId from state param:', internalId);
+            }
+          }
+ 
           try {
             const supabaseUrl = process.env.SUPABASE_URL;
             const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -195,7 +206,7 @@ export default async function handler(req, res) {
                 }
               }
             );
-            if (lookupRes.ok) {
+            if (lookupRes.ok && !internalId) {
               const existing = await lookupRes.json();
               if (existing && existing.length > 0) {
                 internalId = existing[0].id;
