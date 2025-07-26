@@ -80,18 +80,27 @@ serve(async (req) => {
               .eq("user_id", scan.user_id)
               .ilike("name", `%${nameNorm}%`);
             if (!existing?.length) {
-              await supabase.from("subscriptions").insert({
+              // Insert the newly detected subscription directly into the subscriptions table
+              const { error: insertErr } = await supabase.from("subscriptions").insert({
                 user_id: scan.user_id,
                 name: r.subscription_name,
-                price: price,
-                currency: r.currency || "USD",
-                billing_cycle: r.billing_cycle || "monthly",
-                next_billing_date: r.next_billing_date,
-                provider: r.service_provider,
+                price: r.price ?? 0, // column is NOT NULL
+                currency: r.currency ?? "USD",
+                billing_cycle: r.billing_cycle ?? "monthly",
+                next_billing_date: r.next_billing_date ?? null,
+                provider: r.service_provider ?? r.subscription_name,
+                category: "auto-detected",
+                email_id: analysis.email_data_id,
+                is_manual: false,
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
               });
-              subsFound++;
+
+              if (insertErr) {
+                console.error("Failed to insert subscription", insertErr);
+              } else {
+                subsFound++;
+              }
             }
           }
           processed++;
