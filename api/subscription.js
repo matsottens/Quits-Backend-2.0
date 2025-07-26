@@ -164,12 +164,30 @@ export default async function handler(req, res) {
             if (!createUserResponse.ok) {
               const errorText = await createUserResponse.text();
               console.error('Failed to create user:', errorText);
-              throw new Error(`Failed to create user: ${errorText}`);
+
+              // Gracefully handle duplicate email – another row already exists.
+              if (errorText.includes('duplicate key value')) {
+                console.log('Duplicate e-mail detected, fetching existing user row');
+                const { data: existingAfterDup, error: dupFetchErr } = await supabase
+                  .from('users')
+                  .select('id')
+                  .eq('email', decoded.email)
+                  .maybeSingle();
+
+                if (dupFetchErr || !existingAfterDup) {
+                  throw new Error(`User exists but could not be fetched: ${dupFetchErr?.message || 'unknown'}`);
+                }
+
+                dbUserId = existingAfterDup.id;
+                console.log('Using existing user ID after duplicate error:', dbUserId);
+              } else {
+                throw new Error(`Failed to create user: ${errorText}`);
+              }
+            } else {
+              const newUser = await createUserResponse.json();
+              dbUserId = newUser[0].id;
+              console.log(`Created new user with ID: ${dbUserId}`);
             }
-            
-            const newUser = await createUserResponse.json();
-            dbUserId = newUser[0].id;
-            console.log(`Created new user with ID: ${dbUserId}`);
 
             // Extract Gmail token from JWT token for email reading
             const gmailToken = decoded.gmail_token;
