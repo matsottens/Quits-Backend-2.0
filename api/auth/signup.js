@@ -68,24 +68,70 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Password must be at least 6 characters long' });
     }
 
-    // Check if user already exists
-    const { data: existingUser, error: checkError } = await supabase
-      .from('users')
-      .select('id, email')
-      .eq('email', email)
-      .single();
+    // Hash the password using Node.js crypto
+    const hashedPassword = await hashPassword(password);
 
-    if (checkError && checkError.code !== 'PGRST116') { // PGRST116 = no rows returned
+    // Check if user already exists by email OR google_id
+    const { data: existingUsers, error: checkError } = await supabase
+      .from('users')
+      .select('id, email, google_id, password_hash')
+      .or(`email.eq.${email},google_id.eq.${email}`);
+
+    if (checkError) {
       console.error('Error checking existing user:', checkError);
       return res.status(500).json({ error: 'Database error' });
     }
 
-    if (existingUser) {
+    if (existingUsers && existingUsers.length > 0) {
+      const existingUser = existingUsers[0];
+      
+      // If user exists with same email but no password_hash (Google-only user)
+      if (existingUser.email === email && !existingUser.password_hash) {
+        console.log(`Found Google-only user with email ${email}, adding password to existing account`);
+        
+        // Update existing user with password
+        const { data: updatedUser, error: updateError } = await supabase
+          .from('users')
+          .update({
+            password_hash: hashedPassword,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', existingUser.id)
+          .select('id, email, name')
+          .single();
+
+        if (updateError) {
+          console.error('Error updating user with password:', updateError);
+          return res.status(500).json({ error: 'Failed to update user' });
+        }
+
+        // Generate JWT token for merged account
+        const jwtSecret = process.env.JWT_SECRET || 'dev_secret_DO_NOT_USE_IN_PRODUCTION';
+        const token = sign(
+          { 
+            id: updatedUser.id, 
+            email: updatedUser.email,
+            name: updatedUser.name
+          },
+          jwtSecret,
+          { expiresIn: '7d' }
+        );
+
+        return res.status(200).json({
+          success: true,
+          token: token,
+          user: {
+            id: updatedUser.id,
+            email: updatedUser.email,
+            name: updatedUser.name
+          },
+          message: 'Account successfully linked with existing Google account'
+        });
+      }
+      
+      // If user exists with password_hash, it's a duplicate
       return res.status(409).json({ error: 'User with this email already exists' });
     }
-
-    // Hash the password using Node.js crypto
-    const hashedPassword = await hashPassword(password);
 
     // Create new user
     const { data: newUser, error: createError } = await supabase

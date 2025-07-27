@@ -46,21 +46,22 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
-    // Find user by email
-    const { data: user, error: fetchError } = await supabase
+    // Find user by email or google_id
+    const { data: users, error: fetchError } = await supabase
       .from('users')
-      .select('id, email, name, password_hash')
-      .eq('email', email)
-      .single();
+      .select('id, email, name, password_hash, google_id')
+      .or(`email.eq.${email},google_id.eq.${email}`);
 
     if (fetchError) {
       console.error('Error fetching user:', fetchError);
       return res.status(500).json({ error: 'Database error' });
     }
 
-    if (!user) {
+    if (!users || users.length === 0) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
+
+    const user = users[0];
 
     // Check if user has a password hash (email/password user)
     if (!user.password_hash) {

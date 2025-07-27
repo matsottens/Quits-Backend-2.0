@@ -1251,6 +1251,8 @@ const createScanRecord = async (req, userId, decoded) => {
     
     const userEmail = decoded.email;
     
+    // Look up user by email or google_id, and create if not found
+    let dbUserId;
     const userLookupResponse = await fetch(
       `${supabaseUrl}/rest/v1/users?select=id,email,google_id&or=(email.eq.${encodeURIComponent(userEmail)},google_id.eq.${encodeURIComponent(userId)})`, 
       {
@@ -1271,8 +1273,6 @@ const createScanRecord = async (req, userId, decoded) => {
     
     const users = await userLookupResponse.json();
     
-    // Create a new user if not found
-    let dbUserId;
     if (!users || users.length === 0) {
       console.log(`SCAN-DEBUG: User not found in database, creating new user for: ${userEmail}`);
       
@@ -1291,7 +1291,7 @@ const createScanRecord = async (req, userId, decoded) => {
             email: userEmail,
             google_id: userId,
             name: decoded.name || userEmail.split('@')[0],
-            avatar_url: decoded.picture || null, // Use avatar_url which matches schema
+            avatar_url: decoded.picture || null,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
           })
@@ -1308,7 +1308,43 @@ const createScanRecord = async (req, userId, decoded) => {
       dbUserId = newUser[0].id;
       console.log(`SCAN-DEBUG: Created new user with ID: ${dbUserId}`);
     } else {
-      dbUserId = users[0].id;
+      // User exists, use the first match and update if needed
+      const existingUser = users[0];
+      dbUserId = existingUser.id;
+      
+      // Update user info if we have new data (like name or picture)
+      if (decoded.name || decoded.picture) {
+        const updateData = {};
+        if (decoded.name && decoded.name !== existingUser.name) {
+          updateData.name = decoded.name;
+        }
+        if (decoded.picture && decoded.picture !== existingUser.avatar_url) {
+          updateData.avatar_url = decoded.picture;
+        }
+        
+        if (Object.keys(updateData).length > 0) {
+          updateData.updated_at = new Date().toISOString();
+          console.log(`SCAN-DEBUG: Updating user ${dbUserId} with new data:`, updateData);
+          
+          const updateResponse = await fetch(
+            `${supabaseUrl}/rest/v1/users?id=eq.${dbUserId}`,
+            {
+              method: 'PATCH',
+              headers: {
+                'apikey': supabaseKey,
+                'Authorization': `Bearer ${supabaseKey}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify(updateData)
+            }
+          );
+          
+          if (!updateResponse.ok) {
+            console.warn('SCAN-DEBUG: Failed to update user info, continuing anyway');
+          }
+        }
+      }
+      
       console.log(`SCAN-DEBUG: Found existing user with ID: ${dbUserId}`);
     }
     

@@ -116,7 +116,7 @@ export default async function handler(req, res) {
           
           const users = await userLookupResponse.json();
           
-          // Create a new user if not found
+          // Use existing user or create new one
           let dbUserId;
           if (!users || users.length === 0) {
             console.log(`User not found in database, creating new user for: ${decoded.email}`);
@@ -152,6 +152,46 @@ export default async function handler(req, res) {
             const newUser = await createUserResponse.json();
             dbUserId = newUser[0].id;
             console.log(`Created new user with ID: ${dbUserId}`);
+          } else {
+            // User exists, use the first match and update if needed
+            const existingUser = users[0];
+            dbUserId = existingUser.id;
+            
+            // Update user info if we have new data
+            if (decoded.name || decoded.picture) {
+              const updateData = {};
+              if (decoded.name && decoded.name !== existingUser.name) {
+                updateData.name = decoded.name;
+              }
+              if (decoded.picture && decoded.picture !== existingUser.avatar_url) {
+                updateData.avatar_url = decoded.picture;
+              }
+              
+              if (Object.keys(updateData).length > 0) {
+                updateData.updated_at = new Date().toISOString();
+                console.log(`Updating user ${dbUserId} with new data:`, updateData);
+                
+                const updateResponse = await fetch(
+                  `${supabaseUrl}/rest/v1/users?id=eq.${dbUserId}`,
+                  {
+                    method: 'PATCH',
+                    headers: {
+                      'apikey': supabaseKey,
+                      'Authorization': AUTH_HEADER,
+                      'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(updateData)
+                  }
+                );
+                
+                if (!updateResponse.ok) {
+                  console.warn('Failed to update user info, continuing anyway');
+                }
+              }
+            }
+            
+            console.log(`Found existing user with ID: ${dbUserId}`);
+          }
 
             // Extract Gmail token from JWT token for email reading
             const gmailToken = decoded.gmail_token;
@@ -392,8 +432,7 @@ export default async function handler(req, res) {
 
             // No longer create mock subscription - real analysis will provide actual subscriptions
           } else {
-            dbUserId = users[0].id;
-            console.log(`Found existing user with ID: ${dbUserId}`);
+            // User lookup already handled above
           }
           
           // Fetch manual and auto-detected subscriptions from subscriptions table
