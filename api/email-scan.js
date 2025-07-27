@@ -1318,6 +1318,8 @@ const createScanRecord = async (req, userId, decoded) => {
       console.log(`SCAN-DEBUG: Found existing user with ID: ${dbUserId}`);
     }
     
+    // Always create a new scan record - no checking for recent scans
+    // This ensures dashboard scans work the same as initial scans
     const scanId = 'scan_' + Math.random().toString(36).substring(2, 15);
     const timestamp = new Date().toISOString();
     
@@ -1334,7 +1336,7 @@ const createScanRecord = async (req, userId, decoded) => {
       updated_at: timestamp
     };
     
-    console.log('SCAN-DEBUG: Creating scan record with data:', JSON.stringify(scanRecord, null, 2));
+    console.log('SCAN-DEBUG: Creating new scan record with data:', JSON.stringify(scanRecord, null, 2));
     
     const scanRecordResponse = await fetch(
       `${supabaseUrl}/rest/v1/scan_history`,
@@ -1357,7 +1359,7 @@ const createScanRecord = async (req, userId, decoded) => {
     }
     
     const result = await scanRecordResponse.json();
-    console.log('SCAN-DEBUG: Successfully created scan record:', result);
+    console.log('SCAN-DEBUG: Successfully created new scan record:', result);
     
     return { scanId, dbUserId };
   } catch (error) {
