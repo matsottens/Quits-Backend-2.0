@@ -47,13 +47,24 @@ router.post('/scan',
       console.log(`Using real Gmail data: ${useRealData ? 'YES' : 'NO'}`);
       console.log(`Gmail token available: ${gmailToken ? 'YES' : 'NO'}`);
       
-      // Check if a scan is already in progress
+      // Prevent duplicate scans – if the user already has a scan that is not finished
+      // return that one instead of creating a new row.
+      const ACTIVE_STATUSES = [
+        'pending',            // just created, awaiting email fetch
+        'in_progress',        // fetching emails
+        'ready_for_analysis', // waiting for Gemini
+        'analyzing',          // Gemini running
+        'quota_exhausted'     // temporally paused – will resume automatically
+      ];
+
       const { data: existingScan, error: checkError } = await supabase
         .from('scan_history')
-        .select('id, status')
+        .select('id, status, scan_id')
         .eq('user_id', userId)
-        .eq('status', 'in_progress')
-        .single();
+        .in('status', ACTIVE_STATUSES)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
       if (checkError && checkError.code !== 'PGRST116') {
         console.error('Error checking for existing scan:', checkError);
@@ -63,10 +74,10 @@ router.post('/scan',
       }
       
       if (existingScan) {
-        console.log(`Scan already in progress for user ${userId}`);
+        console.log(`Returning existing active scan ${existingScan.scan_id || existingScan.id} (status ${existingScan.status}) for user ${userId}`);
         return res.json({
           message: 'Scan already in progress',
-          scanId: existingScan.id
+          scanId: existingScan.scan_id || existingScan.id
         });
       }
       
@@ -239,7 +250,12 @@ router.get('/status',
       // Safeguard division by zero
       const totalEmails = scan.emails_to_process || 0;
       const processedEmails = scan.emails_processed || 0;
-      const progressPct = totalEmails > 0 ? Math.round((processedEmails / totalEmails) * 100) : 0;
+      const calculatedPct = totalEmails > 0 ? Math.round((processedEmails / totalEmails) * 100) : 0;
+
+      // Prefer the explicit progress field when available (set by Edge Function)
+      const progressPct = typeof scan.progress === 'number' && scan.progress > 0
+        ? scan.progress
+        : calculatedPct;
 
       res.json({
         status: scan.status,

@@ -177,84 +177,30 @@ export default async function handler(req, res) {
     }
 
     if (error) {
-      console.error('Error fetching scan:', error);
-      
-      // If no scan found, let's see what scans exist for this user
+      console.error('Error fetching scan:', error.message);
+      // It's expected that the scan might not be found initially.
+      // Do not return an error. The client will continue polling.
+      // The 'pending' status will be shown on the frontend.
       if (error.code === 'PGRST116') {
-        console.log('SCAN-STATUS-DEBUG: No scan found with ID:', scanId);
-        console.log('SCAN-STATUS-DEBUG: Looking for scans for user ID:', userId);
-        
-        const { data: allScans, error: allScansError } = await supabase
-          .from('scan_history')
-          .select('scan_id, status, created_at')
-          .eq('user_id', userId)
-          .order('created_at', { ascending: false })
-          .limit(5);
-        
-        if (allScansError) {
-          console.error('SCAN-STATUS-DEBUG: Error fetching all scans:', allScansError);
-          return res.status(500).json({ error: allScansError.message });
-        }
-        
-        console.log('SCAN-STATUS-DEBUG: Found scans for user:', allScans);
-        
-        // If we found scans, return the latest one instead of error
-        if (allScans && allScans.length > 0) {
-          const latestScan = allScans[0];
-          console.log('SCAN-STATUS-DEBUG: Returning latest scan instead:', latestScan.scan_id, ',', req.url);
-          
-          // Get the full scan data for the latest scan
-          const { data: fullScan, error: fullScanError } = await supabase
-            .from('scan_history')
-            .select('*')
-            .eq('scan_id', latestScan.scan_id)
-            .single();
-          
-          if (fullScanError) {
-            console.error('SCAN-STATUS-DEBUG: Error fetching full scan data:', fullScanError);
-            return res.status(500).json({ error: fullScanError.message });
-          }
-          
-          // Use the latest scan data
-          scan = fullScan;
-          error = null;
-          
-          // Add a warning in the response that we're returning a different scan
-          const responseData = {
-            status: scan.status, 
-            scan_id: scan.scan_id, 
-            created_at: scan.created_at,
-            progress: calculateProgress(scan),
-            stats: {
-              emails_found: scan.emails_found || 0,
-              emails_to_process: scan.emails_to_process || 0,
-              emails_processed: scan.emails_processed || 0,
-              subscriptions_found: scan.subscriptions_found || 0
-            },
-            warning: `Requested scan ID '${scanId}' not found. Returning latest scan '${scan.scan_id}' instead.`
-          };
-          
-          return res.status(200).json(responseData);
-        } else {
-          // No scans found at all
-          return res.status(404).json({ 
-            error: 'No scans found for user',
-            requested_scan_id: scanId,
-            user_id: userId
-          });
-        }
-      } else {
-        // Some other error occurred
-        return res.status(500).json({ error: error.message });
+        return res.status(200).json({
+          status: 'pending',
+          progress: 0,
+          scan_id: scanId,
+          message: 'Scan record not yet available. The system is initializing the process.'
+        });
       }
-    }
-    
-    if (!scan) {
-      return res.status(404).json({ error: 'No scan found' });
+      // For other, unexpected errors, return a 500 status.
+      return res.status(500).json({ error: 'Failed to fetch scan status', details: error.message });
     }
 
-    // Calculate progress based on status
-    let progress = calculateProgress(scan);
+    if (!scan) {
+      // This case should ideally not be reached if the above logic is correct,
+      // but as a fallback, we indicate that the scan is not found.
+      return res.status(404).json({ error: 'No scan found for the given ID' });
+    }
+
+    // If the scan is found, return its data.
+    const progress = calculateProgress(scan);
 
     // Get stats for the scan
     const stats = {
@@ -323,27 +269,28 @@ const calculateProgress = (scan) => {
       progress = 0;
       break;
     case 'in_progress':
-      // Use the actual progress value from the database
-      progress = Math.min(80, scan.progress || 0);
+      // Show 10% while the initial email fetching is running
+      progress = 10;
       break;
     case 'ready_for_analysis':
-      progress = 85;
+      // Email fetching finished, waiting for Edge Function analysis
+      progress = 30;
       break;
     case 'analyzing':
-      // Show 90% while Edge Function is analyzing with Gemini
-      progress = 90;
+      // Use dynamic progress saved by the Edge Function (30-99)
+      progress = scan.progress || 30;
       break;
     case 'quota_exhausted':
-      // Keep progress at current level but indicate temporary pause
-      progress = Math.min(95, scan.progress || 90);
+      // Analysis paused due to quota – keep it at analysing step
+      progress = 60;
       break;
     case 'completed':
       // Only show 100% when scan is actually completed
       progress = 100;
       break;
     case 'failed':
-      // Keep the progress where it failed, but cap at 95%
-      progress = Math.min(95, scan.progress || 0);
+      // Indicate failure without falsely showing full completion
+      progress = Math.min(60, scan.progress || 0);
       break;
     default:
       progress = scan.progress || 0;

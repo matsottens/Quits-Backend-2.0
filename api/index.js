@@ -691,41 +691,30 @@ async function handleEmailStatus(req, res) {
       });
     }
     
-    // Forward request to the real backend implementation
-    const forwardResponse = await fetch(`${process.env.BACKEND_URL}/email/status`, {
-      method: 'GET',
-      headers: {
-        'Authorization': authHeader
-      }
-    });
-    
-    if (!forwardResponse.ok) {
-      const errorText = await forwardResponse.text();
-      console.error(`Backend status check failed with status ${forwardResponse.status}:`, errorText);
-      
-      // If backend is unavailable, provide mock status
-      if (forwardResponse.status >= 500) {
-        return res.status(200).json({
-          status: "completed",
-          progress: 100,
-          total_emails: 50,
-          processed_emails: 50
-        });
-      }
-      
-      // Otherwise return the backend error
-      return res.status(forwardResponse.status).send(errorText);
-    }
-    
-    const backendData = await forwardResponse.json();
-    return res.status(200).json(backendData);
-    
+    /*
+     * Instead of proxying this request to the separate backend service,
+     * we can serve the scan status directly via the local scan-status
+     * handler that already powers /api/scan-status. This ensures that
+     * the progress-step mapping (10 → 30 → 60 → 100) defined there is
+     * also applied when the frontend calls /api/email/status on Vercel.
+     */
+    const scanStatusHandler = (await import('./scan-status.js')).default;
+    return await scanStatusHandler(req, res);
+
+    // -- old implementation kept for reference --
+    // const forwardResponse = await fetch(`${process.env.BACKEND_URL}/email/status`, {
+    //   method: 'GET',
+    //   headers: {
+    //     'Authorization': authHeader
+    //   }
+    // });
+    // ...
   } catch (error) {
     console.error('Error in email status handler:', error);
     
     // Mock status in case of error
     return res.status(200).json({
-      status: "completed",
+      status: 'completed',
       progress: 100,
       total_emails: 50,
       processed_emails: 50

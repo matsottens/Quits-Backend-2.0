@@ -1,5 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
 
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseFnClient = createClient(supabaseUrl, supabaseServiceRoleKey);
+
 export default async function handler(req, res) {
   console.log('TRIGGER-DEBUG: ===== GEMINI SCAN TRIGGER CALLED =====');
   console.log('TRIGGER-DEBUG: Method:', req.method);
@@ -147,8 +151,10 @@ export default async function handler(req, res) {
 
     const analyzingScanIds = new Set(analyzingScans?.map(s => s.scan_id) || []);
     
-    // Filter out scans that are already being analyzed
-    const scansToProcess = readyScans.filter(scan => !analyzingScanIds.has(scan.scan_id));
+    // Process only one scan per invocation to keep function quick
+    const scansToProcess = readyScans
+      .filter(scan => !analyzingScanIds.has(scan.scan_id))
+      .slice(0, 1);
     
     if (scansToProcess.length === 0) {
       console.log('TRIGGER-DEBUG: All ready scans are already being analyzed');
@@ -174,84 +180,23 @@ export default async function handler(req, res) {
     
     console.log('TRIGGER-DEBUG: Edge Function URL: https://dstsluflwxzkwouxcjkh.supabase.co/functions/v1/gemini-scan');
     
-    // Add retry logic for Edge Function call
-    let edgeFunctionSuccess = false;
-    let retryCount = 0;
-    const maxRetries = 3;
-    let lastError = null;
-    
-    while (!edgeFunctionSuccess && retryCount < maxRetries) {
-      try {
-        console.log(`TRIGGER-DEBUG: Edge Function attempt ${retryCount + 1}/${maxRetries}`);
-        
-        const response = await fetch(
-          "https://dstsluflwxzkwouxcjkh.supabase.co/functions/v1/gemini-scan",
-          { 
-            method: "POST",
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
-            },
-            body: JSON.stringify({
-              scan_ids: scansToProcess.map(s => s.scan_id),
-              user_ids: scansToProcess.map(s => s.user_id)
-            })
-          }
-        );
-        
-        console.log(`TRIGGER-DEBUG: Edge Function response status (attempt ${retryCount + 1}):`, response.status);
-        
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error(`TRIGGER-DEBUG: Edge Function error (attempt ${retryCount + 1}):`, response.status, errorText);
-          lastError = new Error(`Edge Function error: ${response.status} ${errorText}`);
-          retryCount++;
-          
-          if (retryCount < maxRetries) {
-            console.log(`TRIGGER-DEBUG: Retrying Edge Function in 10 seconds...`);
-            await new Promise(resolve => setTimeout(resolve, 10000));
-          }
-          continue;
+    // Fire-and-forget Edge Function call (no long wait)
+    try {
+      const { data: fnData, error: fnErr } = await supabaseFnClient.functions.invoke('gemini-scan', {
+        body: {
+          scan_ids: scansToProcess.map(s => s.scan_id),
+          user_ids: scansToProcess.map(s => s.user_id)
         }
-        
-        const data = await response.json();
-        console.log(`TRIGGER-DEBUG: Edge Function response (attempt ${retryCount + 1}):`, data);
-        
-        if (data.success) {
-          console.log(`TRIGGER-DEBUG: ✅ Edge Function succeeded on attempt ${retryCount + 1}`);
-          edgeFunctionSuccess = true;
-          
-          res.status(200).json({ 
-            success: true, 
-            message: 'Gemini analysis triggered successfully',
-            scans_processed: scansToProcess.length,
-            scan_ids: scansToProcess.map(s => s.scan_id),
-            data,
-            attempts: retryCount + 1
-          });
-          return;
-        } else {
-          console.log(`TRIGGER-DEBUG: Edge Function returned success: false`);
-          lastError = new Error(`Edge Function returned success: false: ${data.message || 'Unknown error'}`);
-          retryCount++;
-          
-          if (retryCount < maxRetries) {
-            console.log(`TRIGGER-DEBUG: Retrying Edge Function in 10 seconds...`);
-            await new Promise(resolve => setTimeout(resolve, 10000));
-          }
-        }
-        
-      } catch (error) {
-        console.error(`TRIGGER-DEBUG: Edge Function exception (attempt ${retryCount + 1}):`, error);
-        lastError = error;
-        retryCount++;
-        
-        if (retryCount < maxRetries) {
-          console.log(`TRIGGER-DEBUG: Retrying Edge Function in 10 seconds...`);
-          await new Promise(resolve => setTimeout(resolve, 10000));
-        }
+      });
+      if (fnErr) {
+        console.error('TRIGGER-DEBUG: Edge Function invoke error', fnErr);
+      } else {
+        console.log('TRIGGER-DEBUG: Edge Function invoke success');
       }
+    } catch (invokeErr) {
+      console.error('TRIGGER-DEBUG: Edge Function invoke exception', invokeErr);
     }
+<<<<<<< HEAD
     
     // If all retries failed, reset scan status and return error
     console.error('TRIGGER-DEBUG: All Edge Function attempts failed');
@@ -272,6 +217,14 @@ export default async function handler(req, res) {
       error: 'Edge Function failed after all retries', 
       details: lastError?.message || 'Unknown error',
       attempts: retryCount
+=======
+
+    return res.status(200).json({
+      success: true,
+      message: 'Edge Function triggered',
+      scans_processed: scansToProcess.length,
+      scan_ids: scansToProcess.map(s => s.scan_id)
+>>>>>>> 0d7bfdc37919de0dd0b430b9ea025523c658bea7
     });
   } catch (error) {
     console.error('TRIGGER-DEBUG: Error triggering Gemini analysis:', error);
