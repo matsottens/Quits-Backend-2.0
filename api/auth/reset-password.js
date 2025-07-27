@@ -1,4 +1,4 @@
-import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import jsonwebtoken from 'jsonwebtoken';
 import { createClient } from '@supabase/supabase-js';
 
@@ -8,6 +8,17 @@ const { sign } = jsonwebtoken;
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
+
+// Password hashing function using Node.js crypto
+async function hashPassword(password) {
+  return new Promise((resolve, reject) => {
+    const salt = crypto.randomBytes(16).toString('hex');
+    crypto.scrypt(password, salt, 64, (err, derivedKey) => {
+      if (err) reject(err);
+      resolve(salt + ':' + derivedKey.toString('hex'));
+    });
+  });
+}
 
 export default async function handler(req, res) {
   // Set CORS headers
@@ -61,9 +72,8 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Reset token has expired' });
     }
 
-    // Hash the new password
-    const saltRounds = 10;
-    const hashedPassword = await bcrypt.hash(password, saltRounds);
+    // Hash the new password using Node.js crypto
+    const hashedPassword = await hashPassword(password);
 
     // Update user password and clear reset token
     const { error: updateError } = await supabase

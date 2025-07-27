@@ -1,4 +1,4 @@
-import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import jsonwebtoken from 'jsonwebtoken';
 import { createClient } from '@supabase/supabase-js';
 
@@ -8,6 +8,17 @@ const { sign } = jsonwebtoken;
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
+
+// Password verification function using Node.js crypto
+async function verifyPassword(password, hash) {
+  return new Promise((resolve, reject) => {
+    const [salt, key] = hash.split(':');
+    crypto.scrypt(password, salt, 64, (err, derivedKey) => {
+      if (err) reject(err);
+      resolve(key === derivedKey.toString('hex'));
+    });
+  });
+}
 
 export default async function handler(req, res) {
   // Set CORS headers
@@ -56,8 +67,8 @@ export default async function handler(req, res) {
       return res.status(401).json({ error: 'This account was created with Google. Please use Google sign-in.' });
     }
 
-    // Verify password
-    const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+    // Verify password using Node.js crypto
+    const isPasswordValid = await verifyPassword(password, user.password_hash);
     if (!isPasswordValid) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
