@@ -109,9 +109,10 @@ export default async function handler(req, res) {
     const token = jwt.sign(
       {
         id: internalUserId,
-              email: userInfo.email,
-              name: userInfo.name,
-              picture: userInfo.picture,
+        email: userInfo.email,
+        name: userInfo.name,
+        picture: userInfo.picture,
+        gmail_token: tokens.access_token,
         // Add any other relevant claims
       },
       process.env.JWT_SECRET,

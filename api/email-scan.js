@@ -1874,31 +1874,21 @@ export default async function handler(req, res) {
         // Try to get Gmail token from database as final fallback
         console.log('SCAN-DEBUG: Attempting to get Gmail token from database...');
         try {
-          const userEmail = decoded.email;
-          console.log('SCAN-DEBUG: Looking up user tokens for email:', userEmail);
-          
-          const tokenResponse = await fetch(
-            `${supabaseUrl}/rest/v1/user_tokens?select=access_token&user_id=eq.${userId}&provider=eq.google`,
-            {
-              method: 'GET',
-              headers: {
-                'apikey': supabaseKey,
-                'Authorization': `Bearer ${supabaseKey}`,
-                'Content-Type': 'application/json'
-              }
-            }
-          );
-          
-          if (tokenResponse.ok) {
-            const tokenData = await tokenResponse.json();
-            if (tokenData && tokenData.length > 0 && tokenData[0].access_token) {
-              console.log('SCAN-DEBUG: Found Gmail token in database');
-              gmailToken = tokenData[0].access_token;
-            } else {
-              console.log('SCAN-DEBUG: No Gmail token found in database');
-            }
+          console.log('SCAN-DEBUG: Looking up user tokens for user ID:', userId);
+
+          const { data, error } = await supabase
+            .from('users')
+            .select('gmail_access_token')
+            .eq('id', userId)
+            .single();
+
+          if (error) {
+            console.error('SCAN-DEBUG: Failed to fetch tokens from database:', error.message);
+          } else if (data && data.gmail_access_token) {
+            console.log('SCAN-DEBUG: Found Gmail token in database');
+            gmailToken = data.gmail_access_token;
           } else {
-            console.log('SCAN-DEBUG: Failed to fetch tokens from database:', tokenResponse.status);
+            console.log('SCAN-DEBUG: No Gmail token found in database for user');
           }
         } catch (dbError) {
           console.error('SCAN-DEBUG: Error fetching Gmail token from database:', dbError);
