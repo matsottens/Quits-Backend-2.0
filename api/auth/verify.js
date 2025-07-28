@@ -1,6 +1,26 @@
-// Token verification endpoint
+// Token verification utilities
 import jsonwebtoken from 'jsonwebtoken';
 const { verify } = jsonwebtoken;
+
+export async function authenticateUser(req, res) {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      res.status(401).json({ error: 'Missing or invalid authorization header' });
+      return null;
+    }
+
+    const token = authHeader.substring(7);
+    const jwtSecret = process.env.JWT_SECRET || 'dev_secret_DO_NOT_USE_IN_PRODUCTION';
+    const decoded = verify(token, jwtSecret);
+    
+    // Return decoded user object
+    return decoded;
+  } catch (error) {
+    res.status(401).json({ valid: false, error: 'Invalid or expired token' });
+    return null;
+  }
+}
 
 export default async function handler(req, res) {
   // Set CORS headers for all response types
@@ -26,35 +46,17 @@ export default async function handler(req, res) {
       return res.status(405).json({ error: 'Method not allowed' });
     }
 
-    // Extract token from Authorization header
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ error: 'Missing or invalid authorization header' });
-    }
-
-    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
-    
-    // Verify the token
-    try {
-      const jwtSecret = process.env.JWT_SECRET || 'dev_secret_DO_NOT_USE_IN_PRODUCTION';
-      const decoded = verify(token, jwtSecret);
-      
-      // Return a successful verification result
+    const user = await authenticateUser(req, res);
+    if (user) {
       return res.status(200).json({
         valid: true,
         message: 'Token is valid',
         user: {
-          id: decoded.id,
-          email: decoded.email,
-          name: decoded.name || null,
-          picture: decoded.picture || null
+          id: user.id,
+          email: user.email,
+          name: user.name || null,
+          picture: user.picture || null
         }
-      });
-    } catch (tokenError) {
-      console.error('Token verification error:', tokenError);
-      return res.status(401).json({ 
-        valid: false,
-        error: 'Invalid or expired token' 
       });
     }
   } catch (error) {
