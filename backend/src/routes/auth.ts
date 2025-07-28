@@ -207,26 +207,54 @@ const handleGoogleCallback: RequestHandler = async (req: Request, res: Response)
         throw new Error('Failed to retrieve user ID or email from Google.');
     }
 
-    // Determine which email to store. If we're linking to an existing user and
-    // their e-mail differs from the Gmail address we keep the original e-mail
-    // to ensure their email/password login still works.
+    // ---------------------------------------------------------------------------------
+    // Revised logic: use state=uid:<uuid> to link, otherwise lookup by e-mail
+    // ---------------------------------------------------------------------------------
+    let internalId: string | null = null;
+
+    if (typeof req.query.state === 'string' && req.query.state.startsWith('uid:')) {
+      const maybe = req.query.state.substring(4);
+      if (/^[0-9a-fA-F-]{36}$/.test(maybe)) internalId = maybe;
+    }
+
+    if (!internalId) {
+      const { data: existingUserRow, error: lookupErr } = await supabase
+        .from('users')
+        .select('id')
+        .eq('email', userInfo.email)
+        .maybeSingle();
+      if (lookupErr) console.warn('Supabase email lookup failed', lookupErr.message);
+      if (existingUserRow) internalId = existingUserRow.id as string;
+    }
+
+    if (!internalId) {
+      // create new
+      const { data: insertRow, error: insErr } = await supabase
+        .from('users')
+        .insert({
+          email: userInfo.email,
+          name: userInfo.name,
+          avatar_url: userInfo.picture
+        })
+        .select('id')
+        .single();
+      if (insErr) throw insErr;
+      internalId = insertRow.id;
+    }
+
+    // Merge linked_accounts
+    await supabase.rpc('merge_linked_accounts', { p_user_id: internalId, p_email: userInfo.email });
+
+    // Prepare email to store (preserve original if linking)
     let emailToStore = userInfo.email;
-
-    if (linkUserId) {
-      try {
-        const { data: existingUser } = await supabase
-          .from('users')
-          .select('email')
-          .eq('id', linkUserId)
-          .single();
-
-        if (existingUser && existingUser.email && existingUser.email !== userInfo.email) {
-          console.log('Preserving existing primary email while linking Google account');
-          emailToStore = existingUser.email;
-        }
-      } catch (fetchErr) {
-        console.warn('Failed to fetch existing user for email preservation:', fetchErr.message || fetchErr);
-      }
+    if (linkUserId && linkUserId !== internalId) {
+      // keep existing email of linkUserId row
+      const { data: existingPrimary } = await supabase
+        .from('users')
+        .select('email')
+        .eq('id', linkUserId)
+        .single();
+      if (existingPrimary?.email) emailToStore = existingPrimary.email;
     }
 
     // Create or update user in database
