@@ -4,12 +4,30 @@
 import { createServer } from 'http';
 import url from 'url';
 
-// Core route handlers
-// Note: We'll use dynamic imports for these handlers to avoid circular dependencies
-// and to make sure they're only loaded when needed
+// Universal CORS Middleware
+function applyCors(req, res) {
+  const origin = req.headers.origin;
+  const allowedOrigins = [
+    'https://www.quits.cc',
+    'https://quits.cc',
+    'http://localhost:5173', // For local dev
+  ];
 
-// Apply CORS middleware
-import corsMiddleware from './cors-middleware.js';
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Accept, Authorization');
+  
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    res.end();
+    return true; // Request handled
+  }
+  return false; // Continue to next handler
+}
 
 // Simple body parser for JSON requests
 function parseBody(req) {
@@ -49,12 +67,14 @@ const routeMap = {
   '/api/auth/google/url': () => import('./google-auth-url.js').then(m => m.default || m),
   '/api/auth/google/callback': () => import('./auth-callback.js').then(m => m.default || m),
   '/api/auth/me': () => import('./auth-me.js').then(m => m.default || m),
+  '/auth/me': () => import('./auth-me.js').then(m => m.default || m), // Allow non-prefixed
   '/api/manual-subscription': () => import('./manual-subscription.js').then(m => m.default || m),
   '/api/email/suggestions': () => import('./email/suggestions.js').then(m => m.default || m),
   '/api/email/scan': () => import('./email/scan.js').then(m => m.default || m),
   '/api/export-subscriptions': () => import('./export-subscriptions.js').then(m => m.default || m),
   '/api/health': () => import('./health.js').then(m => m.default || m),
   '/api/settings': () => import('./settings.js').then(m => m.default || m),
+  '/api/account': () => import('./account.js').then(m => m.default || m), // <-- ADDED
   // New Gemini analysis endpoints
   '/api/analyze-emails': () => import('./analyze-emails.js').then(m => m.default || m),
   '/api/analyzed-subscriptions': () => import('./analyzed-subscriptions.js').then(m => m.default || m),
@@ -78,13 +98,8 @@ const handlerCache = {};
 
 // The main handler function for the combined API endpoints
 export default async function handler(req, res) {
-  // Apply CORS middleware
-  const corsHandled = await corsMiddleware(req, res);
-  
-  // If CORS middleware handled the request (e.g., OPTIONS preflight), return early
-  if (corsHandled) {
-    console.log(`[combined-handlers] CORS middleware handled the request, returning early`);
-    return;
+  if (applyCors(req, res)) {
+    return; // CORS preflight handled
   }
   
   // Parse request body for non-GET requests
@@ -106,74 +121,4 @@ export default async function handler(req, res) {
   console.log(`[combined-handlers] Query params:`, parsedUrl.query);
   console.log(`[combined-handlers] Headers:`, Object.keys(req.headers));
   console.log(`[combined-handlers] Origin: ${req.headers.origin}`);
-  console.log(`[combined-handlers] Referer: ${req.headers.referer}`);
-
-  // The path should already be normalized by api.js, but let's handle edge cases
-  if (path.startsWith('/api/api/')) {
-    // Double /api prefix from Vercel rewrites
-    path = path.replace('/api/api/', '/api/');
-    console.log(`[combined-handlers] Fixed double /api prefix: ${path}`);
-  }
-
-  console.log(`[combined-handlers] Final normalized path: ${path}`);
-
-  // Special handling for trigger-gemini-scan endpoint
-  if (path === '/api/trigger-gemini-scan') {
-    console.log(`[combined-handlers] === TRIGGER-GEMINI-SCAN SPECIAL HANDLING ===`);
-    console.log(`[combined-handlers] Method: ${req.method}`);
-    console.log(`[combined-handlers] Body:`, req.body);
-    console.log(`[combined-handlers] Query:`, parsedUrl.query);
-  }
-
-  try {
-    const matchedHandler = await findHandler(path);
-
-    if (matchedHandler) {
-      console.log(`[combined-handlers] Found handler for path: ${path}`);
-      return await matchedHandler(req, res);
-    }
-
-    console.log(`[combined-handlers] No handler found for path: ${path}`);
-    console.log(`[combined-handlers] Available routes:`, Object.keys(routeMap));
-    return res.status(404).json({ 
-      error: 'API endpoint not found',
-      debug: {
-        requestedPath: path,
-        originalUrl: req.url,
-        availableRoutes: Object.keys(routeMap),
-        queryParams: parsedUrl.query
-      }
-    });
-  } catch (error) {
-    console.error(`[combined-handlers] Error executing handler for ${path}:`, error);
-    return res.status(500).json({ error: 'Internal server error' });
-  }
-}
-
-// Helper to load the appropriate handler
-async function findHandler(path) {
-  console.log(`[combined-handlers] findHandler called for path: ${path}`);
-
-  // Cached?
-  if (handlerCache[path]) {
-    return handlerCache[path];
-  }
-
-  // Exact match
-  if (routeMap[path]) {
-    const handler = await routeMap[path]();
-    handlerCache[path] = handler;
-    return handler;
-  }
-
-  // Nested match (e.g., /api/subscription/123)
-  for (const routePath in routeMap) {
-    if (path.startsWith(routePath + '/')) {
-      const handler = await routeMap[routePath]();
-      handlerCache[path] = handler;
-      return handler;
-    }
-  }
-
-  return null;
-}
+  console.log(`
