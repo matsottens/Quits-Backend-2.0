@@ -16,6 +16,9 @@ const supabaseKey = supabaseServiceRoleKey || supabaseServiceKey;
 // Initialize Supabase client
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+// Use the service role key for all backend operations to bypass RLS.
+const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
+
 // Add logging to help debug
 console.log(`Email-scan: Supabase URL defined: ${!!supabaseUrl}`);
 console.log(`Email-scan: Supabase key defined: ${!!supabaseKey}`);
@@ -1244,74 +1247,43 @@ const storeSubscriptionExample = async (sender, subject, analysisResult) => {
 const createScanRecord = async (req, userId, decoded) => {
   console.log('SCAN-DEBUG: Creating scan record for user:', userId);
   
-  // Use service-role key if available to bypass RLS for all insert operations
-  const insertAuth = supabaseServiceRoleKey
-    ? `Bearer ${supabaseServiceRoleKey}`
-    : `Bearer ${supabaseKey}`;
-  
   try {
-    // First, look up the database user ID using google_id or email
-    console.log('SCAN-DEBUG: Looking up database user ID for Google user ID:', userId);
-    
     const userEmail = decoded.email;
-    
-    // Search by email, google_id OR the internal UUID (id) from the JWT to avoid
-    // creating duplicate rows when the Gmail address differs from the sign-up e-mail.
-    const userLookupResponse = await fetch(
-      `${supabaseUrl}/rest/v1/users?select=id,email,google_id&or=(email.eq.${encodeURIComponent(userEmail)},google_id.eq.${encodeURIComponent(userId)},id.eq.${encodeURIComponent(userId)})`, 
-      {
-        method: 'GET',
-        headers: {
-          'apikey': supabaseKey,
-          'Authorization': `Bearer ${supabaseKey}`,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-    
-    if (!userLookupResponse.ok) {
-      const errorText = await userLookupResponse.text();
-      console.error('SCAN-DEBUG: User lookup failed:', errorText);
-      throw new Error(`User lookup failed: ${errorText}`);
+
+    // Look up the user using the admin client to bypass RLS
+    const { data: users, error: userError } = await supabaseAdmin
+      .from('users')
+      .select('id, email, google_id')
+      .or(`email.eq.${userEmail},google_id.eq.${userId},id.eq.${userId}`);
+
+    if (userError) {
+      console.error('SCAN-DEBUG: User lookup failed:', userError.message);
+      throw new Error(`User lookup failed: ${userError.message}`);
     }
-    
-    const users = await userLookupResponse.json();
     
     // Create a new user if not found
     let dbUserId;
     if (!users || users.length === 0) {
       console.log(`SCAN-DEBUG: User not found in database, creating new user for: ${userEmail}`);
       
-      // Create a new user
-      const createUserResponse = await fetch(
-        `${supabaseUrl}/rest/v1/users`, 
-        {
-          method: 'POST',
-          headers: {
-            'apikey': supabaseKey,
-            'Authorization': insertAuth,
-            'Content-Type': 'application/json',
-            'Prefer': 'return=representation'
-          },
-          body: JSON.stringify({
-            email: userEmail,
-            google_id: userId,
-            name: decoded.name || userEmail.split('@')[0],
-            avatar_url: decoded.picture || null, // Use avatar_url which matches schema
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          })
-        }
-      );
+      const { data: newUser, error: createUserError } = await supabaseAdmin
+        .from('users')
+        .insert({
+          email: userEmail,
+          google_id: userId,
+          id: userId, // Explicitly set the UUID from the token
+          name: decoded.name || userEmail.split('@')[0],
+          avatar_url: decoded.picture || null,
+        })
+        .select('id')
+        .single();
       
-      if (!createUserResponse.ok) {
-        const errorText = await createUserResponse.text();
-        console.error('SCAN-DEBUG: Failed to create user:', errorText);
-        throw new Error(`Failed to create user: ${errorText}`);
+      if (createUserError) {
+        console.error('SCAN-DEBUG: Failed to create user:', createUserError.message);
+        throw new Error(`Failed to create user: ${createUserError.message}`);
       }
       
-      const newUser = await createUserResponse.json();
-      dbUserId = newUser[0].id;
+      dbUserId = newUser.id;
       console.log(`SCAN-DEBUG: Created new user with ID: ${dbUserId}`);
     } else {
       dbUserId = users[0].id;
@@ -1336,30 +1308,21 @@ const createScanRecord = async (req, userId, decoded) => {
     
     console.log('SCAN-DEBUG: Creating scan record with data:', JSON.stringify(scanRecord, null, 2));
     
-    const scanRecordResponse = await fetch(
-      `${supabaseUrl}/rest/v1/scan_history`,
-      {
-        method: 'POST',
-        headers: {
-          'apikey': supabaseKey,
-          'Authorization': insertAuth,
-          'Content-Type': 'application/json',
-          'Prefer': 'return=representation'
-        },
-        body: JSON.stringify(scanRecord)
-      }
-    );
-    
-    if (!scanRecordResponse.ok) {
-      const errorText = await scanRecordResponse.text();
-      console.error('SCAN-DEBUG: Failed to create scan record:', errorText);
-      throw new Error(`Failed to create scan record: ${errorText}`);
+    // Use the admin client to insert the scan record
+    const { data: result, error: scanError } = await supabaseAdmin
+      .from('scan_history')
+      .insert(scanRecord)
+      .select()
+      .single();
+
+    if (scanError) {
+      console.error('SCAN-DEBUG: Failed to create scan record:', scanError.message);
+      throw new Error(`Failed to create scan record: ${scanError.message}`);
     }
     
-    const result = await scanRecordResponse.json();
     console.log('SCAN-DEBUG: Successfully created scan record:', result);
     
-    return { scanId, dbUserId };
+    return { scanId: result.scan_id, dbUserId };
   } catch (error) {
     console.error('SCAN-DEBUG: Error creating scan record:', error);
     throw error;
