@@ -7,6 +7,7 @@ import { handleGoogleProxy } from './routes/proxy.js';
 import authRoutes from './routes/auth.js';
 import emailRoutes from './routes/email.js';
 import subscriptionRoutes from './routes/subscription.js';
+import settingsRoutes from './routes/settings.js';
 
 // Create Express app
 const app = express();
@@ -75,6 +76,7 @@ app.post('/api/google-proxy', googleProxyHandler);
 app.use('/api/auth', authRoutes);
 app.use('/api/email', emailRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
+app.use('/api/settings', settingsRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
