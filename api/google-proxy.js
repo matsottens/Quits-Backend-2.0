@@ -3,13 +3,13 @@ import jwt from 'jsonwebtoken';
 import { supabase } from './utils/supabase.js';
 
 // In-memory cache to prevent duplicate authorization code usage
-const usedAuthCodes = new Set();
+const codeCache = new Map(); // authCode -> { token, userInfo }
 
 // Clean up old codes every 10 minutes to prevent memory buildup
 // Authorization codes expire after ~10 minutes anyway
 setInterval(() => {
   console.log('[google-proxy] Cleaning up used authorization codes cache');
-  usedAuthCodes.clear();
+  codeCache.clear();
 }, 10 * 60 * 1000);
 
 // helper to merge linked accounts array on the users row
@@ -95,18 +95,12 @@ export default async function handler(req, res) {
     return res.status(400).json({ success: false, error: 'missing_code' });
   }
 
-  // Prevent duplicate processing of the same authorization code
-  if (usedAuthCodes.has(code)) {
-    console.log('[google-proxy] Authorization code already used, rejecting duplicate request');
-    return res.status(400).json({ 
-      success: false, 
-      error: 'code_already_used',
-      message: 'This authorization code has already been processed'
-    });
+  if (codeCache.has(code)) {
+    console.log('[google-proxy] Authorization code already used, returning cached result');
+    return res.status(200).json({ success: true, ...codeCache.get(code) });
   }
 
-  // Mark this code as used immediately
-  usedAuthCodes.add(code);
+  // We'll populate cache after successful processing
 
   try {
     // Before doing anything that touches the users table, make sure the schema is up to date
@@ -177,6 +171,9 @@ export default async function handler(req, res) {
                 { expiresIn: '7d' }
               );
               
+    // Cache result for duplicate requests
+    codeCache.set(code, { token, user: { ...userInfo, id: internalUserId } });
+
     return res.status(200).json({ success: true, token, user: { ...userInfo, id: internalUserId } });
   } catch (error) {
     console.error('Error in google-proxy:', error.message);
