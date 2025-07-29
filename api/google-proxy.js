@@ -40,6 +40,38 @@ async function getUserInfo(oauth2Client) {
   return data;
 }
 
+// Helper to ensure new user table columns exist (runs once per instance)
+let schemaEnsured = false;
+
+async function ensureUserTableSchema() {
+  if (schemaEnsured) return;
+
+  const sql = `\nALTER TABLE public.users\n  ADD COLUMN IF NOT EXISTS linked_accounts TEXT[],\n  ADD COLUMN IF NOT EXISTS google_id TEXT UNIQUE,\n  ADD COLUMN IF NOT EXISTS gmail_refresh_token TEXT,\n  ADD COLUMN IF NOT EXISTS gmail_access_token TEXT,\n  ADD COLUMN IF NOT EXISTS gmail_token_expires_at TIMESTAMP WITH TIME ZONE;\n`;
+
+  try {
+    // Vercel environments run on Node 18+ so fetch is available globally
+    const resp = await fetch(`${process.env.SUPABASE_URL}/rest/v1/rpc/exec_sql`, {
+      method: 'POST',
+      headers: {
+        'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY,
+        'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ sql })
+    });
+
+    if (!resp.ok) {
+      const text = await resp.text();
+      console.warn('[google-proxy] Schema ensure RPC responded with', resp.status, text);
+    } else {
+      console.log('[google-proxy] User table schema ensured');
+      schemaEnsured = true;
+    }
+  } catch (err) {
+    console.error('[google-proxy] Failed to ensure user table schema', err);
+  }
+}
+
 export default async function handler(req, res) {
   // Always set CORS headers so browser accepts JSON responses
   res.setHeader('Access-Control-Allow-Origin', 'https://www.quits.cc');
@@ -54,6 +86,9 @@ export default async function handler(req, res) {
   }
 
   try {
+    // Before doing anything that touches the users table, make sure the schema is up to date
+    await ensureUserTableSchema();
+
     const { oauth2Client, tokens } = await exchangeCodeForToken(code, redirect_uri);
     const userInfo = await getUserInfo(oauth2Client);
 
