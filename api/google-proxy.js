@@ -2,6 +2,16 @@ import { google } from 'googleapis';
 import jwt from 'jsonwebtoken';
 import { supabase } from './utils/supabase.js';
 
+// In-memory cache to prevent duplicate authorization code usage
+const usedAuthCodes = new Set();
+
+// Clean up old codes every 10 minutes to prevent memory buildup
+// Authorization codes expire after ~10 minutes anyway
+setInterval(() => {
+  console.log('[google-proxy] Cleaning up used authorization codes cache');
+  usedAuthCodes.clear();
+}, 10 * 60 * 1000);
+
 // helper to merge linked accounts array on the users row
 async function mergeLinkedAccount(userId, email) {
   try {
@@ -84,6 +94,19 @@ export default async function handler(req, res) {
   if (!code) {
     return res.status(400).json({ success: false, error: 'missing_code' });
   }
+
+  // Prevent duplicate processing of the same authorization code
+  if (usedAuthCodes.has(code)) {
+    console.log('[google-proxy] Authorization code already used, rejecting duplicate request');
+    return res.status(400).json({ 
+      success: false, 
+      error: 'code_already_used',
+      message: 'This authorization code has already been processed'
+    });
+  }
+
+  // Mark this code as used immediately
+  usedAuthCodes.add(code);
 
   try {
     // Before doing anything that touches the users table, make sure the schema is up to date
