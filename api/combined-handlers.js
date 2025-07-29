@@ -54,6 +54,43 @@ function parseBody(req) {
   });
 }
 
+// Define simple handlers for basic endpoints
+const simpleHandlers = {
+  '/api/health': async (req, res) => {
+    return res.status(200).json({
+      status: 'ok',
+      message: 'API is working',
+      timestamp: new Date().toISOString()
+    });
+  }
+};
+
+// Define debug handlers map
+const debugHandlerMap = {
+  '/api/debug': () => import('./debug.js').then(m => m.default || m),
+  '/api/debug-env': () => import('./debug-env.js').then(m => m.default || m),
+  '/api/debug-google-token': () => import('./debug-google-token.js').then(m => m.default || m),
+  '/api/debug-gmail': () => import('./debug-gmail.js').then(m => m.default || m),
+  '/api/debug-scan': () => import('./debug-scan.js').then(m => m.default || m),
+  '/api/debug-subscriptions': () => import('./debug-subscriptions.js').then(m => m.default || m),
+  '/api/debug-gemini': () => import('./debug-gemini.js').then(m => m.default || m),
+  '/api/debug-supabase': () => import('./debug-supabase.js').then(m => m.default || m),
+  '/api/restart-oauth': () => import('./restart-oauth.js').then(m => m.default || m)
+};
+
+// Load a debug handler dynamically
+const getDebugHandler = async (path) => {
+  if (debugHandlerMap[path]) {
+    try {
+      return await debugHandlerMap[path]();
+    } catch (error) {
+      console.error(`Error loading debug handler for ${path}:`, error);
+      return null;
+    }
+  }
+  return null;
+};
+
 // Define the route map with lazy-loaded handlers
 const routeMap = {
   // Core API routes
@@ -121,4 +158,48 @@ export default async function handler(req, res) {
   console.log(`[combined-handlers] Query params:`, parsedUrl.query);
   console.log(`[combined-handlers] Headers:`, Object.keys(req.headers));
   console.log(`[combined-handlers] Origin: ${req.headers.origin}`);
-  console.log(`
+  console.log(`[combined-handlers] ===== END REQUEST INFO =====`);
+
+  // Handle simple endpoints first
+  if (simpleHandlers[path]) {
+    console.log(`[combined-handlers] Using simple handler for: ${path}`);
+    return await simpleHandlers[path](req, res);
+  }
+
+  // Handle debug endpoints
+  if (debugHandlerMap[path]) {
+    console.log(`[combined-handlers] Using debug handler for: ${path}`);
+    const debugHandler = await getDebugHandler(path);
+    if (debugHandler) {
+      return await debugHandler(req, res);
+    }
+  }
+
+  // Check if we have a route handler for this path
+  if (routeMap[path]) {
+    console.log(`[combined-handlers] Found route handler for: ${path}`);
+    
+    try {
+      const handler = await routeMap[path]();
+      if (handler) {
+        console.log(`[combined-handlers] Executing handler for: ${path}`);
+        return await handler(req, res);
+      }
+    } catch (error) {
+      console.error(`[combined-handlers] Error loading handler for ${path}:`, error);
+      return res.status(500).json({ 
+        error: 'Internal server error',
+        message: 'Failed to load route handler',
+        path: path
+      });
+    }
+  }
+
+  // No handler found
+  console.log(`[combined-handlers] No handler found for path: ${path}`);
+  return res.status(404).json({ 
+    error: 'Not found',
+    message: `No handler found for path: ${path}`,
+    available_routes: Object.keys(routeMap)
+  });
+}
