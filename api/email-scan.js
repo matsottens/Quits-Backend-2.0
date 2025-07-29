@@ -146,6 +146,46 @@ const extractGmailToken = (token) => {
   }
 };
 
+// ===== Helper: refresh Gmail access token if expired =====
+async function getFreshGmailAccessToken(userId, currentToken) {
+  try {
+    const { data: userRow, error } = await supabaseAdmin
+      .from('users')
+      .select('gmail_access_token, gmail_refresh_token, gmail_token_expires_at')
+      .eq('id', userId)
+      .single();
+    if (error || !userRow) return currentToken;
+
+    const now = Date.now();
+    const expires = userRow.gmail_token_expires_at ? new Date(userRow.gmail_token_expires_at).getTime() : 0;
+    if (userRow.gmail_access_token && expires > now + 60_000) {
+      return userRow.gmail_access_token; // still valid
+    }
+    if (!userRow.gmail_refresh_token) return currentToken;
+
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET
+    );
+    oauth2Client.setCredentials({ refresh_token: userRow.gmail_refresh_token });
+    const { credentials } = await oauth2Client.refreshAccessToken();
+    if (!credentials.access_token) return currentToken;
+
+    await supabaseAdmin
+      .from('users')
+      .update({
+        gmail_access_token: credentials.access_token,
+        gmail_token_expires_at: credentials.expiry_date ? new Date(credentials.expiry_date).toISOString() : null,
+      })
+      .eq('id', userId);
+
+    return credentials.access_token;
+  } catch (err) {
+    console.error('SCAN-DEBUG: Token refresh failed:', err);
+    return currentToken;
+  }
+}
+
 // Helper function to fetch subscription examples
 const fetchSubscriptionExamples = async () => {
   // Subscription examples are no longer used. Return an empty array to skip any
