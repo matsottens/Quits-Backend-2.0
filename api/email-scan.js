@@ -1289,6 +1289,8 @@ const createScanRecord = async (req, userId, decoded) => {
   
   try {
     const userEmail = decoded.email;
+    const isScheduledScan = req.body.scheduled === true;
+    const scheduledScanId = req.headers['x-scan-id'];
 
     // Look up the user using the admin client to bypass RLS
     const { data: users, error: userError } = await supabaseAdmin
@@ -1330,7 +1332,8 @@ const createScanRecord = async (req, userId, decoded) => {
       console.log(`SCAN-DEBUG: Found existing user with ID: ${dbUserId}`);
     }
     
-    const scanId = 'scan_' + Math.random().toString(36).substring(2, 15);
+    // Use provided scan ID for scheduled scans, or generate new one
+    const scanId = isScheduledScan && scheduledScanId ? scheduledScanId : 'scan_' + Math.random().toString(36).substring(2, 15);
     const timestamp = new Date().toISOString();
     
     const scanRecord = {
@@ -1851,9 +1854,18 @@ export default async function handler(req, res) {
       return res.status(401).json({ error: 'Invalid or expired token' });
     }
 
-    // Get user ID from decoded token
-    const userId = decoded.id || decoded.sub;
-    if (!userId) {
+    // Get user ID from decoded token or scheduled scan headers
+    let userId = decoded.id || decoded.sub;
+    
+    // Check if this is a scheduled scan (user ID provided in headers)
+    const scheduledUserId = req.headers['x-user-id'];
+    const scheduledScanId = req.headers['x-scan-id'];
+    const isScheduledScan = req.body.scheduled === true;
+    
+    if (isScheduledScan && scheduledUserId) {
+      userId = scheduledUserId;
+      console.log('SCAN-DEBUG: Scheduled scan detected for user:', userId);
+    } else if (!userId) {
       console.log('SCAN-DEBUG: No user ID in token');
       console.log('SCAN-DEBUG: Available fields:', Object.keys(decoded));
       return res.status(400).json({ error: 'Invalid user ID' });

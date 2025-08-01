@@ -28,7 +28,7 @@ export default async function handler(req, res) {
     if (req.method === 'GET') {
       const { data, error } = await supabase
         .from('users')
-        .select('email, linked_accounts')
+        .select('email, linked_accounts, scan_frequency')
         .eq('id', userId)
         .single();
 
@@ -37,10 +37,11 @@ export default async function handler(req, res) {
       const allAccounts = [data.email, ...(data.linked_accounts || [])];
       const uniqueAccounts = [...new Set(allAccounts)];
 
-      // For now, we only care about the accounts
+      // Return settings including scan frequency
       const settings = {
         email: {
           accounts: uniqueAccounts,
+          scanFrequency: data.scan_frequency || 'manual',
         },
       };
       
@@ -48,6 +49,9 @@ export default async function handler(req, res) {
 
     } else if (req.method === 'PUT') {
       const patch = req.body || {};
+      
+      // Prepare update object
+      const updateData = {};
       
       if (patch.email?.accounts) {
         const { data: user, error: userError } = await supabase
@@ -60,10 +64,19 @@ export default async function handler(req, res) {
         
         const primaryEmail = user.email;
         const linkedAccounts = patch.email.accounts.filter(acc => acc !== primaryEmail);
-        
+        updateData.linked_accounts = linkedAccounts;
+      }
+      
+      // Handle scan frequency update
+      if (patch.email?.scanFrequency) {
+        updateData.scan_frequency = patch.email.scanFrequency;
+      }
+      
+      // Update database if there are changes
+      if (Object.keys(updateData).length > 0) {
         const { error: updateError } = await supabase
           .from('users')
-          .update({ linked_accounts: linkedAccounts })
+          .update(updateData)
           .eq('id', userId);
           
         if (updateError) throw updateError;

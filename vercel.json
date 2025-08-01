@@ -76,6 +76,10 @@
     {
       "path": "/api/trigger-gemini-scan",
       "schedule": "*/1 * * * *"
+    },
+    {
+      "path": "/api/scheduled-scan",
+      "schedule": "0 9 * * *"
     }
   ]
 } 
