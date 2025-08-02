@@ -89,6 +89,8 @@ router.get('/google', (req: Request, res: Response) => {
       access_type: 'offline',
       scope: SCOPES,
       prompt: 'consent', // Force consent screen for refresh token
+      // Ensure state is always a string
+      state: (typeof req.query.state === 'string' ? req.query.state : Date.now().toString()) as string,
       include_granted_scopes: true
     });
     

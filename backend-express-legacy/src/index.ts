@@ -209,13 +209,23 @@ const handleGoogleCallbackOptions = (req: Request, res: Response) => {
   return res.status(204).end();
 };
 
-// Direct Google callback handlers (not using Router)
+// Use the same edge-function Google callback in local dev as in Vercel
 const googleCallbackPath = '/api/auth/google/callback';
-app.options(googleCallbackPath, function(req: Request, res: Response) {
+
+// OPTIONS pre-flight for the callback
+app.options(googleCallbackPath, (req: Request, res: Response) => {
   return handleGoogleCallbackOptions(req, res);
 });
-app.get(googleCallbackPath, function(req: Request, res: Response) {
-  return handleGoogleCallback(req, res);
+
+// Delegate GET to the edge-function implementation to keep logic identical
+app.get(googleCallbackPath, async (req: Request, res: Response) => {
+  try {
+    const edgeHandler = (await import('../../api/auth/google/callback.js')).default;
+    return edgeHandler(req as unknown as any, res as unknown as any);
+  } catch (err) {
+    console.error('[INDEX] Failed to load edge Google callback handler:', err);
+    return res.status(500).json({ error: 'google_callback_load_failed' });
+  }
 });
 
 // CORS test endpoint at the root level

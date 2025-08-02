@@ -51,8 +51,13 @@ export default async function handler(req, res) {
     const { google } = await import('googleapis');
     const jwt = await import('jsonwebtoken');
 
-    // Set up the redirect URI - use a consistent one
-    const redirectUri = 'https://www.quits.cc/auth/callback';
+    // Set up the redirect URI - use a consistent one for production, but allow local override
+    const productionRedirectUri = 'https://www.quits.cc/auth/callback';
+    const localRedirectUri = `http://localhost:3000/api/auth/google/callback`;
+    const redirectUri = process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production' 
+      ? productionRedirectUri
+      : localRedirectUri;
+
     console.log(`Using redirect URI: ${redirectUri}`);
     
     // Check for required environment variables
