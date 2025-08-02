@@ -25,7 +25,43 @@ export default async function handler(req, res) {
   console.log(`Auth catch-all handler processing: ${req.url}`);
 
   try {
-    if (path.includes('/auth/me') || path === '/me') {
+    if (path.includes('/auth/signup') || path === '/signup') {
+      // Signup endpoint
+      if (req.method !== 'POST') {
+        return res.status(405).json({ error: 'Method not allowed for signup' });
+      }
+
+      // Import and use the signup handler
+      const signupHandler = (await import('./signup.js')).default;
+      return signupHandler(req, res);
+    } else if (path.includes('/auth/login') || path === '/login') {
+      // Login endpoint
+      if (req.method !== 'POST') {
+        return res.status(405).json({ error: 'Method not allowed for login' });
+      }
+
+      // Import and use the login handler
+      const loginHandler = (await import('./login.js')).default;
+      return loginHandler(req, res);
+    } else if (path.includes('/auth/forgot-password') || path === '/forgot-password') {
+      // Forgot password endpoint
+      if (req.method !== 'POST') {
+        return res.status(405).json({ error: 'Method not allowed for forgot-password' });
+      }
+
+      // Import and use the forgot-password handler
+      const forgotPasswordHandler = (await import('./forgot-password.js')).default;
+      return forgotPasswordHandler(req, res);
+    } else if (path.includes('/auth/reset-password') || path === '/reset-password') {
+      // Reset password endpoint
+      if (req.method !== 'POST') {
+        return res.status(405).json({ error: 'Method not allowed for reset-password' });
+      }
+
+      // Import and use the reset-password handler
+      const resetPasswordHandler = (await import('./reset-password.js')).default;
+      return resetPasswordHandler(req, res);
+    } else if (path.includes('/auth/me') || path === '/me') {
       // Auth/me endpoint
       if (req.method !== 'GET') {
         return res.status(405).json({ error: 'Method not allowed for auth/me' });
