@@ -11,7 +11,8 @@
     "dev": "vercel dev",
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev:backend": "npm --prefix backend run dev",
-    "dev:frontend": "npm --prefix frontend run dev"
+    "dev:frontend": "npm --prefix frontend run dev",
+    "build": "echo \"No build step needed for backend\""
   },
   "engines": {
     "node": ">=18.x"
