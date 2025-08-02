@@ -82,8 +82,26 @@ export default async function handler(req, res) {
         if (updateError) throw updateError;
       }
       
-      // Return a minimal success response
-      return res.status(200).json({ success: true, message: 'Settings updated' });
+      // Fetch and return the updated settings
+      const { data: updatedData, error: fetchError } = await supabase
+        .from('users')
+        .select('email, linked_accounts, scan_frequency')
+        .eq('id', userId)
+        .single();
+
+      if (fetchError) throw fetchError;
+
+      const allAccounts = [updatedData.email, ...(updatedData.linked_accounts || [])];
+      const uniqueAccounts = [...new Set(allAccounts)];
+
+      const updatedSettings = {
+        email: {
+          accounts: uniqueAccounts,
+          scanFrequency: updatedData.scan_frequency || 'manual',
+        },
+      };
+      
+      return res.status(200).json(updatedSettings);
     }
 
     // Default response for unhandled methods
