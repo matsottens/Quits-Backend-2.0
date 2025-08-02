@@ -26,14 +26,21 @@ export default async function handler(req, res) {
     const { id: userId } = user;
 
     if (req.method === 'GET') {
+      console.log('Settings API: Received GET request for user:', userId);
+      
       const { data, error } = await supabase
         .from('users')
         .select('email, linked_accounts, scan_frequency')
         .eq('id', userId)
         .single();
 
-      if (error) throw error;
+      if (error) {
+        console.error('Settings API: Database query error:', error);
+        throw error;
+      }
 
+      console.log('Settings API: Raw database data:', data);
+      
       const allAccounts = [data.email, ...(data.linked_accounts || [])];
       const uniqueAccounts = [...new Set(allAccounts)];
 
@@ -45,10 +52,13 @@ export default async function handler(req, res) {
         },
       };
       
+      console.log('Settings API: Returning settings:', settings);
       return res.status(200).json(settings);
 
     } else if (req.method === 'PUT') {
       const patch = req.body || {};
+      console.log('Settings API: Received PUT request with patch:', patch);
+      console.log('Settings API: User ID:', userId);
       
       // Prepare update object
       const updateData = {};
@@ -70,16 +80,28 @@ export default async function handler(req, res) {
       // Handle scan frequency update
       if (patch.email?.scanFrequency) {
         updateData.scan_frequency = patch.email.scanFrequency;
+        console.log('Settings API: Updating scan_frequency to:', patch.email.scanFrequency);
       }
+      
+      console.log('Settings API: Update data to be applied:', updateData);
       
       // Update database if there are changes
       if (Object.keys(updateData).length > 0) {
-        const { error: updateError } = await supabase
+        console.log('Settings API: Applying database update...');
+        const { data: updateResult, error: updateError } = await supabase
           .from('users')
           .update(updateData)
-          .eq('id', userId);
+          .eq('id', userId)
+          .select();
           
-        if (updateError) throw updateError;
+        if (updateError) {
+          console.error('Settings API: Database update error:', updateError);
+          throw updateError;
+        }
+        
+        console.log('Settings API: Database update successful:', updateResult);
+      } else {
+        console.log('Settings API: No changes to apply');
       }
       
       // Fetch and return the updated settings
