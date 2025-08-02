@@ -1,9 +1,7 @@
 {
   "version": 2,
   "devCommand": "npm --prefix frontend run dev",
-  "framework": "vite",
   "buildCommand": "npm run build",
-  "outputDirectory": "dist",
   "functions": {
     "api/*.js": {
       "memory": 2048,
