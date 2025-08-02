@@ -1,5 +1,7 @@
 {
   "version": 2,
+  "devCommand": "npm --prefix frontend run dev",
+  "framework": "vite",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "functions": {
@@ -51,26 +53,7 @@
     }
   ],
   "rewrites": [
-    { "source": "/(cors-test.html|test-auth|debug-cors)", "destination": "/public/$1" },
-    { "source": "/api/debug", "destination": "/api/debug.js" },
-    { "source": "/api/debug-env", "destination": "/api/debug-env.js" },
-    { "source": "/api/debug-supabase", "destination": "/api/debug-supabase.js" },
-    { "source": "/api/debug-scan-status", "destination": "/api/debug-scan-status.js" },
-    { "source": "/api/auth/signup", "destination": "https://api-quits-2-0.vercel.app/api/auth/signup" },
-    { "source": "/api/auth/login", "destination": "https://api-quits-2-0.vercel.app/api/auth/login" },
-    { "source": "/api/auth/forgot-password", "destination": "https://api-quits-2-0.vercel.app/api/auth/forgot-password" },
-    { "source": "/api/auth/reset-password", "destination": "https://api-quits-2-0.vercel.app/api/auth/reset-password" },
-    { "source": "/api/google-proxy", "destination": "/api/google-proxy.js" },
-    { "source": "/api/health", "destination": "/api/health.js" },
-    { "source": "/api/auth/google/callback", "destination": "/api/auth/google/callback.js" },
-    { "source": "/api/auth/google", "destination": "/api/auth/google/index.js" },
-    { "source": "/api/analyze-emails", "destination": "/api/analyze-emails.js" },
-    { "source": "/api/analyzed-subscriptions", "destination": "/api/analyzed-subscriptions.js" },
-    { "source": "/api/test-gemini-direct", "destination": "/api/test-gemini-direct.js" },
-    { "source": "/api/trigger-analysis", "destination": "/api/trigger-analysis.js" },
-    { "source": "/api/trigger-gemini-scan", "destination": "/api/combined-handlers.js" },
-    { "source": "/api/(.*)", "destination": "/api/combined-handlers.js" },
-    { "source": "/((?!.*\\..*).*)", "destination": "/frontend/$1" }
+    { "source": "/(.*)", "destination": "/api" }
   ],
   "crons": [
     {

@@ -5,12 +5,12 @@
   "main": "api/index.js",
   "type": "module",
   "scripts": {
-    "build": "npm --prefix frontend run build && npm --prefix backend run build",
-    "start": "concurrently \"npm --prefix frontend run start\" \"npm --prefix backend run start\"",
+    "build": "npm --prefix frontend run build",
+    "start": "npm --prefix frontend run start",
     "verify-modules": "node verify-modules.js",
     "predeploy": "npm run verify-modules",
     "prepare-local": "node scripts/prepare-env.js",
-    "dev": "npm run prepare-local && concurrently \"vercel dev --listen 3000\" \"npm --prefix frontend run dev\"",
+    "dev": "vercel dev",
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev:backend": "npm --prefix backend run dev",
     "dev:frontend": "npm --prefix frontend run dev"
