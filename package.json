@@ -8,7 +8,7 @@
     "verify-modules": "node verify-modules.js",
     "predeploy": "npm run verify-modules",
     "prepare-local": "node scripts/prepare-env.js",
-    "dev": "vercel dev",
+    "dev": "echo \"Run 'vercel dev' directly (script disabled to avoid recursion)\"",
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev:backend": "npm --prefix backend run dev",
     "dev:frontend": "npm --prefix frontend run dev",
