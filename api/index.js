@@ -18,6 +18,7 @@ import meHandler from './auth/me.js';
 import verifyHandler from './auth/verify.js';
 import settingsHandler from './settings.js';
 import googleProxyHandler from './google-proxy.js';
+import subscriptionHandler from './subscription.js';
 
 // ---------------------------------------------------------------------------
 // Backend target
@@ -327,10 +328,14 @@ app.post('/api/email/scan', handleEmailScan);
 app.post('/email/scan', handleEmailScan);
 
 // Subscription endpoints
-app.get('/api/subscription', handleGetSubscription);
-app.get('/subscription', handleGetSubscription);
-app.post('/api/subscription', handleCreateSubscription);
-app.post('/subscription', handleCreateSubscription);
+app.get('/api/subscription', subscriptionHandler);
+app.get('/subscription', subscriptionHandler);
+app.get('/api/subscriptions', subscriptionHandler);
+app.get('/subscriptions', subscriptionHandler);
+app.post('/api/subscription', subscriptionHandler);
+app.post('/subscription', subscriptionHandler);
+app.post('/api/subscriptions', subscriptionHandler);
+app.post('/subscriptions', subscriptionHandler);
 
 // Email status endpoints
 app.get('/api/email/status', handleEmailStatus);
@@ -475,204 +480,6 @@ async function handleEmailScan(req, res) {
     
     // Provide mock data as fallback in case of error
     return provideMockResponse(res, false, req.user);
-  }
-}
-
-// Handler function for getting subscriptions
-async function handleGetSubscription(req, res) {
-  try {
-    // Set proper CORS headers
-    setCorsHeaders(req, res);
-    
-    // Extract and verify authorization token
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
-      return res.status(401).json({ 
-        error: 'Unauthorized', 
-        message: 'No authorization token provided'
-      });
-    }
-    
-    // Parse token
-    let token;
-    if (authHeader.startsWith('Bearer ')) {
-      token = authHeader.split(' ')[1];
-    } else {
-      token = authHeader; // Accept token without Bearer prefix too
-    }
-    
-    if (!token) {
-      return res.status(401).json({ 
-        error: 'Unauthorized', 
-        message: 'Invalid authorization token format'
-      });
-    }
-    
-    // Verify JWT token
-    try {
-      const decoded = jsonwebtoken.verify(token, process.env.JWT_SECRET);
-      req.user = { 
-        id: decoded.id,
-        email: decoded.email
-      };
-      
-      console.log(`Fetching subscriptions for user: ${req.user.email}`);
-    } catch (error) {
-      console.error('Token verification failed:', error);
-      return res.status(401).json({ 
-        error: 'Unauthorized', 
-        message: 'Invalid or expired token'
-      });
-    }
-    
-    try {
-      if (!BACKEND_BASE) throw new Error('BACKEND_BASE not set');
-
-      const subPath = BACKEND_BASE.includes('api.quits.cc') ? '/api/subscriptions' : '/api/subscriptions';
-      const forwardResponse = await fetch(`${BACKEND_BASE}${subPath}`, {
-          method: 'GET',
-          headers: {
-            'Authorization': authHeader
-          }
-        });
-        
-      if (forwardResponse.ok) {
-        const backendData = await forwardResponse.json();
-        return res.status(200).json(backendData);
-      }
-    } catch (error) {
-      console.error('Error forwarding to backend:', error);
-      // Fall through to mock data if backend fails
-    }
-    
-    // Generate some mock subscription data
-    const mockSubscriptionData = [
-      {
-        id: "sub_" + Date.now(),
-        name: "Netflix",
-        price: 14.99,
-        billingCycle: "monthly",
-        category: "Entertainment",
-        nextBillingDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
-        logo: "https://www.quits.cc/subscription-logos/netflix.png"
-      },
-      {
-        id: "sub_" + (Date.now() + 1),
-        name: "Spotify",
-        price: 9.99,
-        billingCycle: "monthly",
-        category: "Music",
-        nextBillingDate: new Date(Date.now() + 21 * 24 * 60 * 60 * 1000).toISOString(),
-        logo: "https://www.quits.cc/subscription-logos/spotify.png"
-      },
-      {
-        id: "sub_" + (Date.now() + 2),
-        name: "Amazon Prime",
-        price: 12.99,
-        billingCycle: "monthly",
-        category: "Shopping",
-        nextBillingDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-        logo: "https://www.quits.cc/subscription-logos/amazon.png"
-      }
-    ];
-    
-    // If backend is unavailable or request failed, return mock subscription data
-    return res.status(200).json({
-      success: true,
-      subscriptions: mockSubscriptionData,
-      meta: {
-        total: mockSubscriptionData.length,
-        monthlyCost: mockSubscriptionData.reduce((sum, sub) => sum + sub.price, 0),
-        currency: "USD"
-      }
-    });
-  } catch (error) {
-    console.error('Error in get subscription handler:', error);
-    return res.status(500).json({ 
-      error: 'Server error', 
-      message: 'Failed to fetch subscriptions',
-      details: process.env.NODE_ENV === 'production' ? undefined : error.stack
-    });
-  }
-}
-
-// Handler function for creating a subscription
-async function handleCreateSubscription(req, res) {
-  try {
-    // Set proper CORS headers
-    setCorsHeaders(req, res);
-    
-    // Extract and verify authorization token
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
-      return res.status(401).json({ 
-        error: 'Unauthorized', 
-        message: 'No authorization token provided'
-      });
-    }
-    
-    // Verify JWT token
-    let user;
-    try {
-      const token = authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : authHeader;
-      const decoded = jsonwebtoken.verify(token, process.env.JWT_SECRET);
-      user = { 
-        id: decoded.id,
-        email: decoded.email
-      };
-      
-      console.log(`Creating subscription for user: ${user.email}`);
-    } catch (error) {
-      console.error('Token verification failed:', error);
-      return res.status(401).json({ 
-        error: 'Unauthorized', 
-        message: 'Invalid or expired token'
-      });
-    }
-    
-    // Check if backend URL is defined
-    if (process.env.BACKEND_URL) {
-      try {
-        // Forward request to the real backend implementation
-        const forwardResponse = await fetch(`${process.env.BACKEND_URL}/api/subscriptions`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': authHeader
-          },
-          body: JSON.stringify(req.body)
-        });
-        
-        if (forwardResponse.ok) {
-          const backendData = await forwardResponse.json();
-          return res.status(201).json(backendData);
-        }
-      } catch (error) {
-        console.error('Error forwarding to backend:', error);
-        // Fall through to mock response if backend fails
-      }
-    }
-    
-    // If backend is unavailable or request failed, return success with the submitted data
-    const subscription = {
-      id: "sub_" + Date.now(),
-      ...req.body,
-      userId: user.id,
-      createdAt: new Date().toISOString()
-    };
-    
-    return res.status(201).json({
-      success: true,
-      message: 'Subscription created (mock)',
-      subscription
-    });
-  } catch (error) {
-    console.error('Error in create subscription handler:', error);
-    return res.status(500).json({ 
-      error: 'Server error', 
-      message: 'Failed to create subscription',
-      details: process.env.NODE_ENV === 'production' ? undefined : error.stack
-    });
   }
 }
 

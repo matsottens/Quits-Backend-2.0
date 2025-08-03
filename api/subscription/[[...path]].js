@@ -122,37 +122,18 @@ export default async function handler(req, res) {
           const errorText = await userLookupResponse.text();
           console.error('[PATH] User lookup failed:', errorText);
           
-          // Return mock data for now
-        return res.status(200).json({
-          success: true,
-          subscriptions: [
-            {
-                id: 'mock_sub_123',
-                name: 'Netflix (Path Handler - User Lookup Failed)',
-              price: 15.99,
-                billingCycle: 'monthly',
-                nextBillingDate: '2023-05-15',
-              category: 'entertainment',
-                is_manual: true
-            },
-            {
-                id: 'mock_sub_124',
-                name: 'Spotify (Path Handler - User Lookup Failed)',
-              price: 9.99,
-                billingCycle: 'monthly',
-                nextBillingDate: '2023-05-10',
-              category: 'music',
-                is_manual: true
-              }
-            ],
+          // Return an empty array when lookup fails; never send mock data
+          return res.status(200).json({
+            success: true,
+            subscriptions: [],
             meta: {
-              total: 2,
-              totalMonthly: 25.98,
+              total: 0,
+              totalMonthly: 0,
               totalYearly: 0,
-              totalAnnualized: 311.76,
-              mock_data: true,
-              source: 'path_handler',
-              lookup_failed: true
+              totalAnnualized: 0,
+              lookup_failed: true,
+              mock_data: false,
+              source: 'path_handler'
             }
           });
         }
