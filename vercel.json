@@ -1,7 +1,5 @@
 {
   "version": 2,
-  "devCommand": "npm --prefix frontend run dev",
-  "buildCommand": "npm run build",
   "functions": {
     "api/*.js": {
       "memory": 2048,
