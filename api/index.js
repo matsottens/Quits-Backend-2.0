@@ -19,6 +19,27 @@ import verifyHandler from './auth/verify.js';
 import settingsHandler from './settings.js';
 import googleProxyHandler from './google-proxy.js';
 import subscriptionHandler from './subscription.js';
+import subscriptionPathHandler from './subscription/[[...path]].js';
+
+// Wrapper to adapt Express route params to Vercel path handler format
+function createPathHandlerWrapper(handler) {
+  return async (req, res) => {
+    // Transform Express params to Vercel path handler format
+    if (req.params.id) {
+      // Store the original URL and modify it to include the path format the handler expects
+      const originalUrl = req.url;
+      req.url = `/subscription/${req.params.id}`;
+      
+      // Define the query property to include the path array
+      Object.defineProperty(req, 'query', {
+        value: { path: [req.params.id] },
+        writable: true,
+        configurable: true
+      });
+    }
+    return handler(req, res);
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Backend target
@@ -332,10 +353,22 @@ app.get('/api/subscription', subscriptionHandler);
 app.get('/subscription', subscriptionHandler);
 app.get('/api/subscriptions', subscriptionHandler);
 app.get('/subscriptions', subscriptionHandler);
+app.get('/api/subscription/:id', createPathHandlerWrapper(subscriptionPathHandler));
+app.get('/subscription/:id', createPathHandlerWrapper(subscriptionPathHandler));
+app.get('/api/subscriptions/:id', createPathHandlerWrapper(subscriptionPathHandler));
+app.get('/subscriptions/:id', createPathHandlerWrapper(subscriptionPathHandler));
 app.post('/api/subscription', subscriptionHandler);
 app.post('/subscription', subscriptionHandler);
 app.post('/api/subscriptions', subscriptionHandler);
 app.post('/subscriptions', subscriptionHandler);
+app.put('/api/subscription/:id', createPathHandlerWrapper(subscriptionPathHandler));
+app.put('/subscription/:id', createPathHandlerWrapper(subscriptionPathHandler));
+app.put('/api/subscriptions/:id', createPathHandlerWrapper(subscriptionPathHandler));
+app.put('/subscriptions/:id', createPathHandlerWrapper(subscriptionPathHandler));
+app.delete('/api/subscription/:id', createPathHandlerWrapper(subscriptionPathHandler));
+app.delete('/subscription/:id', createPathHandlerWrapper(subscriptionPathHandler));
+app.delete('/api/subscriptions/:id', createPathHandlerWrapper(subscriptionPathHandler));
+app.delete('/subscriptions/:id', createPathHandlerWrapper(subscriptionPathHandler));
 
 // Email status endpoints
 app.get('/api/email/status', handleEmailStatus);
