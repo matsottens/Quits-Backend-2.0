@@ -94,10 +94,12 @@ const getDebugHandler = async (path) => {
 function extractOriginalPath(req, parsedUrl) {
   let path = parsedUrl.pathname;
   
+  console.log(`[api] extractOriginalPath called with path: ${path}`);
+  console.log(`[api] req.url: ${req.url}`);
+  console.log(`[api] All headers:`, req.headers);
+  
   // If we're at the api.js endpoint, we need to reconstruct the original path
   if (path === '/api/api.js') {
-    // Try multiple methods to get the original path
-    
     // Method 1: Check for Vercel-specific headers
     const originalPath = req.headers['x-vercel-original-path'] || 
                         req.headers['x-original-path'] ||
@@ -141,8 +143,18 @@ function extractOriginalPath(req, parsedUrl) {
       }
     }
     
-    // Method 4: Fallback - try to reconstruct from the request context
-    // This is a last resort and may not work perfectly
+    // Method 4: For auth routes, try to reconstruct based on the request
+    if (req.method === 'POST' && req.body) {
+      // If this is a POST request, it might be a signup/login
+      console.log(`[api] POST request detected, checking body for auth clues`);
+      if (req.body.email && req.body.password) {
+        console.log(`[api] Detected auth request with email/password`);
+        // This is likely a signup or login request
+        return '/api/auth/signup'; // Default to signup, login will be handled by the auth handler
+      }
+    }
+    
+    // Method 5: Fallback - try to reconstruct from the request context
     console.log(`[api] Could not determine original path, using fallback`);
     return '/api/unknown';
   }
@@ -165,6 +177,30 @@ export default async function handler(req, res) {
     console.log(`[api] Headers:`, Object.keys(req.headers));
     console.log(`[api] Host: ${req.headers.host}`);
     console.log(`[api] Referer: ${req.headers.referer}`);
+    
+    // Handle auth routes directly first
+    if (req.method === 'POST' && req.body && req.body.email && req.body.password) {
+      // Check if this is specifically a signup request
+      const contentType = req.headers['content-type'] || '';
+      const userAgent = req.headers['user-agent'] || '';
+      const referer = req.headers.referer || '';
+      
+      // Look for signup-specific indicators
+      const isSignupRequest = 
+        referer.includes('/signup') ||
+        userAgent.includes('signup') ||
+        (req.body.name && !req.body.token); // Signup typically has name, login doesn't
+      
+      if (isSignupRequest) {
+        console.log(`[api] Detected signup request, routing to signup handler`);
+        const signupHandler = (await import('./auth/signup.js')).default;
+        return await signupHandler(req, res);
+      } else {
+        console.log(`[api] Detected login request, routing to login handler`);
+        const loginHandler = (await import('./auth/login.js')).default;
+        return await loginHandler(req, res);
+      }
+    }
     
     // Handle simple/static responses first
     if (simpleHandlers[path]) {
