@@ -539,7 +539,7 @@ export default async function handler(req, res) {
       } catch (dbError) {
         console.error('[PATH] Database operation error:', dbError);
         return res.status(500).json({
-          error: 'database_operation_error', 
+          error: 'database_operation_error',
           message: dbError.message,
           details: {
             stack: dbError.stack,
