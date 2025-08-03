@@ -3,10 +3,20 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { setCorsHeaders } from '../cors-middleware.js';
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
+// Create Supabase client inside the handler to ensure env vars are loaded
+function getSupabaseClient() {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  
+  if (!supabaseUrl) {
+    throw new Error('SUPABASE_URL environment variable is not set');
+  }
+  if (!supabaseKey) {
+    throw new Error('SUPABASE_SERVICE_ROLE_KEY environment variable is not set');
+  }
+  
+  return createClient(supabaseUrl, supabaseKey);
+}
 
 export default async function handler(req, res) {
   console.log('[signup] ===== SIGNUP REQUEST RECEIVED =====');
@@ -45,6 +55,7 @@ export default async function handler(req, res) {
 
     console.log('[signup] Checking if user already exists...');
     // Check if user already exists
+    const supabase = getSupabaseClient();
     const { data: existingUser, error: checkError } = await supabase
       .from('users')
       .select('id')

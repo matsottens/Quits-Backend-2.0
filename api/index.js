@@ -1,3 +1,8 @@
+import dotenv from 'dotenv';
+// Load env vars from project root
+dotenv.config({ path: '../.env.local' });
+dotenv.config();
+
 // Simple serverless handler for Vercel - Consolidated API Endpoints
 import express from 'express';
 import cors from 'cors';
@@ -5,8 +10,16 @@ import { setCorsHeaders } from './cors-middleware.js';
 import jsonwebtoken from 'jsonwebtoken';
 import { google } from 'googleapis';
 
+// Import auth handlers
+import signupHandler from './auth/signup.js';
+import loginHandler from './auth/login.js';
+import forgotPasswordHandler from './auth/forgot-password.js';
+import resetPasswordHandler from './auth/reset-password.js';
+import meHandler from './auth/me.js';
+import verifyHandler from './auth/verify.js';
+
 // Create Express app
-const app = express();
+export const app = express();
 
 // Configure JWT
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production';
@@ -60,32 +73,6 @@ app.use(cors({
   ],
   maxAge: 86400 // 24 hours
 }));
-
-// Add global CORS middleware for preflight requests
-app.options('*', (req, res) => {
-  const origin = req.headers.origin || '';
-  
-  // Set CORS headers for preflight
-  if (origin && (origin.includes('quits.cc') || origin.includes('localhost'))) {
-    res.header('Access-Control-Allow-Origin', origin);
-  } else {
-    res.header('Access-Control-Allow-Origin', '*');
-  }
-  
-  res.header('Access-Control-Allow-Credentials', 'true');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token');
-  res.header('Access-Control-Max-Age', '86400');
-  
-  // Log headers for debugging
-  console.log('Preflight response headers:', {
-    'Access-Control-Allow-Origin': res.getHeader('Access-Control-Allow-Origin'),
-    'Access-Control-Allow-Headers': res.getHeader('Access-Control-Allow-Headers'),
-    'Access-Control-Allow-Methods': res.getHeader('Access-Control-Allow-Methods')
-  });
-  
-  return res.status(204).end();
-});
 
 // Parse JSON bodies
 app.use(express.json());
@@ -310,6 +297,14 @@ app.post('/subscription', handleCreateSubscription);
 // Email status endpoints
 app.get('/api/email/status', handleEmailStatus);
 app.get('/email/status', handleEmailStatus);
+
+// Auth routes
+app.post('/api/auth/signup', signupHandler);
+app.post('/api/auth/login', loginHandler);
+app.post('/api/auth/forgot-password', forgotPasswordHandler);
+app.post('/api/auth/reset-password', resetPasswordHandler);
+app.get('/api/auth/me', meHandler);
+app.get('/api/auth/verify', verifyHandler);
 
 // Handler function for email scanning
 async function handleEmailScan(req, res) {
