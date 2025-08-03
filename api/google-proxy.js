@@ -83,13 +83,31 @@ async function ensureUserTableSchema() {
 }
 
 export default async function handler(req, res) {
-  // Always set CORS headers so browser accepts JSON responses
-  res.setHeader('Access-Control-Allow-Origin', 'https://www.quits.cc');
+  // ------------------ CORS ------------------
+  const origin = req.headers.origin || '';
+  if (origin.includes('localhost') || origin.includes('quits.cc')) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Accept, Cache-Control, X-Requested-With');
 
-  const { code, state, redirect_uri = 'https://www.quits.cc/auth/callback' } = req.query;
+  // Preflight support
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+
+  // ------------------ Params ------------------
+  let { code, state, redirect_uri } = req.query;
+
+  // If caller didn’t specify redirect_uri pick one that matches the current origin
+  if (!redirect_uri) {
+    redirect_uri = origin.includes('localhost')
+      ? 'http://localhost:5173/auth/callback'
+      : 'https://www.quits.cc/auth/callback';
+  }
 
   if (!code) {
     return res.status(400).json({ success: false, error: 'missing_code' });
