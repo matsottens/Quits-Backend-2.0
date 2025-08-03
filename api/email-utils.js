@@ -173,22 +173,29 @@ function analyzeEmailForSubscriptions(emailData) {
     'renewal', 'renewed', 'will renew', 'has been renewed', 'auto-renewal',
     'recurring', 'billed', 'paid', 'successfully charged',
     'thank you for your payment', 'payment confirmation',
-    'premium', 'pro plan', 'plus plan', 'upgraded', 'upgrade'
+    'premium', 'pro plan', 'plus plan', 'upgraded', 'upgrade',
+    // Additional keywords to catch more subscriptions
+    'monthly fee', 'annual fee', 'service fee', 'membership fee',
+    'auto-pay', 'automatic payment', 'direct debit', 'card charged',
+    'trial', 'trial period', 'free trial', 'trial ended',
+    'account', 'your account', 'account summary', 'account statement',
+    'netflix', 'spotify', 'youtube', 'amazon prime', 'apple music',
+    'dropbox', 'google', 'microsoft', 'adobe', 'zoom', 'slack'
   ];
 
   // Check subject line for subscription-related keywords
   subscriptionKeywords.forEach(keyword => {
     if (normalizedSubject.includes(keyword)) {
-      confidence += 20;
-      console.log(`SCAN-DEBUG: Found subscription keyword "${keyword}" in subject (confidence +20)`);
+      confidence += 15;  // Reduced from 20 to be less strict
+      console.log(`SCAN-DEBUG: Found subscription keyword "${keyword}" in subject (confidence +15)`);
     }
   });
 
   // Check email body for subscription-related keywords
   subscriptionKeywords.forEach(keyword => {
     if (normalizedBody.includes(keyword)) {
-      confidence += 10;
-      console.log(`SCAN-DEBUG: Found subscription keyword "${keyword}" in body (confidence +10)`);
+      confidence += 8;  // Reduced from 10 to be less strict
+      console.log(`SCAN-DEBUG: Found subscription keyword "${keyword}" in body (confidence +8)`);
     }
   });
 
@@ -311,8 +318,10 @@ function analyzeEmailForSubscriptions(emailData) {
   }
 
   // Determine if this is likely a subscription based on confidence score
-  isSubscription = confidence >= 40;
-  console.log(`SCAN-DEBUG: Final confidence score: ${confidence}, subscription: ${isSubscription}`);
+  // Convert points to percentage (0.0 to 1.0)
+  const confidencePercentage = Math.min(confidence / 100, 1.0);
+  isSubscription = confidence >= 25;  // Lowered from 40 to 25 to be less strict
+  console.log(`SCAN-DEBUG: Final confidence score: ${confidence} points (${confidencePercentage} percentage), subscription: ${isSubscription}`);
 
   return {
     isSubscription,
@@ -321,7 +330,7 @@ function analyzeEmailForSubscriptions(emailData) {
     currency: currency,
     billingFrequency: billingFrequency || 'unknown',
     nextBillingDate: nextBillingDate,
-    confidence: confidence
+    confidence: confidencePercentage  // Return as percentage 0.0-1.0
   };
 }
 

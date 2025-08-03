@@ -395,7 +395,7 @@ const processEmailsForSubscriptions = async (emails, subscriptionExamples, gmail
       
       console.log(`SCAN-DEBUG: Pattern matching result for email ${messageId}:`, JSON.stringify(analysis));
       
-      if (analysis.isSubscription && analysis.confidence > 0.6) {
+      if (analysis.isSubscription && analysis.confidence > 0.25) {  // Lowered from 0.6 to 0.25
         console.log(`SCAN-DEBUG: Detected potential subscription: ${analysis.serviceName} (${analysis.confidence} confidence)`);
         
         // Check for duplicates
