@@ -1,7 +1,6 @@
-import dotenv from 'dotenv';
-// Load env vars from project root
-dotenv.config({ path: '../.env.local' });
-dotenv.config();
+// Load environment variables **before** any other imports that may rely on them.
+// This side-effect module sets process.env from .env.local / .env.
+import './load-env.js';
 
 // Simple serverless handler for Vercel - Consolidated API Endpoints
 import express from 'express';
@@ -17,7 +16,30 @@ import forgotPasswordHandler from './auth/forgot-password.js';
 import resetPasswordHandler from './auth/reset-password.js';
 import meHandler from './auth/me.js';
 import verifyHandler from './auth/verify.js';
+import settingsHandler from './settings.js';
+import googleProxyHandler from './google-proxy.js';
 
+// ---------------------------------------------------------------------------
+// Backend target
+// ---------------------------------------------------------------------------
+// In production we may configure BACKEND_URL explicitly (e.g. a dedicated
+// API service).  For local development or simple deployments we fall back to
+// the Supabase Edge-Function base derived from SUPABASE_URL so no extra env
+// var is required.
+
+export const BACKEND_BASE =
+  // 1. Explicit override
+  process.env.BACKEND_URL ||
+  // 2. Production default (same domain used by Vercel deployment)
+  'https://api.quits.cc' ||
+  // 3. Supabase Edge Functions fallback (for self-hosted projects)
+  (process.env.SUPABASE_URL
+    ? `${process.env.SUPABASE_URL.replace(/\/$/, '')}/functions/v1`
+    : null);
+
+if (!BACKEND_BASE) {
+  console.warn('[startup] Neither BACKEND_URL nor SUPABASE_URL is set – email scanning proxy will return mock data only.');
+} // ---------------------------------------------------------------------------
 // Create Express app
 export const app = express();
 
@@ -159,9 +181,18 @@ app.get('/api/env-check', (req, res) => {
   });
 });
 
-// Google proxy handler
-app.all('/api/google-proxy', async (req, res) => {
+// Deprecated inline Google proxy handler (renamed to avoid route clash)
+app.all('/__deprecated/google-proxy', async (req, res) => {
   try {
+    // Dynamically allow CORS for localhost during development
+    const reqOrigin = req.headers.origin || '';
+    if (reqOrigin.includes('localhost') || reqOrigin.includes('quits.cc')) {
+      res.setHeader('Access-Control-Allow-Origin', reqOrigin);
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+
     // Log detailed request info
     console.log('=== Google Proxy Handler ===');
     console.log('Path:', req.url);
@@ -176,9 +207,13 @@ app.all('/api/google-proxy', async (req, res) => {
       return res.status(400).json({ error: 'Missing authorization code' });
     }
     
-    // Use EXACTLY the same redirect URI that was used in the frontend
-    // This is crucial for OAuth to work properly
-    const redirectUri = 'https://www.quits.cc/auth/callback';
+    // Determine the correct redirect URI: use query parameter if provided, otherwise pick based on host
+    let redirectUri = req.query.redirect;
+    if (!redirectUri) {
+      redirectUri = req.headers.origin && req.headers.origin.includes('localhost')
+        ? 'http://localhost:5173/auth/callback'
+        : 'https://www.quits.cc/auth/callback';
+    }
     console.log(`Using redirect URI: ${redirectUri}`);
     
     try {
@@ -284,6 +319,9 @@ app.all('/api/google-proxy', async (req, res) => {
   }
 });
 
+// New shared Google proxy handler (mirrors production logic exactly)
+app.all('/api/google-proxy', googleProxyHandler);
+
 // Email scan endpoint - available at both /api/email/scan and /email/scan
 app.post('/api/email/scan', handleEmailScan);
 app.post('/email/scan', handleEmailScan);
@@ -305,6 +343,10 @@ app.post('/api/auth/forgot-password', forgotPasswordHandler);
 app.post('/api/auth/reset-password', resetPasswordHandler);
 app.get('/api/auth/me', meHandler);
 app.get('/api/auth/verify', verifyHandler);
+
+// Settings endpoint
+app.get('/api/settings', settingsHandler);
+app.put('/api/settings', settingsHandler);
 
 // Handler function for email scanning
 async function handleEmailScan(req, res) {
@@ -372,7 +414,7 @@ async function handleEmailScan(req, res) {
     
     // Verify JWT token
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const decoded = jsonwebtoken.verify(token, process.env.JWT_SECRET);
       req.user = { 
         id: decoded.id,
         email: decoded.email
@@ -392,7 +434,13 @@ async function handleEmailScan(req, res) {
     const useRealData = !!gmailToken && req.body.useRealData !== false;
     
     // Forward request to the real backend implementation
-    const forwardResponse = await fetch(`${process.env.BACKEND_URL}/email/scan`, {
+    if (!BACKEND_BASE) {
+      console.warn('[email-scan] BACKEND_BASE undefined – returning mock data');
+      return provideMockResponse(res, useRealData, req.user);
+    }
+
+    const scanPath = BACKEND_BASE.includes('api.quits.cc') ? '/api/email/scan' : '/email/scan';
+    const forwardResponse = await fetch(`${BACKEND_BASE}${scanPath}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -462,7 +510,7 @@ async function handleGetSubscription(req, res) {
     
     // Verify JWT token
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const decoded = jsonwebtoken.verify(token, process.env.JWT_SECRET);
       req.user = { 
         id: decoded.id,
         email: decoded.email
@@ -477,25 +525,24 @@ async function handleGetSubscription(req, res) {
       });
     }
     
-    // Check if backend URL is defined
-    if (process.env.BACKEND_URL) {
-      try {
-        // Forward request to the real backend implementation
-        const forwardResponse = await fetch(`${process.env.BACKEND_URL}/api/subscriptions`, {
+    try {
+      if (!BACKEND_BASE) throw new Error('BACKEND_BASE not set');
+
+      const subPath = BACKEND_BASE.includes('api.quits.cc') ? '/api/subscriptions' : '/api/subscriptions';
+      const forwardResponse = await fetch(`${BACKEND_BASE}${subPath}`, {
           method: 'GET',
           headers: {
             'Authorization': authHeader
           }
         });
         
-        if (forwardResponse.ok) {
-          const backendData = await forwardResponse.json();
-          return res.status(200).json(backendData);
-        }
-      } catch (error) {
-        console.error('Error forwarding to backend:', error);
-        // Fall through to mock data if backend fails
+      if (forwardResponse.ok) {
+        const backendData = await forwardResponse.json();
+        return res.status(200).json(backendData);
       }
+    } catch (error) {
+      console.error('Error forwarding to backend:', error);
+      // Fall through to mock data if backend fails
     }
     
     // Generate some mock subscription data
@@ -568,7 +615,7 @@ async function handleCreateSubscription(req, res) {
     let user;
     try {
       const token = authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : authHeader;
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const decoded = jsonwebtoken.verify(token, process.env.JWT_SECRET);
       user = { 
         id: decoded.id,
         email: decoded.email
@@ -687,7 +734,12 @@ async function handleEmailStatus(req, res) {
     }
     
     // Forward request to the real backend implementation
-    const forwardResponse = await fetch(`${process.env.BACKEND_URL}/email/status`, {
+    if (!BACKEND_BASE) {
+      return res.status(200).json({ status: 'completed', progress: 100 });
+    }
+
+    const statusPath = BACKEND_BASE.includes('api.quits.cc') ? '/api/email/status' : '/email/status';
+    const forwardResponse = await fetch(`${BACKEND_BASE}${statusPath}`, {
       method: 'GET',
       headers: {
         'Authorization': authHeader

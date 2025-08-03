@@ -48,7 +48,14 @@ export default async function handler(req, res) {
       .eq('email', email)
       .single();
 
-    if (error || !user) {
+    // If Supabase returned an error (e.g., table missing) treat as 500 so we can surface the underlying problem in the client
+    if (error) {
+      console.error('[login] Database error fetching user:', error);
+      res.status(500).json({ error: 'Database error retrieving user', details: error.message });
+      return;
+    }
+
+    if (!user) {
       res.status(401).json({ error: 'Invalid email or password' });
       return;
     }

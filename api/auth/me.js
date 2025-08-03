@@ -4,7 +4,12 @@ const { verify } = jsonwebtoken;
 
 export default async function handler(req, res) {
   // Set CORS headers for all response types
-  res.setHeader('Access-Control-Allow-Origin', 'https://www.quits.cc');
+  const origin = req.headers.origin || '';
+  if (origin.includes('localhost') || origin.includes('quits.cc')) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', 'https://www.quits.cc');
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH');
   res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token, Pragma, X-API-Key, X-Api-Version, X-Device-ID');
   res.setHeader('Access-Control-Allow-Credentials', 'true');

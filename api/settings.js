@@ -4,7 +4,12 @@ import { supabase } from './utils/supabase.js';
 // This is a simplified handler that will be expanded
 export default async function handler(req, res) {
   // Set CORS headers for all responses
-  res.setHeader('Access-Control-Allow-Origin', 'https://www.quits.cc');
+  const origin = req.headers.origin || '';
+  if (origin.includes('localhost') || origin.includes('quits.cc')) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', 'https://www.quits.cc');
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET, PUT, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Accept, Cache-Control, X-Requested-With');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
