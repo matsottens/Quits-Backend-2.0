@@ -13,16 +13,19 @@ const verifyToken = (token, req) => {
 };
 
 export default async function handler(req, res) {
-  console.log('SCAN-STATUS-DEBUG: Handler called');
+  console.log('SCAN-STATUS-DEBUG: Request received');
   console.log('SCAN-STATUS-DEBUG: Method:', req.method);
   console.log('SCAN-STATUS-DEBUG: URL:', req.url);
   console.log('SCAN-STATUS-DEBUG: Headers:', {
-    'authorization': req.headers.authorization ? 'Present' : 'Missing',
-    'content-type': req.headers['content-type']
+    'origin': req.headers.origin,
+    'authorization': req.headers.authorization ? 'Present' : 'Missing'
   });
-
+  
   // Set CORS headers
-  res.setHeader('Access-Control-Allow-Origin', 'https://www.quits.cc');
+  const origin = process.env.NODE_ENV === 'development' 
+    ? 'http://localhost:5173' 
+    : 'https://www.quits.cc';
+  res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token, Pragma, X-API-Key, X-Api-Version, X-Device-ID');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
