@@ -65,12 +65,14 @@ export const app = express();
 
 // Configure JWT
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production';
+console.log(`JWT_SECRET loaded. Starts with: ${JWT_SECRET.substring(0, 4)}...`);
+
 
 // Generate a JWT token - handle both ESM and CJS environments
 const generateToken = (payload) => {
   try {
     const jwt = jsonwebtoken;
-    return jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
+    return jwt.sign(payload, JWT_SECRET, { expiresIn: '24h' });
   } catch (error) {
     console.error('JWT signing error:', error);
     throw error;
