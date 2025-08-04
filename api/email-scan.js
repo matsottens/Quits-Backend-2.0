@@ -1922,6 +1922,12 @@ export default async function handler(req, res) {
       }
     }
 
+    // --- NEW: attempt to refresh access token --------------------------------
+    // Always attempt to get a fresh token (will return original if still valid)
+    gmailToken = await getFreshGmailAccessToken(userId, gmailToken);
+    console.log('SCAN-DEBUG: Gmail token after refresh attempt, length:', gmailToken?.length || 0);
+    // ------------------------------------------------------------------------
+
     console.log('SCAN-DEBUG: About to validate Gmail token...');
     // Validate Gmail token
     const isValidToken = await validateGmailToken(gmailToken);
