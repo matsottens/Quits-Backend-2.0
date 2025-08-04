@@ -52,9 +52,7 @@ function createPathHandlerWrapper(handler) {
 export const BACKEND_BASE =
   // 1. Explicit override
   process.env.BACKEND_URL ||
-  // 2. Production default (same domain used by Vercel deployment)
-  'https://api.quits.cc' ||
-  // 3. Supabase Edge Functions fallback (for self-hosted projects)
+  // 2. Supabase Edge Functions fallback (for self-hosted projects)
   (process.env.SUPABASE_URL
     ? `${process.env.SUPABASE_URL.replace(/\/$/, '')}/functions/v1`
     : null);
@@ -476,6 +474,9 @@ async function handleEmailScan(req, res) {
       console.warn('[email-scan] BACKEND_BASE undefined – returning mock data');
       return provideMockResponse(res, useRealData, req.user);
     }
+    
+    // Log the backend base URL being used
+    console.log(`Forwarding email scan to: ${BACKEND_BASE}`);
 
     const scanPath = BACKEND_BASE.includes('api.quits.cc') ? '/api/email/scan' : '/email/scan';
     const forwardResponse = await fetch(`${BACKEND_BASE}${scanPath}`, {
