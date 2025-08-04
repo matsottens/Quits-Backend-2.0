@@ -1837,11 +1837,16 @@ export default async function handler(req, res) {
   });
   console.log('SCAN-DEBUG: Body keys:', Object.keys(req.body || {}));
   
-  // Set CORS headers
-  const origin = process.env.NODE_ENV === 'development' 
-    ? 'http://localhost:5173' 
-    : 'https://www.quits.cc';
-  res.setHeader('Access-Control-Allow-Origin', origin);
+  // Dynamically set the allowed origin: accept localhost in development and ANY *.quits.cc sub-domain in production.
+  const requestOrigin = req.headers.origin || '';
+  const allowedOrigin = (requestOrigin && (
+    requestOrigin.includes('localhost') ||           // local dev
+    /https?:\/\/([a-z0-9-]+\.)*quits\.cc$/i.test(requestOrigin) // *.quits.cc domains
+  )) ? requestOrigin : 'https://www.quits.cc';       // safe fallback
+
+  res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+  // Ensure caches vary on Origin so each requesting origin gets its own CORS header
+  res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token, Pragma, X-API-Key, X-Api-Version, X-Device-ID');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
