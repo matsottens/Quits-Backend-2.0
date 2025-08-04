@@ -20,6 +20,7 @@ import settingsHandler from './settings.js';
 import googleProxyHandler from './google-proxy.js';
 import subscriptionHandler from './subscription.js';
 import subscriptionPathHandler from './subscription/[[...path]].js';
+import emailScanHandler from './email-scan.js';
 
 // Wrapper to adapt Express route params to Vercel path handler format
 function createPathHandlerWrapper(handler) {
@@ -344,9 +345,9 @@ app.all('/__deprecated/google-proxy', async (req, res) => {
 // New shared Google proxy handler (mirrors production logic exactly)
 app.all('/api/google-proxy', googleProxyHandler);
 
-// Email scan endpoint - available at both /api/email/scan and /email/scan
-app.post('/api/email/scan', handleEmailScan);
-app.post('/email/scan', handleEmailScan);
+// Ensure the email scan endpoint is registered early
+app.post('/api/email/scan', emailScanHandler);
+app.post('/email/scan', emailScanHandler);
 
 // Subscription endpoints
 app.get('/api/subscription', subscriptionHandler);
@@ -370,7 +371,7 @@ app.delete('/subscription/:id', createPathHandlerWrapper(subscriptionPathHandler
 app.delete('/api/subscriptions/:id', createPathHandlerWrapper(subscriptionPathHandler));
 app.delete('/subscriptions/:id', createPathHandlerWrapper(subscriptionPathHandler));
 
-// Email status endpoints
+// Email status endpoint mapping
 app.get('/api/email/status', handleEmailStatus);
 app.get('/email/status', handleEmailStatus);
 
