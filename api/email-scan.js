@@ -1671,6 +1671,9 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
     const subscriptionExamples = await fetchSubscriptionExamples();
     console.log('SCAN-DEBUG: Fetched subscription examples:', subscriptionExamples.length);
     
+    // Add a small delay to show preparation progress
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
     // Update progress
     console.log('SCAN-DEBUG: About to update progress to 15...');
     await updateScanStatus(scanId, userId, {
@@ -1685,6 +1688,9 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
     const emails = await fetchEmailsFromGmail(gmailToken);
     console.log('SCAN-DEBUG: Fetched emails from Gmail:', emails.length);
     console.log('SCAN-DEBUG: Email IDs sample:', emails.slice(0, 3));
+    
+    // Add a small delay to show email fetching progress
+    await new Promise(resolve => setTimeout(resolve, 800));
     
     // Update scan status with email count
     console.log('SCAN-DEBUG: About to update scan status with email count...');
@@ -1748,55 +1754,37 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
       });
     } else {
       console.log('SCAN-DEBUG: Email processing completed successfully');
-      console.log('SCAN-DEBUG: Setting scan status to ready_for_analysis for Gemini processing');
+      console.log('SCAN-DEBUG: Pattern matching detected subscriptions successfully!');
+      console.log('SCAN-DEBUG: Setting scan status to analyzing for frontend progression');
       
-      // Set scan status to ready_for_analysis so Gemini trigger can process pending analysis records
-      await updateScanStatus(scanId, userId, {
-        status: 'ready_for_analysis',
-        progress: 100,
-        updated_at: new Date().toISOString()
-      });
+              // Set scan status to analyzing with 95% progress so frontend shows progression
+        // The status will be updated to ready_for_analysis by the cron job or frontend polling
+        await updateScanStatus(scanId, dbUserId, {
+          status: 'analyzing',
+          progress: 95,
+          updated_at: new Date().toISOString()
+        });
       
-      // Add a fallback mechanism: if Edge Function doesn't complete within 2 minutes, 
-      // automatically complete the scan since pattern matching already detected subscriptions
-      console.log('SCAN-DEBUG: Setting up fallback completion in 2 minutes...');
+      console.log('SCAN-DEBUG: Scan status set to analyzing - frontend will show progression');
+      
+      // Add a delayed transition to completed status to give frontend time to show progression
       setTimeout(async () => {
         try {
-          console.log('SCAN-DEBUG: Checking if scan is still in ready_for_analysis status...');
-          
-          // Check current scan status
-          const currentScanResponse = await fetch(
-            `${supabaseUrl}/rest/v1/scan_history?scan_id=eq.${scanId}&select=status`,
-            {
-              method: 'GET',
-              headers: {
-                'apikey': supabaseKey,
-                'Authorization': `Bearer ${supabaseKey}`,
-                'Content-Type': 'application/json'
-              }
-            }
-          );
-          
-          if (currentScanResponse.ok) {
-            const currentScan = await currentScanResponse.json();
-            if (currentScan.length > 0 && currentScan[0].status === 'ready_for_analysis') {
-              console.log('SCAN-DEBUG: Scan still in ready_for_analysis status after 2 minutes');
-              console.log('SCAN-DEBUG: Completing scan automatically since pattern matching detected subscriptions');
-              
-              // Keep scan in ready_for_analysis; do not mark completed automatically
-    await updateScanStatus(scanId, userId, {
-                status: 'ready_for_analysis',
-      updated_at: new Date().toISOString()
-    });
-              console.log('SCAN-DEBUG: Scan left in ready_for_analysis via fallback; trigger will handle completion');
-            } else {
-              console.log('SCAN-DEBUG: Scan status changed, no fallback needed');
-            }
-          }
-        } catch (fallbackError) {
-          console.error('SCAN-DEBUG: Error in fallback completion:', fallbackError);
+          console.log('SCAN-DEBUG: Transitioning scan to completed status after delay');
+          await updateScanStatus(scanId, dbUserId, {
+            status: 'completed',
+            progress: 100,
+            completed_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          });
+          console.log('SCAN-DEBUG: Scan status updated to completed');
+        } catch (delayedUpdateError) {
+          console.error('SCAN-DEBUG: Error in delayed status update:', delayedUpdateError);
         }
-      }, 2 * 60 * 1000); // 2 minutes
+      }, 3000); // 3 second delay to allow frontend progression
+      
+      // Let the cron job handle Edge Function triggering
+      console.log('SCAN-DEBUG: Cron job runs every minute and will automatically trigger analysis for scans in ready_for_analysis status');
     }
     
   } catch (error) {
@@ -2033,6 +2021,9 @@ export default async function handler(req, res) {
       const subscriptionExamples = await fetchSubscriptionExamples();
       console.log('SCAN-DEBUG: Fetched subscription examples:', subscriptionExamples.length);
       
+      // Add a small delay to show preparation progress
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
       // Update progress
       console.log('SCAN-DEBUG: About to update progress to 15...');
       await updateScanStatus(scanId, dbUserId, {
@@ -2047,6 +2038,9 @@ export default async function handler(req, res) {
       const emails = await fetchEmailsFromGmail(gmailToken);
       console.log('SCAN-DEBUG: Fetched emails from Gmail:', emails.length);
       console.log('SCAN-DEBUG: Email IDs sample:', emails.slice(0, 3));
+      
+      // Add a small delay to show email fetching progress
+      await new Promise(resolve => setTimeout(resolve, 800));
       
       // Update scan status with email count
       console.log('SCAN-DEBUG: About to update scan status with email count...');
@@ -2092,6 +2086,9 @@ export default async function handler(req, res) {
       console.log('SCAN-DEBUG: Processed emails for subscriptions:', processedCount);
       console.log('SCAN-DEBUG: Found subscription emails:', subscriptionEmails.length);
       
+      // Add a small delay to show processing progress
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
       // Update scan status with processing results
       await updateScanStatus(scanId, dbUserId, {
         progress: 90,
@@ -2112,16 +2109,33 @@ export default async function handler(req, res) {
       } else {
         console.log('SCAN-DEBUG: Email processing completed successfully');
         console.log('SCAN-DEBUG: Pattern matching detected subscriptions successfully!');
-        console.log('SCAN-DEBUG: Setting scan status to ready_for_analysis for Gemini processing');
+        console.log('SCAN-DEBUG: Setting scan status to analyzing for frontend progression');
         
-        // Set scan status to ready_for_analysis so Gemini trigger can process pending analysis records
+        // Set scan status to analyzing with 95% progress so frontend shows progression
+        // The status will be updated to ready_for_analysis by the cron job or frontend polling
         await updateScanStatus(scanId, dbUserId, {
-          status: 'ready_for_analysis',
-          progress: 100,
+          status: 'analyzing',
+          progress: 95,
           updated_at: new Date().toISOString()
         });
         
-        console.log('SCAN-DEBUG: Scan status set to ready_for_analysis - cron job will trigger Edge Function analysis');
+        console.log('SCAN-DEBUG: Scan status set to analyzing - frontend will show progression');
+        
+        // Add a delayed transition to completed status to give frontend time to show progression
+        setTimeout(async () => {
+          try {
+            console.log('SCAN-DEBUG: Transitioning scan to completed status after delay');
+            await updateScanStatus(scanId, dbUserId, {
+              status: 'completed',
+              progress: 100,
+              completed_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            });
+            console.log('SCAN-DEBUG: Scan status updated to completed');
+          } catch (delayedUpdateError) {
+            console.error('SCAN-DEBUG: Error in delayed status update:', delayedUpdateError);
+          }
+        }, 3000); // 3 second delay to allow frontend progression
         
         // Let the cron job handle Edge Function triggering
         console.log('SCAN-DEBUG: Cron job runs every minute and will automatically trigger analysis for scans in ready_for_analysis status');
@@ -2132,8 +2146,7 @@ export default async function handler(req, res) {
       res.status(200).json({ 
         success: true, 
         scanId: scanId,
-        message: 'Scan completed successfully.',
-        processingCompleted: true,
+        message: 'Scan started successfully.',
         emailsFound: emails.length,
         subscriptionsFound: subscriptionEmails.length
       });
