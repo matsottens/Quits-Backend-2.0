@@ -55,7 +55,8 @@ export default async function handler(req, res) {
       const urlParts = req.url.split('/').filter(Boolean); // e.g. ['', 'api', 'subscriptions', ':id'] → ['api','subscriptions',':id']
       const subsIdx = urlParts.indexOf('subscriptions');
       if (subsIdx !== -1 && urlParts.length > subsIdx + 1) {
-        subscriptionId = urlParts[subsIdx + 1];
+        // Strip any query parameters (e.g., ?%5B...path%5D=...) that Vercel appends
+        subscriptionId = urlParts[subsIdx + 1].split('?')[0];
         isSpecificSubscription = true;
         console.log(`[PATH] Fallback extracted subscriptionId from URL: ${subscriptionId}`);
       }
