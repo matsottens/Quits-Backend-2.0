@@ -168,18 +168,52 @@ async function getFreshGmailAccessToken(userId, currentToken) {
       process.env.GOOGLE_CLIENT_SECRET
     );
     oauth2Client.setCredentials({ refresh_token: userRow.gmail_refresh_token });
-    const { credentials } = await oauth2Client.refreshAccessToken();
-    if (!credentials.access_token) return currentToken;
+
+    // Preferred method in google-auth-library v8+
+    let newAccessToken;
+    try {
+      const tokenResponse = await oauth2Client.getAccessToken();
+      newAccessToken = tokenResponse.token;
+    } catch (gaError) {
+      console.error('SCAN-DEBUG: oauth2Client.getAccessToken() failed:', gaError.message);
+    }
+
+    // Fallback to direct HTTP call if the helper failed (older runtimes)
+    if (!newAccessToken) {
+      console.log('SCAN-DEBUG: Falling back to manual refresh token exchange');
+      const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: process.env.GOOGLE_CLIENT_ID,
+          client_secret: process.env.GOOGLE_CLIENT_SECRET,
+          refresh_token: userRow.gmail_refresh_token,
+          grant_type: 'refresh_token',
+        }),
+      });
+      if (tokenRes.ok) {
+        const tokenJson = await tokenRes.json();
+        newAccessToken = tokenJson.access_token;
+        userRow.gmail_token_expires_at = tokenJson.expires_in
+          ? new Date(Date.now() + tokenJson.expires_in * 1000).toISOString()
+          : null;
+      } else {
+        console.error('SCAN-DEBUG: Manual refresh failed with status', tokenRes.status);
+        return currentToken;
+      }
+    }
+
+    if (!newAccessToken) return currentToken;
 
     await supabaseAdmin
       .from('users')
       .update({
-        gmail_access_token: credentials.access_token,
-        gmail_token_expires_at: credentials.expiry_date ? new Date(credentials.expiry_date).toISOString() : null,
+        gmail_access_token: newAccessToken,
+        gmail_token_expires_at: userRow.gmail_token_expires_at || null,
       })
       .eq('id', userId);
 
-    return credentials.access_token;
+    return newAccessToken;
   } catch (err) {
     console.error('SCAN-DEBUG: Token refresh failed:', err);
     return currentToken;
