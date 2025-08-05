@@ -2109,36 +2109,21 @@ export default async function handler(req, res) {
       } else {
         console.log('SCAN-DEBUG: Email processing completed successfully');
         console.log('SCAN-DEBUG: Pattern matching detected subscriptions successfully!');
-        console.log('SCAN-DEBUG: Setting scan status to analyzing for frontend progression');
+        console.log('SCAN-DEBUG: Setting scan status to completed for immediate completion');
         
-        // Set scan status to analyzing with 95% progress so frontend shows progression
-        // The status will be updated to ready_for_analysis by the cron job or frontend polling
+        // Set scan status directly to completed since we have successful pattern matching results
+        // Frontend will handle any progression display through existing polling mechanisms
         await updateScanStatus(scanId, dbUserId, {
-          status: 'analyzing',
-          progress: 95,
+          status: 'completed',
+          progress: 100,
+          completed_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         });
         
-        console.log('SCAN-DEBUG: Scan status set to analyzing - frontend will show progression');
+        console.log('SCAN-DEBUG: Scan status set to completed - pattern matching found subscriptions');
         
-        // Add a delayed transition to completed status to give frontend time to show progression
-        setTimeout(async () => {
-          try {
-            console.log('SCAN-DEBUG: Transitioning scan to completed status after delay');
-            await updateScanStatus(scanId, dbUserId, {
-              status: 'completed',
-              progress: 100,
-              completed_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            });
-            console.log('SCAN-DEBUG: Scan status updated to completed');
-          } catch (delayedUpdateError) {
-            console.error('SCAN-DEBUG: Error in delayed status update:', delayedUpdateError);
-          }
-        }, 3000); // 3 second delay to allow frontend progression
-        
-        // Let the cron job handle Edge Function triggering
-        console.log('SCAN-DEBUG: Cron job runs every minute and will automatically trigger analysis for scans in ready_for_analysis status');
+        // Note: The Edge Function will still be triggered by cron for additional AI analysis
+        console.log('SCAN-DEBUG: Cron job runs every minute and will automatically trigger analysis for additional AI processing');
       }
       
       // Return scan ID with completion status
