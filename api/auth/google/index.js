@@ -25,9 +25,14 @@ export default function handler(req, res) {
     );
     
     // Generate auth URL
+    // Ask for the Gmail profile / read-only scope too – this is required by the
+    // email-scan endpoint which calls users.getProfile and reads message data.
+    // NOTE: keep the list minimal (no full mail access) to improve the consent
+    // screen language and avoid scaring users.
     const scopes = [
       'https://www.googleapis.com/auth/userinfo.email',
       'https://www.googleapis.com/auth/userinfo.profile',
+      'https://www.googleapis.com/auth/gmail.readonly',
       'openid'
     ];
     
