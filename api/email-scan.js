@@ -1427,6 +1427,18 @@ const createScanRecord = async (req, userId, decoded) => {
       console.log(`SCAN-DEBUG: Found existing user with ID: ${dbUserId}`);
     }
     
+    // Cancel any previous unfinished scans for this user before creating a new one
+    const openStatuses = ['pending', 'in_progress', 'ready_for_analysis', 'analyzing'];
+    await supabaseAdmin
+      .from('scan_history')
+      .update({
+        status: 'cancelled',
+        updated_at: new Date().toISOString(),
+        error_message: 'Cancelled by newer scan',
+      })
+      .eq('user_id', dbUserId)
+      .in('status', openStatuses);
+    
     // Use provided scan ID for scheduled scans, or generate new one
     const scanId = isScheduledScan && scheduledScanId ? scheduledScanId : 'scan_' + Math.random().toString(36).substring(2, 15);
     const timestamp = new Date().toISOString();

@@ -95,8 +95,8 @@ Now, analyze these emails and provide the JSON array:
 }
 
 async function updateProgress(scanId, processed, total) {
-  // Progress from 60% (start of analysis) to 99%
-  const pct = 60 + Math.floor((processed / total) * 39);
+  // Progress from 70% (start of analysis) to 99%
+  const pct = 70 + Math.floor((processed / total) * 29);
   await supabase.from("scan_history").update({
     progress: Math.min(pct, 99),
     emails_processed: processed,
@@ -119,7 +119,7 @@ serve(async (req) => {
       if (scan.status !== "ready_for_analysis") continue;
 
       // Mark as analyzing
-      await supabase.from("scan_history").update({ status: 'analyzing', progress: 60 }).eq('scan_id', scan.scan_id);
+      await supabase.from("scan_history").update({ status: 'analyzing', progress: 70 }).eq('scan_id', scan.scan_id);
 
       const { data: analyses } = await supabase
         .from("subscription_analysis")
@@ -138,61 +138,69 @@ serve(async (req) => {
 
       const BATCH_SIZE = 10; // Process 10 emails at a time
       let totalSubsFound = 0;
-      
-      for (let i = 0; i < validEmails.length; i += BATCH_SIZE) {
-        const batch = validEmails.slice(i, i + BATCH_SIZE);
-        const emailContents = batch.map(b => b.email_data);
-        
-        const results = await analyzeEmailsWithGemini(emailContents);
+      let errorMessage: string | null = null;
 
-        for (let j = 0; j < batch.length; j++) {
-          const analysisRow = batch[j];
-          const result = results[j] || {};
+      try {
+        for (let i = 0; i < validEmails.length; i += BATCH_SIZE) {
+          const batch = validEmails.slice(i, i + BATCH_SIZE);
+          const emailContents = batch.map(b => b.email_data);
 
-            await supabase.from("subscription_analysis").update({
-            analysis_status: "completed",
-            gemini_response: JSON.stringify(result),
-            updated_at: new Date().toISOString()
-          }).eq("id", analysisRow.id);
+          const results = await analyzeEmailsWithGemini(emailContents);
 
-          const price = Number(result.price);
-          const isFree = !price || price <= 0;
+          for (let j = 0; j < batch.length; j++) {
+            const analysisRow = batch[j];
+            const result = results[j] || {};
 
-          if (result.is_subscription && result.subscription_name && !isFree) {
-            const nameNorm = normalize(result.subscription_name);
-            const { data: existing } = await supabase.from("subscriptions").select("id").eq("user_id", scan.user_id).ilike("name", `%${nameNorm}%`);
+              await supabase.from("subscription_analysis").update({
+              analysis_status: "completed",
+              gemini_response: JSON.stringify(result),
+              updated_at: new Date().toISOString()
+            }).eq("id", analysisRow.id);
 
-            if (!existing?.length) {
-              const { error: insertErr } = await supabase.from("subscriptions").insert({
-              user_id: scan.user_id,
-                name: result.subscription_name,
-                price: result.price ?? 0,
-                currency: result.currency ?? "USD",
-                billing_cycle: result.billing_cycle ?? "monthly",
-                provider: result.subscription_name, // Use name as provider
-                category: "auto-detected",
-              is_manual: false,
-              created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-              });
+            const price = Number(result.price);
+            const isFree = !price || price <= 0;
 
-              if (insertErr) {
-                console.error("Failed to insert subscription:", insertErr);
-              } else {
-                totalSubsFound++;
+            if (result.is_subscription && result.subscription_name && !isFree) {
+              const nameNorm = normalize(result.subscription_name);
+              const { data: existing } = await supabase.from("subscriptions").select("id").eq("user_id", scan.user_id).ilike("name", `%${nameNorm}%`);
+
+              if (!existing?.length) {
+                const { error: insertErr } = await supabase.from("subscriptions").insert({
+                user_id: scan.user_id,
+                  name: result.subscription_name,
+                  price: result.price ?? 0,
+                  currency: result.currency ?? "USD",
+                  billing_cycle: result.billing_cycle ?? "monthly",
+                  provider: result.subscription_name, // Use name as provider
+                  category: "auto-detected",
+                is_manual: false,
+                created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString(),
+                });
+
+                if (insertErr) {
+                  console.error("Failed to insert subscription:", insertErr);
+                } else {
+                  totalSubsFound++;
+                }
               }
             }
           }
+          await updateProgress(scan.scan_id, i + batch.length, validEmails.length);
         }
-        await updateProgress(scan.scan_id, i + batch.length, validEmails.length);
-      }
-      
-      await supabase.from("scan_history").update({
-          status: "completed", 
-        progress: 100,
+      } catch (err) {
+        console.error("Gemini scan error for scan", scan.scan_id, err);
+        errorMessage = String(err?.message || err);
+      } finally {
+        await supabase.from("scan_history").update({
+          status: "completed",
+          progress: 100,
           completed_at: new Date().toISOString(),
-        subscriptions_found: totalSubsFound,
-      }).eq("scan_id", scan.scan_id);
+          subscriptions_found: totalSubsFound,
+          error_message: errorMessage,
+          updated_at: new Date().toISOString()
+        }).eq("scan_id", scan.scan_id);
+      }
     }
 
     return new Response(JSON.stringify({ success: true }), { status: 200 });
