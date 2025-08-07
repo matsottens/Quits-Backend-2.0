@@ -73,7 +73,12 @@ serve(async (req) => {
       let errorMsg: string | null = null;
 
       try {
-        await supabase.from("scan_history").update({ status: "analyzing", progress: 70 }).eq("scan_id", scan.scan_id);
+        const { error: updErr } = await supabase
+          .from("scan_history")
+          .update({ status: "analyzing", progress: 70, updated_at: new Date().toISOString() })
+          .eq("scan_id", scan.scan_id)
+          .eq("user_id", scan.user_id);
+        if (updErr) throw new Error(`Failed to mark scan analyzing: ${updErr.message}`);
 
         const { data: rows } = await supabase
           .from("subscription_analysis")
@@ -121,14 +126,15 @@ serve(async (req) => {
         errorMsg = String(e?.message || e);
         console.error("Gemini scan error", scan.scan_id, errorMsg);
       } finally {
-        await supabase.from("scan_history").update({
+        const { error: finErr } = await supabase.from("scan_history").update({
           status: "completed",
           progress: 100,
           completed_at: new Date().toISOString(),
           subscriptions_found: subsFound,
           error_message: errorMsg,
           updated_at: new Date().toISOString()
-        }).eq("scan_id", scan.scan_id);
+        }).eq("scan_id", scan.scan_id).eq("user_id", scan.user_id);
+        if (finErr) console.error("Failed final update", finErr.message);
       }
     }
 
