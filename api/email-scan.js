@@ -382,46 +382,8 @@ const processEmailsForSubscriptions = async (emails, subscriptionExamples, gmail
       
       console.log(`SCAN-DEBUG: Email details - Subject: "${parsedHeaders.subject}", From: "${parsedHeaders.from}"`);
       
-      // Store email data in database
-      console.log(`SCAN-DEBUG: Storing email data for message ${messageId}`);
-      console.log('SCAN-DEBUG: Using REST API to store email data...');
-      
-      const emailDataRecord = {
-        scan_id: scanId,
-        user_id: userId,
-        gmail_message_id: messageId,
-        subject: parsedHeaders.subject,
-        sender: parsedHeaders.from,
-        date: parsedHeaders.date,
-        content: emailBody,
-        content_preview: emailBody.substring(0, 500),
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-      
-      const storeResponse = await fetch(`${supabaseUrl}/rest/v1/email_data`, {
-        method: 'POST',
-        headers: {
-          'apikey': supabaseKey,
-          'Authorization': `Bearer ${supabaseKey}`,
-          'Content-Type': 'application/json',
-          'Prefer': 'return=representation'
-        },
-        body: JSON.stringify(emailDataRecord)
-      });
-      
-      let emailDataId = null;
-      if (storeResponse.ok) {
-        const storeData = await storeResponse.json();
-        emailDataId = storeData[0].id;
-        console.log(`SCAN-DEBUG: REST API successful, got ID: ${emailDataId}`);
-        console.log(`SCAN-DEBUG: Successfully stored email data for message ${messageId} with ID: ${emailDataId}`);
-      } else {
-        console.error('SCAN-DEBUG: Error storing email data:', storeResponse.status, storeResponse.statusText);
-        continue;
-      }
-      
-      console.log(`SCAN-DEBUG: Validated email_data_id: ${emailDataId}`);
+      // Skip email_data storage and go directly to analysis
+      console.log(`SCAN-DEBUG: Skipping email_data storage, analyzing directly for message ${messageId}`);
       
       // Analyze email with pattern matching
       console.log(`SCAN-DEBUG: Analyzing email with pattern matching: "${parsedHeaders.subject}"`);
@@ -439,56 +401,48 @@ const processEmailsForSubscriptions = async (emails, subscriptionExamples, gmail
           continue;
         }
         
-        // Create analysis record
-        console.log(`SCAN-DEBUG: About to insert analysis record with email_data_id: ${emailDataId}`);
+        // Create subscription directly in the subscriptions table
+        console.log(`SCAN-DEBUG: Creating subscription directly: ${analysis.serviceName}`);
         
-        const analysisRecord = {
-          email_data_id: emailDataId,
-          user_id: userId,
-          scan_id: scanId,
-          subscription_name: analysis.serviceName,
-          price: analysis.amount || 0,
-          currency: analysis.currency || 'USD',
-          billing_cycle: analysis.billingFrequency || 'monthly',
-          next_billing_date: analysis.nextBillingDate,
-          service_provider: analysis.serviceName,
-          confidence_score: analysis.confidence,
-          analysis_status: 'pending',
-          gemini_response: null,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        };
-        
-        console.log('SCAN-DEBUG: Analysis record keys:', Object.keys(analysisRecord));
-        
-        const analysisResponse = await fetch(`${supabaseUrl}/rest/v1/subscription_analysis`, {
-          method: 'POST',
-          headers: {
-            'apikey': supabaseKey,
-            'Authorization': `Bearer ${supabaseKey}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(analysisRecord)
-        });
-        
-        if (analysisResponse.ok) {
-          console.log('SCAN-DEBUG: Stored analysis record for Edge Function processing');
+        try {
+          const { data: subscription, error: subscriptionError } = await supabase
+            .from('subscriptions')
+            .insert({
+              user_id: userId,
+              name: analysis.serviceName,
+              price: analysis.monthlyPrice || 0,
+              currency: analysis.currency || 'USD',
+              billing_frequency: analysis.billingFrequency || 'monthly',
+              status: 'active',
+              confidence: analysis.confidence,
+              email_subject: parsedHeaders.subject,
+              email_from: parsedHeaders.from,
+              email_date: parsedHeaders.date,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            })
+            .select()
+            .single();
           
-          // Add to subscription emails array for further processing
-        subscriptionEmails.push({
-          messageId,
-          emailData,
-          analysis,
-          subject: parsedHeaders.subject,
-          from: parsedHeaders.from,
-          date: parsedHeaders.date,
-            emailBody,
-            emailDataId
-        });
-          
-          uniqueEmailsProcessed++;
-        } else {
-          console.error('SCAN-DEBUG: Error creating analysis record:', analysisResponse.status, analysisResponse.statusText);
+          if (subscriptionError) {
+            console.error('SCAN-DEBUG: Error creating subscription:', subscriptionError);
+          } else {
+            console.log(`SCAN-DEBUG: Successfully created subscription: ${analysis.serviceName}`);
+            subscriptionEmails.push({
+              messageId,
+              subject: parsedHeaders.subject,
+              from: parsedHeaders.from,
+              date: parsedHeaders.date,
+              emailBody,
+              analysis,
+              subscriptionId: subscription.id
+            });
+            
+            // Add to existing subscriptions to prevent duplicates
+            existingSubscriptions.push(normalizedServiceName);
+          }
+        } catch (error) {
+          console.error('SCAN-DEBUG: Exception creating subscription:', error);
         }
       }
       
