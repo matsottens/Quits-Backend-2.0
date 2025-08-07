@@ -1,6 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 
+// Use the shared admin client to bypass RLS for server-to-server calls
+import { supabaseAdmin } from './utils/supabase.js';
+
 // Token verification function
 const verifyToken = (token, req) => {
   try {
@@ -45,17 +48,9 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
-  const supabaseKey = supabaseServiceRoleKey || supabaseServiceKey;
-  
-  const supabase = createClient(process.env.SUPABASE_URL, supabaseKey);
-  
-  // Debug Supabase connection
-  console.log('SCAN-STATUS-DEBUG: SUPABASE_URL:', process.env.SUPABASE_URL ? 'Set' : 'Not set');
-  console.log('SCAN-STATUS-DEBUG: SUPABASE_SERVICE_ROLE_KEY:', process.env.SUPABASE_SERVICE_ROLE_KEY ? 'Set' : 'Not set');
-  console.log('SCAN-STATUS-DEBUG: SUPABASE_SERVICE_KEY:', process.env.SUPABASE_SERVICE_KEY ? 'Set' : 'Not set');
-  console.log('SCAN-STATUS-DEBUG: Final supabaseKey:', supabaseKey ? 'Set' : 'Not set');
+  // NOTE: All 'supabase' instances are replaced with 'supabaseAdmin' below
+  // to ensure RLS is bypassed for these server-side operations.
+  // The original local client creation has been removed.
   
   try {
     // Extract and verify token
@@ -117,7 +112,7 @@ export default async function handler(req, res) {
     ];
     if (userEmail) filters.push(`email.eq.${encodeURIComponent(userEmail)}`);
 
-    const { data: user, error: userError } = await supabase
+    const { data: user, error: userError } = await supabaseAdmin
       .from('users')
       .select('id')
       .or(filters.join(','))
@@ -160,7 +155,7 @@ export default async function handler(req, res) {
       console.log('SCAN-STATUS-DEBUG: Querying by specific scan ID:', scanId);
       // If a specific scan ID is provided, look it up directly without user filter
       // This matches the behavior of the new backend
-      const { data, error: scanError } = await supabase
+      const { data, error: scanError } = await supabaseAdmin
         .from('scan_history')
         .select('*')
         .eq('scan_id', scanId)
@@ -172,7 +167,7 @@ export default async function handler(req, res) {
     } else {
       // Query latest scan for user
       console.log('SCAN-STATUS-DEBUG: Querying latest scan for user');
-      const { data, error: scanError } = await supabase
+      const { data, error: scanError } = await supabaseAdmin
         .from('scan_history')
         .select('*')
         .eq('user_id', userId)
@@ -193,7 +188,7 @@ export default async function handler(req, res) {
         console.log('SCAN-STATUS-DEBUG: No scan found with ID:', scanId);
         console.log('SCAN-STATUS-DEBUG: Looking for scans for user ID:', userId);
         
-        const { data: allScans, error: allScansError } = await supabase
+        const { data: allScans, error: allScansError } = await supabaseAdmin
           .from('scan_history')
           .select('scan_id, status, created_at')
           .eq('user_id', userId)
@@ -213,7 +208,7 @@ export default async function handler(req, res) {
           console.log('SCAN-STATUS-DEBUG: Returning latest scan instead:', latestScan.scan_id, ',', req.url);
           
           // Get the full scan data for the latest scan
-          const { data: fullScan, error: fullScanError } = await supabase
+          const { data: fullScan, error: fullScanError } = await supabaseAdmin
             .from('scan_history')
             .select('*')
             .eq('scan_id', latestScan.scan_id)
@@ -278,7 +273,7 @@ export default async function handler(req, res) {
     
     if (scan.status === 'failed' || scan.status === 'pending' || scan.status === 'ready_for_analysis') {
       // Get subscription analysis data to show what was found
-      const { data: analysisData, error: analysisError } = await supabase
+      const { data: analysisData, error: analysisError } = await supabaseAdmin
         .from('subscription_analysis')
         .select('id, subscription_name, analysis_status, confidence_score, created_at')
         .eq('scan_id', scan.scan_id)
