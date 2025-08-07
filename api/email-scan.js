@@ -412,12 +412,10 @@ const processEmailsForSubscriptions = async (emails, subscriptionExamples, gmail
               name: analysis.serviceName,
               price: analysis.monthlyPrice || 0,
               currency: analysis.currency || 'USD',
-              billing_frequency: analysis.billingFrequency || 'monthly',
-              status: 'active',
-              confidence: analysis.confidence,
-              email_subject: parsedHeaders.subject,
-              email_from: parsedHeaders.from,
-              email_date: parsedHeaders.date,
+              billing_cycle: analysis.billingFrequency || 'monthly',
+              provider: analysis.serviceName,
+              category: 'auto-detected',
+              is_manual: false,
               created_at: new Date().toISOString(),
               updated_at: new Date().toISOString()
             })
