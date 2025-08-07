@@ -44,7 +44,8 @@ export default async function handler(req, res) {
     const supabase = getSupabaseClient();
     const { data: user, error } = await supabase
       .from('users')
-      .select('id, email, name, password_hash')
+      // Also fetch any existing Gmail access-token so we can embed it in the JWT
+      .select('id, email, name, password_hash, gmail_access_token')
       .eq('email', email)
       .single();
 
@@ -79,7 +80,10 @@ export default async function handler(req, res) {
     const tokenPayload = {
       id: user.id,
       email: user.email,
-      name: user.name
+      name: user.name,
+      // If the account has a Gmail token stored, embed it so the /email/scan
+      // endpoint can use it immediately without another DB lookup.
+      ...(user.gmail_access_token ? { gmail_token: user.gmail_access_token } : {})
     };
     const token = jwt.sign(
       tokenPayload,
