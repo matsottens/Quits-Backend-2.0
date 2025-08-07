@@ -1064,6 +1064,10 @@ const analyzeEmailWithPatternMatching = async (emailContent) => {
       /(\d+\.?\d*)\s*(?:usd|dollars?)/gi,  // 19.99 USD
       /(\d+\.?\d*)\s*(?:eur|euros?)/gi,    // 19.99 EUR
       /(\d+\.?\d*)\s*(?:gbp|pounds?)/gi,   // 19.99 GBP
+      /price:\s*\$(\d+\.?\d*)/gi, // price: $19.99
+      /total:\s*\$(\d+\.?\d*)/gi, // total: $19.99
+      /amount:\s*\$(\d+\.?\d*)/gi, // amount: $19.99
+      /charge:\s*\$(\d+\.?\d*)/gi, // charge: $19.99
     ];
 
     for (const pattern of pricePatterns) {
@@ -1072,8 +1076,8 @@ const analyzeEmailWithPatternMatching = async (emailContent) => {
         const price = parseFloat(matches[0].replace(/[^\d.]/g, ''));
         if (price > 0) {
           amount = price;
-          if (pattern.source.includes('€')) currency = 'EUR';
-          else if (pattern.source.includes('£')) currency = 'GBP';
+          if (pattern.source.includes('€') || pattern.source.includes('eur')) currency = 'EUR';
+          else if (pattern.source.includes('£') || pattern.source.includes('gbp')) currency = 'GBP';
           else currency = 'USD';
           console.log(`SCAN-DEBUG: Enhanced detection - Extracted: ${amount} ${currency}`);
           break;
@@ -1806,36 +1810,20 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
     } else {
       console.log('SCAN-DEBUG: Email processing completed successfully');
       console.log('SCAN-DEBUG: Pattern matching detected subscriptions successfully!');
-      console.log('SCAN-DEBUG: Setting scan status to analyzing for frontend progression');
+      console.log('SCAN-DEBUG: Setting scan status to ready_for_analysis for Gemini processing');
       
-              // Set scan status to analyzing with 95% progress so frontend shows progression
-        // The status will be updated to ready_for_analysis by the cron job or frontend polling
-        await updateScanStatus(scanId, dbUserId, {
-          status: 'analyzing',
-          progress: 95,
-          updated_at: new Date().toISOString()
-        });
+      // Always set status to ready_for_analysis so the Gemini function can run.
+      // The Gemini function is responsible for setting the final 'completed' status.
+      await updateScanStatus(scanId, dbUserId, {
+        status: 'ready_for_analysis',
+        progress: 60, // Set progress to the start of the analysis phase
+        updated_at: new Date().toISOString()
+      });
       
-      console.log('SCAN-DEBUG: Scan status set to analyzing - frontend will show progression');
+      console.log('SCAN-DEBUG: Scan status set to ready_for_analysis');
       
-      // Add a delayed transition to completed status to give frontend time to show progression
-      setTimeout(async () => {
-        try {
-          console.log('SCAN-DEBUG: Transitioning scan to completed status after delay');
-          await updateScanStatus(scanId, dbUserId, {
-            status: 'completed',
-            progress: 100,
-            completed_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          });
-          console.log('SCAN-DEBUG: Scan status updated to completed');
-        } catch (delayedUpdateError) {
-          console.error('SCAN-DEBUG: Error in delayed status update:', delayedUpdateError);
-        }
-      }, 3000); // 3 second delay to allow frontend progression
-      
-      // Let the cron job handle Edge Function triggering
-      console.log('SCAN-DEBUG: Cron job runs every minute and will automatically trigger analysis for scans in ready_for_analysis status');
+      // Note: The Edge Function will still be triggered by cron for additional AI analysis
+      console.log('SCAN-DEBUG: Cron job runs every minute and will automatically trigger analysis for additional AI processing');
     }
     
   } catch (error) {
@@ -2183,18 +2171,17 @@ export default async function handler(req, res) {
       } else {
         console.log('SCAN-DEBUG: Email processing completed successfully');
         console.log('SCAN-DEBUG: Pattern matching detected subscriptions successfully!');
-        console.log('SCAN-DEBUG: Setting scan status to completed for immediate completion');
+        console.log('SCAN-DEBUG: Setting scan status to ready_for_analysis for Gemini processing');
         
-        // Set scan status directly to completed since we have successful pattern matching results
-        // Frontend will handle any progression display through existing polling mechanisms
+        // Always set status to ready_for_analysis so the Gemini function can run.
+        // The Gemini function is responsible for setting the final 'completed' status.
         await updateScanStatus(scanId, dbUserId, {
-          status: 'completed',
-          progress: 100,
-          completed_at: new Date().toISOString(),
+          status: 'ready_for_analysis',
+          progress: 60, // Set progress to the start of the analysis phase
           updated_at: new Date().toISOString()
         });
         
-        console.log('SCAN-DEBUG: Scan status set to completed - pattern matching found subscriptions');
+        console.log('SCAN-DEBUG: Scan status set to ready_for_analysis');
         
         // Note: The Edge Function will still be triggered by cron for additional AI analysis
         console.log('SCAN-DEBUG: Cron job runs every minute and will automatically trigger analysis for additional AI processing');
