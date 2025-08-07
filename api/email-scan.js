@@ -1770,11 +1770,10 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
     console.log('SCAN-DEBUG: Successfully updated scan status with email count');
     
     if (emails.length === 0) {
-      console.log('SCAN-DEBUG: No emails found, completing scan');
+      console.log('SCAN-DEBUG: No emails found, but still proceed to analysis phase');
       await updateScanStatus(scanId, userId, {
         status: 'ready_for_analysis',
-        progress: 100,
-        completed_at: new Date().toISOString(),
+        progress: 60,
         updated_at: new Date().toISOString(),
         error_message: 'No subscription-related emails found in your Gmail account. This could mean you don\'t have any active subscriptions, or your emails are organized differently.'
       });
@@ -1812,11 +1811,10 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
     });
     
     if (subscriptionEmails.length === 0) {
-      console.log('SCAN-DEBUG: No subscriptions found, completing scan');
+      console.log('SCAN-DEBUG: No subscriptions found, but still need Gemini analysis');
       await updateScanStatus(scanId, userId, {
         status: 'ready_for_analysis',
-        progress: 100,
-        completed_at: new Date().toISOString(),
+        progress: 60,
         updated_at: new Date().toISOString()
       });
     } else {
@@ -2127,11 +2125,10 @@ export default async function handler(req, res) {
       console.log('SCAN-DEBUG: Successfully updated scan status with email count');
       
       if (emails.length === 0) {
-        console.log('SCAN-DEBUG: No emails found, completing scan');
+        console.log('SCAN-DEBUG: No emails found, but still proceed to analysis phase');
         await updateScanStatus(scanId, dbUserId, {
           status: 'ready_for_analysis',
-          progress: 100,
-          completed_at: new Date().toISOString(),
+          progress: 60,
           updated_at: new Date().toISOString(),
           error_message: 'No subscription-related emails found in your Gmail account. This could mean you don\'t have any active subscriptions, or your emails are organized differently.'
         });
@@ -2173,11 +2170,10 @@ export default async function handler(req, res) {
       });
       
       if (subscriptionEmails.length === 0) {
-        console.log('SCAN-DEBUG: No subscriptions found, completing scan');
+        console.log('SCAN-DEBUG: No subscriptions found, but still need Gemini analysis');
         await updateScanStatus(scanId, dbUserId, {
           status: 'ready_for_analysis',
-          progress: 100,
-          completed_at: new Date().toISOString(),
+          progress: 60,
           updated_at: new Date().toISOString()
         });
       } else {
