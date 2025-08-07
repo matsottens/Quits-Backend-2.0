@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 
 // Use the shared admin client to bypass RLS for server-to-server calls
-import { supabaseAdmin } from './utils/supabase.js';
+import { supabase as supabaseAdmin } from './utils/supabase.js';
 
 // Token verification function
 const verifyToken = (token, req) => {
