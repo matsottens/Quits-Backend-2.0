@@ -408,16 +408,16 @@ const processEmailsForSubscriptions = async (emails, subscriptionExamples, gmail
           const { data: subscription, error: subscriptionError } = await supabase
             .from('subscriptions')
             .insert({
-              user_id: userId,
+          user_id: userId,
               name: analysis.serviceName,
               price: analysis.monthlyPrice || 0,
-              currency: analysis.currency || 'USD',
-              billing_cycle: analysis.billingFrequency || 'monthly',
+          currency: analysis.currency || 'USD',
+          billing_cycle: analysis.billingFrequency || 'monthly',
               provider: analysis.serviceName,
               category: 'auto-detected',
               is_manual: false,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
             })
             .select()
             .single();
@@ -426,12 +426,12 @@ const processEmailsForSubscriptions = async (emails, subscriptionExamples, gmail
             console.error('SCAN-DEBUG: Error creating subscription:', subscriptionError);
           } else {
             console.log(`SCAN-DEBUG: Successfully created subscription: ${analysis.serviceName}`);
-            subscriptionEmails.push({
-              messageId,
-              subject: parsedHeaders.subject,
-              from: parsedHeaders.from,
-              date: parsedHeaders.date,
-              emailBody,
+        subscriptionEmails.push({
+          messageId,
+          subject: parsedHeaders.subject,
+          from: parsedHeaders.from,
+          date: parsedHeaders.date,
+            emailBody,
               analysis,
               subscriptionId: subscription.id
             });
@@ -1814,11 +1814,11 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
       
       // Always set status to ready_for_analysis so the Gemini function can run.
       // The Gemini function is responsible for setting the final 'completed' status.
-      await updateScanStatus(scanId, dbUserId, {
+        await updateScanStatus(scanId, dbUserId, {
         status: 'ready_for_analysis',
         progress: 60, // Set progress to the start of the analysis phase
-        updated_at: new Date().toISOString()
-      });
+          updated_at: new Date().toISOString()
+        });
       
       console.log('SCAN-DEBUG: Scan status set to ready_for_analysis');
       
