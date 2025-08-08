@@ -1781,6 +1781,16 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
       updated_at: new Date().toISOString()
     });
     
+    // Persist emails and queue AI analysis when we found potential subscriptions
+    if (subscriptionEmails.length > 0) {
+      try {
+        await storeEmailData(subscriptionEmails, scanId, userId);
+        await createSubscriptionAnalysisRecords(subscriptionEmails, scanId, userId);
+      } catch (persistError) {
+        console.error('SCAN-DEBUG: Failed to persist email/analysis records:', persistError);
+      }
+    }
+    
     if (subscriptionEmails.length === 0) {
       console.log('SCAN-DEBUG: No subscriptions found during pattern matching');
       await updateScanStatus(scanId, userId, {
@@ -2139,6 +2149,16 @@ export default async function handler(req, res) {
         subscriptions_found: subscriptionEmails.length,
         updated_at: new Date().toISOString()
       });
+
+      // Persist emails and queue AI analysis when we found potential subscriptions
+      if (subscriptionEmails.length > 0) {
+        try {
+          await storeEmailData(subscriptionEmails, scanId, dbUserId);
+          await createSubscriptionAnalysisRecords(subscriptionEmails, scanId, dbUserId);
+        } catch (persistError) {
+          console.error('SCAN-DEBUG: Failed to persist email/analysis records:', persistError);
+        }
+      }
       
       if (subscriptionEmails.length === 0) {
         console.log('SCAN-DEBUG: No subscriptions found during pattern matching');
