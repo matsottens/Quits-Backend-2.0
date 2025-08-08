@@ -140,7 +140,8 @@ serve(async (req) => {
       .in("scan_id", scan_ids);
 
     for (const scan of scans || []) {
-      if (scan.status !== "ready_for_analysis") continue;
+      // Accept both 'ready_for_analysis' and 'analyzing' to avoid race with trigger
+      if (!(scan.status === "ready_for_analysis" || scan.status === "analyzing")) continue;
 
       let subsFound = 0;
       let errorMsg: string | null = null;

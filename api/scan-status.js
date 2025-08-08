@@ -315,8 +315,8 @@ export default async function handler(req, res) {
       });
     }
 
-    // Calculate progress based on status
-    let progress = calculateProgress(scan);
+    // Calculate progress based on status but prefer DB 'progress' field directly when present
+    let progress = typeof scan.progress === 'number' ? scan.progress : calculateProgress(scan);
 
     // Local development shortcut: auto-complete long-running analysis
     try {
