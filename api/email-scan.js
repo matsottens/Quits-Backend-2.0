@@ -401,48 +401,18 @@ const processEmailsForSubscriptions = async (emails, subscriptionExamples, gmail
           continue;
         }
         
-        // Create subscription directly in the subscriptions table
-        console.log(`SCAN-DEBUG: Creating subscription directly: ${analysis.serviceName}`);
-        
-        try {
-          const { data: subscription, error: subscriptionError } = await supabase
-            .from('subscriptions')
-            .insert({
-          user_id: userId,
-              name: analysis.serviceName,
-              // Use the detected amount; monthlyPrice may be undefined in pattern matcher
-              price: (typeof analysis.amount === 'number' ? analysis.amount : 0),
-          currency: analysis.currency || 'USD',
-          billing_cycle: analysis.billingFrequency || 'monthly',
-              provider: analysis.serviceName,
-              category: 'auto-detected',
-              is_manual: false,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-            })
-            .select()
-            .single();
-          
-          if (subscriptionError) {
-            console.error('SCAN-DEBUG: Error creating subscription:', subscriptionError);
-          } else {
-            console.log(`SCAN-DEBUG: Successfully created subscription: ${analysis.serviceName}`);
+        // Do NOT create subscriptions here; instead, queue for AI analysis
+        // so the edge function can make the final decision with higher precision.
         subscriptionEmails.push({
           messageId,
           subject: parsedHeaders.subject,
           from: parsedHeaders.from,
           date: parsedHeaders.date,
-            emailBody,
-              analysis,
-              subscriptionId: subscription.id
-            });
-            
-            // Add to existing subscriptions to prevent duplicates
-            existingSubscriptions.push(normalizedServiceName);
-          }
-        } catch (error) {
-          console.error('SCAN-DEBUG: Exception creating subscription:', error);
-        }
+          emailBody,
+          analysis
+        });
+        // Track normalized name locally to avoid enqueuing duplicates in this pass
+        existingSubscriptions.push(normalizedServiceName);
       }
       
       processedCount++;
