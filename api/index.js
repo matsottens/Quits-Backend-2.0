@@ -20,6 +20,9 @@ import settingsHandler from './settings.js';
 import googleProxyHandler from './google-proxy.js';
 import subscriptionHandler from './subscription.js';
 import subscriptionPathHandler from './subscription/[[...path]].js';
+import emailScanHandler from './email-scan.js';
+import scanStatusHandler from './scan-status.js';
+import debugScanStatusHandler from './debug-scan-status.js';
 
 // Wrapper to adapt Express route params to Vercel path handler format
 function createPathHandlerWrapper(handler) {
@@ -117,6 +120,21 @@ app.use(cors({
   ],
   maxAge: 86400 // 24 hours
 }));
+
+// Explicitly handle all OPTIONS preflight requests (Express 5-safe)
+app.use((req, res, next) => {
+  if (req.method === 'OPTIONS') {
+    const origin = req.headers.origin || '*';
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token');
+    res.setHeader('Access-Control-Max-Age', '86400');
+    return res.sendStatus(204);
+  }
+  next();
+});
 
 // Parse JSON bodies
 app.use(express.json());
@@ -344,9 +362,12 @@ app.all('/__deprecated/google-proxy', async (req, res) => {
 // New shared Google proxy handler (mirrors production logic exactly)
 app.all('/api/google-proxy', googleProxyHandler);
 
-// Email scan endpoint - available at both /api/email/scan and /email/scan
-app.post('/api/email/scan', handleEmailScan);
-app.post('/email/scan', handleEmailScan);
+// Ensure the email scan endpoint is registered early
+app.post('/api/email/scan', emailScanHandler);
+app.post('/email/scan', emailScanHandler);
+// Preflight for scan routes
+app.options('/api/email/scan', (req, res) => res.sendStatus(204));
+app.options('/email/scan', (req, res) => res.sendStatus(204));
 
 // Subscription endpoints
 app.get('/api/subscription', subscriptionHandler);
@@ -370,9 +391,22 @@ app.delete('/subscription/:id', createPathHandlerWrapper(subscriptionPathHandler
 app.delete('/api/subscriptions/:id', createPathHandlerWrapper(subscriptionPathHandler));
 app.delete('/subscriptions/:id', createPathHandlerWrapper(subscriptionPathHandler));
 
-// Email status endpoints
-app.get('/api/email/status', handleEmailStatus);
-app.get('/email/status', handleEmailStatus);
+// Email status endpoint mapping
+app.get('/api/email/status', scanStatusHandler);
+app.get('/email/status', scanStatusHandler);
+// Backward/compatibility routes
+app.get('/api/scan-status', scanStatusHandler);
+app.get('/scan-status', scanStatusHandler);
+// Path-param variants for robustness
+app.get('/api/email/status/:id', scanStatusHandler);
+app.get('/email/status/:id', scanStatusHandler);
+// Preflight for status routes
+app.options('/api/email/status', (req, res) => res.sendStatus(204));
+app.options('/email/status', (req, res) => res.sendStatus(204));
+app.options('/api/scan-status', (req, res) => res.sendStatus(204));
+app.options('/scan-status', (req, res) => res.sendStatus(204));
+// Debug scan status endpoint
+app.get('/api/debug-scan-status', debugScanStatusHandler);
 
 // Auth routes
 app.post('/api/auth/signup', signupHandler);

@@ -324,6 +324,7 @@ const processEmailsForSubscriptions = async (emails, subscriptionExamples, gmail
   console.log(`SCAN-DEBUG: Processing ${emails.length} emails`);
   
   const subscriptionEmails = [];
+  const candidateEmails = []; // Fallback candidates when pattern matching finds nothing
   let processedCount = 0;
   let uniqueEmailsProcessed = 0;
   
@@ -382,46 +383,8 @@ const processEmailsForSubscriptions = async (emails, subscriptionExamples, gmail
       
       console.log(`SCAN-DEBUG: Email details - Subject: "${parsedHeaders.subject}", From: "${parsedHeaders.from}"`);
       
-      // Store email data in database
-      console.log(`SCAN-DEBUG: Storing email data for message ${messageId}`);
-      console.log('SCAN-DEBUG: Using REST API to store email data...');
-      
-      const emailDataRecord = {
-        scan_id: scanId,
-        user_id: userId,
-        gmail_message_id: messageId,
-        subject: parsedHeaders.subject,
-        sender: parsedHeaders.from,
-        date: parsedHeaders.date,
-        content: emailBody,
-        content_preview: emailBody.substring(0, 500),
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-      
-      const storeResponse = await fetch(`${supabaseUrl}/rest/v1/email_data`, {
-        method: 'POST',
-        headers: {
-          'apikey': supabaseKey,
-          'Authorization': `Bearer ${supabaseKey}`,
-          'Content-Type': 'application/json',
-          'Prefer': 'return=representation'
-        },
-        body: JSON.stringify(emailDataRecord)
-      });
-      
-      let emailDataId = null;
-      if (storeResponse.ok) {
-        const storeData = await storeResponse.json();
-        emailDataId = storeData[0].id;
-        console.log(`SCAN-DEBUG: REST API successful, got ID: ${emailDataId}`);
-        console.log(`SCAN-DEBUG: Successfully stored email data for message ${messageId} with ID: ${emailDataId}`);
-      } else {
-        console.error('SCAN-DEBUG: Error storing email data:', storeResponse.status, storeResponse.statusText);
-        continue;
-      }
-      
-      console.log(`SCAN-DEBUG: Validated email_data_id: ${emailDataId}`);
+      // Skip email_data storage and go directly to analysis
+      console.log(`SCAN-DEBUG: Skipping email_data storage, analyzing directly for message ${messageId}`);
       
       // Analyze email with pattern matching
       console.log(`SCAN-DEBUG: Analyzing email with pattern matching: "${parsedHeaders.subject}"`);
@@ -439,56 +402,29 @@ const processEmailsForSubscriptions = async (emails, subscriptionExamples, gmail
           continue;
         }
         
-        // Create analysis record
-        console.log(`SCAN-DEBUG: About to insert analysis record with email_data_id: ${emailDataId}`);
-        
-        const analysisRecord = {
-          email_data_id: emailDataId,
-          user_id: userId,
-          scan_id: scanId,
-          subscription_name: analysis.serviceName,
-          price: analysis.amount || 0,
-          currency: analysis.currency || 'USD',
-          billing_cycle: analysis.billingFrequency || 'monthly',
-          next_billing_date: analysis.nextBillingDate,
-          service_provider: analysis.serviceName,
-          confidence_score: analysis.confidence,
-          analysis_status: 'pending',
-          gemini_response: null,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        };
-        
-        console.log('SCAN-DEBUG: Analysis record keys:', Object.keys(analysisRecord));
-        
-        const analysisResponse = await fetch(`${supabaseUrl}/rest/v1/subscription_analysis`, {
-          method: 'POST',
-          headers: {
-            'apikey': supabaseKey,
-            'Authorization': `Bearer ${supabaseKey}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(analysisRecord)
-        });
-        
-        if (analysisResponse.ok) {
-          console.log('SCAN-DEBUG: Stored analysis record for Edge Function processing');
-          
-          // Add to subscription emails array for further processing
+        // Do NOT create subscriptions here; instead, queue for AI analysis
+        // so the edge function can make the final decision with higher precision.
         subscriptionEmails.push({
           messageId,
-          emailData,
-          analysis,
           subject: parsedHeaders.subject,
           from: parsedHeaders.from,
           date: parsedHeaders.date,
-            emailBody,
-            emailDataId
+          emailBody,
+          analysis
         });
-          
-          uniqueEmailsProcessed++;
-        } else {
-          console.error('SCAN-DEBUG: Error creating analysis record:', analysisResponse.status, analysisResponse.statusText);
+        // Track normalized name locally to avoid enqueuing duplicates in this pass
+        existingSubscriptions.push(normalizedServiceName);
+      } else {
+        // Collect a limited set of fallback candidates for AI analysis
+        if (candidateEmails.length < 25) {
+          candidateEmails.push({
+            messageId,
+            subject: parsedHeaders.subject,
+            from: parsedHeaders.from,
+            date: parsedHeaders.date,
+            emailBody,
+            analysis: null
+          });
         }
       }
       
@@ -501,8 +437,8 @@ const processEmailsForSubscriptions = async (emails, subscriptionExamples, gmail
     }
   }
   
-  console.log(`SCAN-DEBUG: Processed ${processedCount} emails, found ${subscriptionEmails.length} subscriptions`);
-  return { subscriptionEmails, processedCount };
+  console.log(`SCAN-DEBUG: Processed ${processedCount} emails, found ${subscriptionEmails.length} subscriptions, collected ${candidateEmails.length} fallback candidates`);
+  return { subscriptionEmails, candidateEmails, processedCount };
 };
 
 // Helper function to store email data
@@ -563,13 +499,13 @@ const createSubscriptionAnalysisRecords = async (subscriptionEmails, scanId, use
         email_data_id: email.emailDataId,
         user_id: userId,
         scan_id: scanId,
-        subscription_name: email.analysis.serviceName,
-        price: email.analysis.amount || 0,
-        currency: email.analysis.currency || 'USD',
-        billing_cycle: email.analysis.billingFrequency || 'monthly',
-        next_billing_date: email.analysis.nextBillingDate,
-        service_provider: email.analysis.serviceName,
-        confidence_score: email.analysis.confidence,
+        subscription_name: email.analysis?.serviceName || null,
+        price: email.analysis?.amount || null,
+        currency: email.analysis?.currency || null,
+        billing_cycle: email.analysis?.billingFrequency || null,
+        next_billing_date: email.analysis?.nextBillingDate || null,
+        service_provider: email.analysis?.serviceName || null,
+        confidence_score: email.analysis?.confidence || null,
         analysis_status: 'pending',
         gemini_response: null,
         created_at: new Date().toISOString(),
@@ -610,6 +546,7 @@ const fetchEmailsFromGmail = async (gmailToken) => {
   try {
     // First validate the token
     console.log('SCAN-DEBUG: About to validate Gmail token');
+    console.log('SCAN-DEBUG: Gmail token first 20 chars:', gmailToken?.substring(0, 20) + '...');
     const isValidToken = await validateGmailToken(gmailToken);
     if (!isValidToken) {
       console.error('SCAN-DEBUG: Gmail token validation failed');
@@ -702,21 +639,24 @@ const fetchEmailsFromGmail = async (gmailToken) => {
     const uniqueMessageIds = new Set();
     const processedQueryCount = { count: 0 };
     
-    // Define a function to execute a single query
-    const executeQuery = async (query) => {
+    // Define a function to execute a single query with retry logic
+    const executeQuery = async (query, retryCount = 0) => {
+      const maxRetries = 2;
       processedQueryCount.count++;
-      console.log(`SCAN-DEBUG: Executing query ${processedQueryCount.count}/${uniqueQueries.length}: ${query}`);
+      console.log(`SCAN-DEBUG: Executing query ${processedQueryCount.count}/${uniqueQueries.length}: ${query}${retryCount > 0 ? ` (retry ${retryCount}/${maxRetries})` : ''}`);
       
       const encodedQuery = encodeURIComponent(query);
       const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodedQuery}&maxResults=50`;
       
       console.log(`SCAN-DEBUG: Making Gmail API request to: ${url}`);
       
-      // Add timeout to prevent hanging requests
+      // Add timeout to prevent hanging requests - shorter timeout for retries
+      const timeoutMs = retryCount > 0 ? 15000 : 30000; // 15s for retries, 30s for first attempt
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
       
       try {
+        console.log(`SCAN-DEBUG: Starting fetch request for query: ${query}`);
         const response = await fetch(url, {
           headers: {
             Authorization: `Bearer ${gmailToken}`,
@@ -726,15 +666,18 @@ const fetchEmailsFromGmail = async (gmailToken) => {
         });
         
         clearTimeout(timeoutId);
+        console.log(`SCAN-DEBUG: Fetch completed for query: ${query}, status: ${response.status}`);
         
         console.log(`SCAN-DEBUG: Gmail API response status: ${response.status}`);
         
         if (!response.ok) {
           const errorText = await response.text();
           console.error(`SCAN-DEBUG: Gmail API error: ${response.status} ${errorText}`);
+          console.error(`SCAN-DEBUG: Failed query was: ${query}`);
           throw new Error(`Gmail API error: ${response.status} ${errorText}`);
         }
         
+        console.log(`SCAN-DEBUG: Parsing response JSON for query: ${query}`);
         const data = await response.json();
         const messages = data.messages || [];
         
@@ -743,19 +686,49 @@ const fetchEmailsFromGmail = async (gmailToken) => {
         // Add messages to the unique set
         messages.forEach(message => uniqueMessageIds.add(message.id));
         
+        console.log(`SCAN-DEBUG: Successfully completed query: ${query}`);
         return messages.length;
-      } catch (error) {
-        clearTimeout(timeoutId);
-        if (error.name === 'AbortError') {
-          console.error(`SCAN-DEBUG: Gmail API request timed out for query: ${query}`);
-          throw new Error(`Gmail API request timed out for query: ${query}`);
+              } catch (error) {
+          clearTimeout(timeoutId);
+          console.error(`SCAN-DEBUG: Error in executeQuery for "${query}":`, error.message);
+          console.error(`SCAN-DEBUG: Error type:`, error.name);
+          console.error(`SCAN-DEBUG: Error stack:`, error.stack);
+          
+          // Check if we should retry
+          const shouldRetry = retryCount < maxRetries && (
+            error.name === 'AbortError' || 
+            error.message.includes('network') ||
+            error.message.includes('timeout') ||
+            error.message.includes('ECONNRESET') ||
+            error.message.includes('500') ||
+            error.message.includes('502') ||
+            error.message.includes('503')
+          );
+          
+          if (shouldRetry) {
+            console.log(`SCAN-DEBUG: Retrying query "${query}" (attempt ${retryCount + 1}/${maxRetries}) after error: ${error.message}`);
+            await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 1000)); // Progressive delay
+            return executeQuery(query, retryCount + 1);
+          }
+          
+          if (error.name === 'AbortError') {
+            console.error(`SCAN-DEBUG: Gmail API request timed out for query: ${query} (no more retries)`);
+            throw new Error(`Gmail API request timed out for query: ${query}`);
+          }
+          
+          // Log the exact error before re-throwing
+          console.error(`SCAN-DEBUG: Re-throwing error for query "${query}" (no more retries): ${error.message}`);
+          throw error;
         }
-        throw error;
-      }
     };
     
     console.log('SCAN-DEBUG: Starting to execute queries');
+    console.log('SCAN-DEBUG: About to process', uniqueQueries.length, 'queries');
+    
     // Execute queries until we have enough messages or run out of queries
+    let processedQueries = 0;
+    const maxQueriesToProcess = 10; // Limit queries to prevent timeout
+    
     for (const query of uniqueQueries) {
       // Skip if we already have enough messages
       if (uniqueMessageIds.size >= 250) {
@@ -763,11 +736,33 @@ const fetchEmailsFromGmail = async (gmailToken) => {
         break;
       }
       
+      // Prevent too many queries from causing timeout
+      if (processedQueries >= maxQueriesToProcess) {
+        console.log(`SCAN-DEBUG: Processed maximum ${maxQueriesToProcess} queries to prevent timeout, stopping`);
+        break;
+      }
+      
+      processedQueries++;
+      
       try {
+        console.log(`SCAN-DEBUG: About to execute query: ${query}`);
+        console.log(`SCAN-DEBUG: Current unique messages collected: ${uniqueMessageIds.size}`);
+        const queryStartTime = Date.now();
         await executeQuery(query);
+        const queryDuration = Date.now() - queryStartTime;
+        console.log(`SCAN-DEBUG: Successfully completed query: ${query} (took ${queryDuration}ms)`);
+        
+        // Add a small delay between queries to prevent rate limiting
+        await new Promise(resolve => setTimeout(resolve, 100));
       } catch (error) {
         console.error(`SCAN-DEBUG: Error executing query "${query}":`, error.message);
+        console.error(`SCAN-DEBUG: Error details for query "${query}":`, {
+          name: error.name,
+          message: error.message,
+          stack: error.stack?.substring(0, 200) + '...'
+        });
         // Continue with next query instead of failing completely
+        console.log(`SCAN-DEBUG: Continuing with next query after error in: ${query}`);
         continue;
       }
     }
@@ -784,20 +779,66 @@ const fetchEmailsFromGmail = async (gmailToken) => {
       }
     }
     
-    // Convert the Set to an Array
-    const messageIds = Array.from(uniqueMessageIds);
+    // Convert the Set to an Array and limit to prevent memory issues
+    const allMessageIds = Array.from(uniqueMessageIds);
+    const maxEmailsToProcess = Math.min(allMessageIds.length, 100); // Limit to 100 emails to prevent timeout/memory issues
+    const messageIds = allMessageIds.slice(0, maxEmailsToProcess);
     
-    console.log(`SCAN-DEBUG: Total unique messages found: ${messageIds.length}`);
+    console.log(`SCAN-DEBUG: Total unique messages found: ${allMessageIds.length}`);
+    console.log(`SCAN-DEBUG: Processing first ${messageIds.length} emails to prevent timeout`);
     console.log(`SCAN-DEBUG: Sample message IDs: ${messageIds.slice(0, 3).join(', ')}${messageIds.length > 3 ? '...' : ''}`);
-    console.log(`SCAN-DEBUG: Total queries executed: ${processedQueryCount.count}/${uniqueQueries.length}`);
-    console.log(`SCAN-DEBUG: Processing up to 250 emails to find subscriptions (current: ${messageIds.length})`);
+    console.log(`SCAN-DEBUG: Total queries executed: ${processedQueries}/${uniqueQueries.length}`);
+    console.log(`SCAN-DEBUG: Processing up to ${maxEmailsToProcess} emails to find subscriptions (current: ${messageIds.length})`);
     
-    // Return the unique message IDs
+    // Return the limited message IDs
     return messageIds;
   } catch (error) {
     console.error('SCAN-DEBUG: Error fetching emails from Gmail:', error);
     console.error('SCAN-DEBUG: Error stack:', error.stack);
     throw error; // Re-throw the error so it can be caught by the calling function
+  }
+};
+
+// Simple fallback function for when the comprehensive search fails
+const fetchEmailsSimple = async (gmailToken) => {
+  console.log('SCAN-DEBUG: Using simple fallback Gmail query');
+  
+  try {
+    // Use the original simple query from the legacy function
+    const query = 'subject:(subscription OR receipt OR invoice OR payment OR billing OR renewal)';
+    const encodedQuery = encodeURIComponent(query);
+    const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodedQuery}&maxResults=50`;
+    
+    console.log('SCAN-DEBUG: Simple fallback query:', query);
+    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000); // Shorter timeout for fallback
+    
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${gmailToken}`,
+        'Content-Type': 'application/json',
+      },
+      signal: controller.signal
+    });
+    
+    clearTimeout(timeoutId);
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Gmail API error: ${response.status} ${errorText}`);
+    }
+    
+    const data = await response.json();
+    const messages = data.messages || [];
+    
+    console.log(`SCAN-DEBUG: Simple fallback found ${messages.length} messages`);
+    
+    // Return message IDs in the same format as the comprehensive function
+    return messages.map(message => message.id);
+  } catch (error) {
+    console.error('SCAN-DEBUG: Error in simple fallback:', error.message);
+    throw error;
   }
 };
 
@@ -1007,6 +1048,10 @@ const analyzeEmailWithPatternMatching = async (emailContent) => {
       /(\d+\.?\d*)\s*(?:usd|dollars?)/gi,  // 19.99 USD
       /(\d+\.?\d*)\s*(?:eur|euros?)/gi,    // 19.99 EUR
       /(\d+\.?\d*)\s*(?:gbp|pounds?)/gi,   // 19.99 GBP
+      /price:\s*\$(\d+\.?\d*)/gi, // price: $19.99
+      /total:\s*\$(\d+\.?\d*)/gi, // total: $19.99
+      /amount:\s*\$(\d+\.?\d*)/gi, // amount: $19.99
+      /charge:\s*\$(\d+\.?\d*)/gi, // charge: $19.99
     ];
 
     for (const pattern of pricePatterns) {
@@ -1015,8 +1060,8 @@ const analyzeEmailWithPatternMatching = async (emailContent) => {
         const price = parseFloat(matches[0].replace(/[^\d.]/g, ''));
         if (price > 0) {
           amount = price;
-          if (pattern.source.includes('€')) currency = 'EUR';
-          else if (pattern.source.includes('£')) currency = 'GBP';
+          if (pattern.source.includes('€') || pattern.source.includes('eur')) currency = 'EUR';
+          else if (pattern.source.includes('£') || pattern.source.includes('gbp')) currency = 'GBP';
           else currency = 'USD';
           console.log(`SCAN-DEBUG: Enhanced detection - Extracted: ${amount} ${currency}`);
           break;
@@ -1366,6 +1411,18 @@ const createScanRecord = async (req, userId, decoded) => {
       console.log(`SCAN-DEBUG: Found existing user with ID: ${dbUserId}`);
     }
     
+    // Cancel any previous unfinished scans for this user before creating a new one
+    const openStatuses = ['pending', 'in_progress', 'ready_for_analysis', 'analyzing'];
+    await supabaseAdmin
+      .from('scan_history')
+      .update({
+        status: 'cancelled',
+        updated_at: new Date().toISOString(),
+        error_message: 'Cancelled by newer scan',
+      })
+      .eq('user_id', dbUserId)
+      .in('status', openStatuses);
+    
     // Use provided scan ID for scheduled scans, or generate new one
     const scanId = isScheduledScan && scheduledScanId ? scheduledScanId : 'scan_' + Math.random().toString(36).substring(2, 15);
     const timestamp = new Date().toISOString();
@@ -1504,16 +1561,10 @@ const updateScanStatus = async (scanId, dbUserId, updates) => {
           console.log('SCAN-DEBUG: Status-only update, skipping email stats fetch');
         }
       } else {
-        // Ensure we have at least default values for missing stats
-        if (filteredUpdates.emails_found === undefined) {
-          filteredUpdates.emails_found = 0;
-        }
-        if (filteredUpdates.emails_to_process === undefined) {
-          filteredUpdates.emails_to_process = 0;
-        }
-        if (filteredUpdates.emails_processed === undefined) {
-          filteredUpdates.emails_processed = 0;
-        }
+        // Do NOT overwrite existing email statistics when they are intentionally omitted from this update.
+        // Only include stats that are explicitly provided in the updates object. This avoids resetting
+        // previously stored counts (e.g., emails_found) back to 0 when we only want to patch progress.
+        // If a stat field is missing here, we simply leave it unchanged in the database.
       }
 
       console.log('SCAN-DEBUG: Final update data:', JSON.stringify(filteredUpdates, null, 2));
@@ -1671,6 +1722,9 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
     const subscriptionExamples = await fetchSubscriptionExamples();
     console.log('SCAN-DEBUG: Fetched subscription examples:', subscriptionExamples.length);
     
+    // Add a small delay to show preparation progress
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
     // Update progress
     console.log('SCAN-DEBUG: About to update progress to 15...');
     await updateScanStatus(scanId, userId, {
@@ -1686,6 +1740,9 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
     console.log('SCAN-DEBUG: Fetched emails from Gmail:', emails.length);
     console.log('SCAN-DEBUG: Email IDs sample:', emails.slice(0, 3));
     
+    // Add a small delay to show email fetching progress
+    await new Promise(resolve => setTimeout(resolve, 800));
+    
     // Update scan status with email count
     console.log('SCAN-DEBUG: About to update scan status with email count...');
     await updateScanStatus(scanId, userId, {
@@ -1697,11 +1754,10 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
     console.log('SCAN-DEBUG: Successfully updated scan status with email count');
     
     if (emails.length === 0) {
-      console.log('SCAN-DEBUG: No emails found, completing scan');
+      console.log('SCAN-DEBUG: No emails found, but still proceed to analysis phase');
       await updateScanStatus(scanId, userId, {
         status: 'ready_for_analysis',
-        progress: 100,
-        completed_at: new Date().toISOString(),
+        progress: 60,
         updated_at: new Date().toISOString(),
         error_message: 'No subscription-related emails found in your Gmail account. This could mean you don\'t have any active subscriptions, or your emails are organized differently.'
       });
@@ -1718,7 +1774,7 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
     
     console.log('SCAN-DEBUG: About to process emails for subscriptions...');
     // Process emails to find subscriptions (this now includes storing data and creating analysis records)
-    const { subscriptionEmails, processedCount } = await processEmailsForSubscriptions(
+    const { subscriptionEmails, candidateEmails, processedCount } = await processEmailsForSubscriptions(
       emails, 
       subscriptionExamples, 
       gmailToken, 
@@ -1738,65 +1794,49 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
       updated_at: new Date().toISOString()
     });
     
+    // Persist emails and queue AI analysis when we found potential subscriptions
+    if (subscriptionEmails.length > 0) {
+      try {
+        await storeEmailData(subscriptionEmails, scanId, userId);
+        await createSubscriptionAnalysisRecords(subscriptionEmails, scanId, userId);
+      } catch (persistError) {
+        console.error('SCAN-DEBUG: Failed to persist email/analysis records:', persistError);
+      }
+    }
+    // If no pattern matches, persist a small set of candidates for AI to analyze anyway
+    if (subscriptionEmails.length === 0 && candidateEmails.length > 0) {
+      try {
+        await storeEmailData(candidateEmails, scanId, userId);
+        await createSubscriptionAnalysisRecords(candidateEmails, scanId, userId);
+      } catch (persistError) {
+        console.error('SCAN-DEBUG: Failed to persist fallback candidate records:', persistError);
+      }
+    }
+    
     if (subscriptionEmails.length === 0) {
-      console.log('SCAN-DEBUG: No subscriptions found, completing scan');
+      console.log('SCAN-DEBUG: No subscriptions found during pattern matching');
       await updateScanStatus(scanId, userId, {
-        status: 'ready_for_analysis',
-        progress: 100,
-        completed_at: new Date().toISOString(),
+        status: emails.length === 0 ? 'completed' : 'ready_for_analysis',
+        progress: emails.length === 0 ? 100 : 70,
         updated_at: new Date().toISOString()
       });
     } else {
       console.log('SCAN-DEBUG: Email processing completed successfully');
+      console.log('SCAN-DEBUG: Pattern matching detected subscriptions successfully!');
       console.log('SCAN-DEBUG: Setting scan status to ready_for_analysis for Gemini processing');
       
-      // Set scan status to ready_for_analysis so Gemini trigger can process pending analysis records
-      await updateScanStatus(scanId, userId, {
+      // Always set status to ready_for_analysis so the Gemini function can run.
+      // The Gemini function is responsible for setting the final 'completed' status.
+        await updateScanStatus(scanId, dbUserId, {
         status: 'ready_for_analysis',
-        progress: 100,
-        updated_at: new Date().toISOString()
-      });
+        progress: 70, // Set progress to analysis phase
+          updated_at: new Date().toISOString()
+        });
       
-      // Add a fallback mechanism: if Edge Function doesn't complete within 2 minutes, 
-      // automatically complete the scan since pattern matching already detected subscriptions
-      console.log('SCAN-DEBUG: Setting up fallback completion in 2 minutes...');
-      setTimeout(async () => {
-        try {
-          console.log('SCAN-DEBUG: Checking if scan is still in ready_for_analysis status...');
-          
-          // Check current scan status
-          const currentScanResponse = await fetch(
-            `${supabaseUrl}/rest/v1/scan_history?scan_id=eq.${scanId}&select=status`,
-            {
-              method: 'GET',
-              headers: {
-                'apikey': supabaseKey,
-                'Authorization': `Bearer ${supabaseKey}`,
-                'Content-Type': 'application/json'
-              }
-            }
-          );
-          
-          if (currentScanResponse.ok) {
-            const currentScan = await currentScanResponse.json();
-            if (currentScan.length > 0 && currentScan[0].status === 'ready_for_analysis') {
-              console.log('SCAN-DEBUG: Scan still in ready_for_analysis status after 2 minutes');
-              console.log('SCAN-DEBUG: Completing scan automatically since pattern matching detected subscriptions');
-              
-              // Keep scan in ready_for_analysis; do not mark completed automatically
-    await updateScanStatus(scanId, userId, {
-                status: 'ready_for_analysis',
-      updated_at: new Date().toISOString()
-    });
-              console.log('SCAN-DEBUG: Scan left in ready_for_analysis via fallback; trigger will handle completion');
-            } else {
-              console.log('SCAN-DEBUG: Scan status changed, no fallback needed');
-            }
-          }
-        } catch (fallbackError) {
-          console.error('SCAN-DEBUG: Error in fallback completion:', fallbackError);
-        }
-      }, 2 * 60 * 1000); // 2 minutes
+      console.log('SCAN-DEBUG: Scan status set to ready_for_analysis');
+      
+      // Note: The Edge Function will still be triggered by cron for additional AI analysis
+      console.log('SCAN-DEBUG: Cron job runs every minute and will automatically trigger analysis for additional AI processing');
     }
     
   } catch (error) {
@@ -1837,11 +1877,16 @@ export default async function handler(req, res) {
   });
   console.log('SCAN-DEBUG: Body keys:', Object.keys(req.body || {}));
   
-  // Set CORS headers
-  const origin = process.env.NODE_ENV === 'development' 
-    ? 'http://localhost:5173' 
-    : 'https://www.quits.cc';
-  res.setHeader('Access-Control-Allow-Origin', origin);
+  // Dynamically set the allowed origin: accept localhost in development and ANY *.quits.cc sub-domain in production.
+  const requestOrigin = req.headers.origin || '';
+  const allowedOrigin = (requestOrigin && (
+    requestOrigin.includes('localhost') ||           // local dev
+    /https?:\/\/([a-z0-9-]+\.)*quits\.cc$/i.test(requestOrigin) // *.quits.cc domains
+  )) ? requestOrigin : 'https://www.quits.cc';       // safe fallback
+
+  res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+  // Ensure caches vary on Origin so each requesting origin gets its own CORS header
+  res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token, Pragma, X-API-Key, X-Api-Version, X-Device-ID');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -2028,6 +2073,9 @@ export default async function handler(req, res) {
       const subscriptionExamples = await fetchSubscriptionExamples();
       console.log('SCAN-DEBUG: Fetched subscription examples:', subscriptionExamples.length);
       
+      // Add a small delay to show preparation progress
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
       // Update progress
       console.log('SCAN-DEBUG: About to update progress to 15...');
       await updateScanStatus(scanId, dbUserId, {
@@ -2039,9 +2087,35 @@ export default async function handler(req, res) {
       console.log('SCAN-DEBUG: About to fetch emails from Gmail...');
       console.log('SCAN-DEBUG: Calling fetchEmailsFromGmail function...');
       // Fetch emails from Gmail using the comprehensive search function
-      const emails = await fetchEmailsFromGmail(gmailToken);
-      console.log('SCAN-DEBUG: Fetched emails from Gmail:', emails.length);
-      console.log('SCAN-DEBUG: Email IDs sample:', emails.slice(0, 3));
+      let emails;
+      try {
+        console.log('SCAN-DEBUG: Starting Gmail fetch with timeout protection...');
+        // Add overall timeout to the Gmail fetch operation
+        const fetchPromise = fetchEmailsFromGmail(gmailToken);
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Gmail fetch operation timed out after 60 seconds')), 60000)
+        );
+        
+        emails = await Promise.race([fetchPromise, timeoutPromise]);
+        console.log('SCAN-DEBUG: Fetched emails from Gmail:', emails.length);
+        console.log('SCAN-DEBUG: Email IDs sample:', emails.slice(0, 3));
+      } catch (fetchError) {
+        console.error('SCAN-DEBUG: Error in fetchEmailsFromGmail:', fetchError.message);
+        console.error('SCAN-DEBUG: fetchEmailsFromGmail error stack:', fetchError.stack);
+        
+        // Try a simple fallback query
+        console.log('SCAN-DEBUG: Attempting simple fallback Gmail query...');
+        try {
+          emails = await fetchEmailsSimple(gmailToken);
+          console.log('SCAN-DEBUG: Fallback query successful, emails found:', emails.length);
+        } catch (fallbackError) {
+          console.error('SCAN-DEBUG: Fallback query also failed:', fallbackError.message);
+          throw new Error(`Failed to fetch emails from Gmail: ${fetchError.message}`);
+        }
+      }
+      
+      // Add a small delay to show email fetching progress
+      await new Promise(resolve => setTimeout(resolve, 800));
       
       // Update scan status with email count
       console.log('SCAN-DEBUG: About to update scan status with email count...');
@@ -2054,11 +2128,10 @@ export default async function handler(req, res) {
       console.log('SCAN-DEBUG: Successfully updated scan status with email count');
       
       if (emails.length === 0) {
-        console.log('SCAN-DEBUG: No emails found, completing scan');
+        console.log('SCAN-DEBUG: No emails found, but still proceed to analysis phase');
         await updateScanStatus(scanId, dbUserId, {
           status: 'ready_for_analysis',
-          progress: 100,
-          completed_at: new Date().toISOString(),
+          progress: 60,
           updated_at: new Date().toISOString(),
           error_message: 'No subscription-related emails found in your Gmail account. This could mean you don\'t have any active subscriptions, or your emails are organized differently.'
         });
@@ -2076,7 +2149,7 @@ export default async function handler(req, res) {
       
       console.log('SCAN-DEBUG: About to process emails for subscriptions...');
       // Process emails to find subscriptions (this now includes storing data and creating analysis records)
-      const { subscriptionEmails, processedCount } = await processEmailsForSubscriptions(
+      const { subscriptionEmails, candidateEmails, processedCount } = await processEmailsForSubscriptions(
         emails, 
         subscriptionExamples, 
         gmailToken, 
@@ -2087,6 +2160,9 @@ export default async function handler(req, res) {
       console.log('SCAN-DEBUG: Processed emails for subscriptions:', processedCount);
       console.log('SCAN-DEBUG: Found subscription emails:', subscriptionEmails.length);
       
+      // Add a small delay to show processing progress
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
       // Update scan status with processing results
       await updateScanStatus(scanId, dbUserId, {
         progress: 90,
@@ -2095,31 +2171,59 @@ export default async function handler(req, res) {
         subscriptions_found: subscriptionEmails.length,
         updated_at: new Date().toISOString()
       });
+
+      // Persist emails and queue AI analysis when we found potential subscriptions
+      if (subscriptionEmails.length > 0) {
+        try {
+          await storeEmailData(subscriptionEmails, scanId, dbUserId);
+          await createSubscriptionAnalysisRecords(subscriptionEmails, scanId, dbUserId);
+        } catch (persistError) {
+          console.error('SCAN-DEBUG: Failed to persist email/analysis records:', persistError);
+        }
+      }
+      // If no pattern matches, persist a small set of candidates for AI to analyze anyway
+      if (subscriptionEmails.length === 0 && candidateEmails.length > 0) {
+        try {
+          await storeEmailData(candidateEmails, scanId, dbUserId);
+          await createSubscriptionAnalysisRecords(candidateEmails, scanId, dbUserId);
+        } catch (persistError) {
+          console.error('SCAN-DEBUG: Failed to persist fallback candidate records:', persistError);
+        }
+      }
       
       if (subscriptionEmails.length === 0) {
-        console.log('SCAN-DEBUG: No subscriptions found, completing scan');
-        await updateScanStatus(scanId, dbUserId, {
-          status: 'ready_for_analysis',
-          progress: 100,
-          completed_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        });
+        console.log('SCAN-DEBUG: No subscriptions found during pattern matching');
+        // If no sub emails and also zero emails overall, we can complete early.
+        if (emails.length === 0) {
+          await updateScanStatus(scanId, dbUserId, {
+            status: 'completed',
+            progress: 100,
+            updated_at: new Date().toISOString()
+          });
+        } else {
+          await updateScanStatus(scanId, dbUserId, {
+            status: 'ready_for_analysis',
+            progress: 70,
+            updated_at: new Date().toISOString()
+          });
+        }
       } else {
         console.log('SCAN-DEBUG: Email processing completed successfully');
         console.log('SCAN-DEBUG: Pattern matching detected subscriptions successfully!');
         console.log('SCAN-DEBUG: Setting scan status to ready_for_analysis for Gemini processing');
         
-        // Set scan status to ready_for_analysis so Gemini trigger can process pending analysis records
+        // Always set status to ready_for_analysis so the Gemini function can run.
+        // The Gemini function is responsible for setting the final 'completed' status.
         await updateScanStatus(scanId, dbUserId, {
           status: 'ready_for_analysis',
-          progress: 100,
+          progress: 70, // Move to 70 to signal AI phase explicitly
           updated_at: new Date().toISOString()
         });
         
-        console.log('SCAN-DEBUG: Scan status set to ready_for_analysis - cron job will trigger Edge Function analysis');
+        console.log('SCAN-DEBUG: Scan status set to ready_for_analysis');
         
-        // Let the cron job handle Edge Function triggering
-        console.log('SCAN-DEBUG: Cron job runs every minute and will automatically trigger analysis for scans in ready_for_analysis status');
+        // Note: The Edge Function will still be triggered by cron for additional AI analysis
+        console.log('SCAN-DEBUG: Cron job runs every minute and will automatically trigger analysis for additional AI processing');
       }
       
       // Return scan ID with completion status
@@ -2127,8 +2231,7 @@ export default async function handler(req, res) {
       res.status(200).json({ 
         success: true, 
         scanId: scanId,
-        message: 'Scan completed successfully.',
-        processingCompleted: true,
+        message: 'Scan started successfully.',
         emailsFound: emails.length,
         subscriptionsFound: subscriptionEmails.length
       });

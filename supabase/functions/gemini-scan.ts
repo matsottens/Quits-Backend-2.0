@@ -1,679 +1,282 @@
+// Rewritten Gemini scan edge function: robust progress + always completed
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
-
-function normalizeServiceName(name: string): string {
-  if (!name) return '';
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .replace(/\b(inc|llc|ltd|corp|co|company|limited|incorporated)\b/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
 
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
-// ===== Runtime Environment Validation (executes at import time) =====
-if (!GEMINI_API_KEY) {
-  console.warn("[gemini-scan] Warning: GEMINI_API_KEY is not set – analysis requests will fail. Scans will be marked as error.");
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+const normalize = (s: string) =>
+  (s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+
+// Heuristics and helpers for robust scoring and extraction
+const SUBSCRIPTION_KEYWORDS = [
+  "subscription", "subscribed", "your plan", "membership", "renewal", "auto-renew",
+  "billed", "billing", "payment", "receipt", "invoice", "charged", "charge",
+  "trial", "trial ended", "will renew", "has been renewed"
+];
+
+const STRONG_TRANSACTIONAL = ["receipt", "invoice", "payment", "charged", "subscription"];
+
+const CURRENCY_SIGNS: Record<string, RegExp> = {
+  USD: /(?:\$)\s?(\d{1,4}(?:[.,]\d{2})?)/,
+  EUR: /(?:€)\s?(\d{1,4}(?:[.,]\d{2})?)/,
+  GBP: /(?:£)\s?(\d{1,4}(?:[.,]\d{2})?)/
+};
+
+const EXPLICIT_CURRENCY: Array<{ code: string; re: RegExp }> = [
+  { code: "USD", re: /(\d{1,4}(?:[.,]\d{2})?)\s?(?:usd|dollars?)/i },
+  { code: "EUR", re: /(\d{1,4}(?:[.,]\d{2})?)\s?(?:eur|euros?)/i },
+  { code: "GBP", re: /(\d{1,4}(?:[.,]\d{2})?)\s?(?:gbp|pounds?)/i }
+];
+
+function extractPriceAndCurrency(text: string): { price: number | null; currency: string | null } {
+  const t = text || "";
+  for (const [code, re] of Object.entries(CURRENCY_SIGNS)) {
+    const m = t.match(re);
+    if (m && m[1]) return { price: Number(m[1].replace(',', '.')), currency: code };
+  }
+  for (const { code, re } of EXPLICIT_CURRENCY) {
+    const m = t.match(re);
+    if (m && m[1]) return { price: Number(m[1].replace(',', '.')), currency: code };
+  }
+  return { price: null, currency: null };
 }
-if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-  console.error("[gemini-scan] Error: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY missing – Edge Function cannot access database and will exit early.");
+
+function detectBillingCycle(text: string): string | null {
+  const t = (text || "").toLowerCase();
+  if (/(monthly|per month|\/month)/i.test(t)) return "monthly";
+  if (/(yearly|annual|per year|\/year)/i.test(t)) return "yearly";
+  if (/(weekly|per week|\/week)/i.test(t)) return "weekly";
+  if (/(quarterly|per quarter)/i.test(t)) return "quarterly";
+  return null;
 }
 
-let requestCount = 0;
-let lastQuotaReset = Date.now();
-
-function checkQuota(): boolean {
-  const now = Date.now();
-  if (now - lastQuotaReset > 60000) {
-    requestCount = 0;
-    lastQuotaReset = now;
-  }
-  
-  if (requestCount >= 60) {
-    return false;
-  }
-  
-  requestCount++;
-  return true;
+function keywordScore(text: string): number {
+  const t = (text || "").toLowerCase();
+  let score = 0;
+  for (const k of SUBSCRIPTION_KEYWORDS) if (t.includes(k)) score += 0.05; // cap later
+  for (const k of STRONG_TRANSACTIONAL) if (t.includes(k)) score += 0.1;
+  return Math.min(score, 0.6);
 }
 
-// Improved batch analysis function with better prompt and error handling
-async function analyzeEmailsBatchWithGemini(emails: Array<{id: string, content: string, subject: string, sender: string}>) {
-  // Immediately abort if the key is not present – prevents unnecessary fetch attempts and clearer error reporting
-  if (!GEMINI_API_KEY) {
-    return { error: "Missing GEMINI_API_KEY", results: [] } as const;
+function deriveServiceName(subject: string, sender: string): string | null {
+  const fromDomain = (sender || '').match(/@([\w.-]+)/);
+  if (fromDomain && fromDomain[1]) {
+    const dom = fromDomain[1].split('.')[0];
+    if (dom && !['gmail','yahoo','hotmail','outlook','mail','noreply','no-reply'].includes(dom)) {
+      return dom.charAt(0).toUpperCase() + dom.slice(1);
+    }
   }
+  const s = (subject || '').split(/\s+/).find(w => w && w.length > 2);
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : null;
+}
 
-  if (!checkQuota()) {
-    return { error: "Rate limit reached", results: [] };
-  }
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
-
-  // Build a clearer, more structured prompt
-  const emailList = emails.map((email, index) => 
-    `EMAIL ${index + 1}:
-Subject: ${email.subject}
-From: ${email.sender}
-Content: ${email.content.substring(0, 1000)}`
-  ).join('\n\n');
-
-  const prompt = `Analyze these emails for subscription services. Look for:
-- Recurring payments
-- Billing notices
-- Subscription confirmations
-- Service renewals
-- Payment receipts
-
-For each email, return a JSON object with these exact fields:
+/* -------------------------------------------------------------------------- */
+/* Gemini helper                                                               */
+/* -------------------------------------------------------------------------- */
+async function analyzeEmailsWithGemini(emails: any[]) {
+  const systemPrompt = `You are an expert financial assistant. Analyze the following emails to identify paid subscription transactions and explicit cancellations (not newsletters or ads).
+Return a JSON array. Each element MUST be an object with EXACTLY these keys:
 {
-  "is_subscription": true/false,
-  "subscription_name": "service name or null",
-  "price": number or null,
-  "currency": "USD/EUR/etc or null",
-  "billing_cycle": "monthly/yearly/weekly or null",
-  "next_billing_date": "YYYY-MM-DD or null",
-  "service_provider": "company name or null",
-  "confidence_score": number between 0.0 and 1.0
+  "is_subscription": boolean,
+  "subscription_name": string | null,
+  "price": number | null,
+  "currency": string | null,
+  "billing_cycle": "monthly" | "yearly" | "weekly" | "quarterly" | null,
+  "confidence_score": number,  // 0.0 to 1.0 reflecting likelihood this is a subscription charge
+  "is_cancellation": boolean  // true if the email explicitly confirms cancellation/termination of a subscription
 }
+Rules:
+- Prefer actual charge/receipt/renewal confirmations over marketing.
+- If price is not explicitly stated, use null (do NOT invent 0).
+- Only set is_subscription true if the email clearly indicates a subscription payment, renewal, or plan details.
+- Set is_cancellation true only for explicit cancellation confirmations (e.g., "Your subscription has been canceled").
+`;
 
-Return a JSON array with one object per email in the same order. For non-subscriptions, set is_subscription to false and confidence_score to 0.95.
-
-Emails to analyze:
-${emailList}
-
-Return ONLY the JSON array, no other text:`;
+  const combined = emails.map((e, i) => `EMAIL ${i + 1}:\nSubject: ${e.subject}\nFrom: ${e.sender}\nContent: ${e.content.slice(0, 3000)}`).join("\n\n");
 
   const body = {
-    contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: { 
-      response_mime_type: "application/json",
-      temperature: 0.1,
-      maxOutputTokens: 3000
-    }
+    contents: [{ role: "user", parts: [{ text: systemPrompt + combined }] }],
+    generationConfig: { response_mime_type: "application/json", temperature: 0.1, maxOutputTokens: 4096 }
   };
 
-  const maxRetries = 3;
-  let lastError = null;
+  const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
 
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      console.log(`Attempt ${attempt}: Sending batch of ${emails.length} emails to Gemini`);
-      
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body)
-      });
-
-      if (!response.ok) {
-        if (response.status === 429) {
-          try {
-            const errorData = await response.json();
-            if (errorData.error && errorData.error.status === 'RESOURCE_EXHAUSTED') {
-              return { error: `Quota exhausted`, results: [], quota_exhausted: true };
-            }
-          } catch (parseError) {}
-          
-          lastError = new Error(`Rate limit hit`);
-          
-          if (attempt < maxRetries) {
-            const backoffDelay = Math.pow(2, attempt) * 5000;
-            console.log(`Rate limited, waiting ${backoffDelay}ms before retry`);
-            await new Promise(resolve => setTimeout(resolve, backoffDelay));
-            continue;
-          } else {
-            return { error: `Rate limit exceeded`, results: [] };
-          }
-        }
-        
-        throw new Error(`API error: ${response.status}`);
-      }
-
-      const data = await response.json();
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-      
-      if (!text) {
-        console.log(`Attempt ${attempt}: No response text from Gemini`);
-        if (attempt < maxRetries) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          continue;
-        } else {
-          return { error: "No response", results: [] };
-        }
-      }
-
-      console.log(`Attempt ${attempt}: Raw Gemini response (first 500 chars): ${text.substring(0, 500)}...`);
-
-      try {
-        // Try to extract JSON array from the response
-        let jsonText = text.trim();
-        
-        // Remove any markdown formatting
-        if (jsonText.startsWith('```json')) {
-          jsonText = jsonText.substring(7);
-        }
-        if (jsonText.endsWith('```')) {
-          jsonText = jsonText.substring(0, jsonText.length - 3);
-      }
-
-        // Find JSON array
-        const jsonMatch = jsonText.match(/\[[\s\S]*\]/);
-        if (!jsonMatch) {
-          console.log(`Attempt ${attempt}: No JSON array found in response. Full response: ${text}`);
-          if (attempt < maxRetries) {
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            continue;
-          } else {
-            return { error: "No JSON array found", results: [] };
-          }
-        }
-        
-        const results = JSON.parse(jsonMatch[0]);
-        console.log(`Attempt ${attempt}: Parsed JSON array with ${results.length} results`);
-        
-        if (!Array.isArray(results)) {
-          console.log(`Attempt ${attempt}: Response is not an array`);
-          if (attempt < maxRetries) {
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            continue;
-          } else {
-            return { error: "Response is not an array", results: [] };
-          }
-        }
-        
-        if (results.length !== emails.length) {
-          console.log(`Attempt ${attempt}: Expected ${emails.length} results, got ${results.length}`);
-          if (attempt < maxRetries) {
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            continue;
-          } else {
-            return { error: `Expected ${emails.length} results, got ${results.length}`, results: [] };
-          }
-        }
-        
-        // Validate and process each result
-        const processedResults = results.map((result, index) => {
-          console.log(`Processing result ${index + 1}:`, result);
-          
-          // Ensure is_subscription is boolean
-          if (typeof result.is_subscription !== 'boolean') {
-            console.log(`Result ${index + 1}: Invalid is_subscription type, defaulting to false`);
-            result.is_subscription = false;
-        }
-        
-        if (result.is_subscription) {
-            // Validate subscription fields
-          if (!result.subscription_name || typeof result.subscription_name !== 'string') {
-              console.log(`Result ${index + 1}: Missing subscription_name, attempting to extract from email`);
-              const emailLower = emails[index].content.toLowerCase();
-            let extractedName: string | null = null;
-            
-              // Enhanced service name extraction
-            if (emailLower.includes('netflix') || emailLower.includes('nflx')) extractedName = 'Netflix';
-            else if (emailLower.includes('spotify')) extractedName = 'Spotify';
-            else if (emailLower.includes('amazon') || emailLower.includes('prime')) extractedName = 'Amazon Prime';
-            else if (emailLower.includes('disney') || emailLower.includes('disney+')) extractedName = 'Disney+';
-            else if (emailLower.includes('hbo') || emailLower.includes('max')) extractedName = 'HBO Max';
-            else if (emailLower.includes('youtube') || emailLower.includes('yt premium')) extractedName = 'YouTube Premium';
-            else if (emailLower.includes('apple')) extractedName = 'Apple Services';
-            else if (emailLower.includes('hulu')) extractedName = 'Hulu';
-            else if (emailLower.includes('paramount') || emailLower.includes('paramount+')) extractedName = 'Paramount+';
-            else if (emailLower.includes('peacock')) extractedName = 'Peacock';
-            else if (emailLower.includes('adobe')) extractedName = 'Adobe Creative Cloud';
-            else if (emailLower.includes('microsoft') || emailLower.includes('office 365')) extractedName = 'Microsoft 365';
-            else if (emailLower.includes('google one') || emailLower.includes('drive storage')) extractedName = 'Google One';
-            else if (emailLower.includes('dropbox')) extractedName = 'Dropbox';
-            else if (emailLower.includes('nba') || emailLower.includes('league pass')) extractedName = 'NBA League Pass';
-            else if (emailLower.includes('babbel')) extractedName = 'Babbel';
-            else if (emailLower.includes('chegg')) extractedName = 'Chegg';
-            else if (emailLower.includes('grammarly')) extractedName = 'Grammarly';
-            else if (emailLower.includes('nordvpn') || emailLower.includes('vpn')) extractedName = 'NordVPN';
-            else if (emailLower.includes('peloton')) extractedName = 'Peloton';
-            else if (emailLower.includes('duolingo')) extractedName = 'Duolingo';
-            else if (emailLower.includes('notion')) extractedName = 'Notion';
-            else if (emailLower.includes('canva')) extractedName = 'Canva';
-            else if (emailLower.includes('nytimes') || emailLower.includes('ny times')) extractedName = 'New York Times';
-            else if (emailLower.includes('vercel')) extractedName = 'Vercel';
-              else if (emailLower.includes('ahrefs')) extractedName = 'Ahrefs';
-            
-            if (extractedName) {
-              result.subscription_name = extractedName;
-                console.log(`Result ${index + 1}: Extracted service name: ${extractedName}`);
-            } else {
-              result.subscription_name = 'Unknown Service';
-                console.log(`Result ${index + 1}: Could not extract service name, using 'Unknown Service'`);
-            }
-          }
-          
-            // Validate price
-          if (result.price !== undefined && typeof result.price !== 'number') {
-            result.price = parseFloat(result.price) || 0;
-          }
-          
-            // Validate confidence score
-          if (result.confidence_score !== undefined && typeof result.confidence_score !== 'number') {
-            result.confidence_score = parseFloat(result.confidence_score) || 0.8;
-          }
-            
-            // Set defaults for missing fields
-            if (!result.currency) result.currency = 'USD';
-            if (!result.billing_cycle) result.billing_cycle = 'monthly';
-            if (!result.service_provider) result.service_provider = result.subscription_name;
-            
-            console.log(`Result ${index + 1}: Validated subscription - ${result.subscription_name} at $${result.price} ${result.currency}`);
-          } else {
-            // For non-subscriptions, ensure confidence score is set
-            if (result.confidence_score === undefined || typeof result.confidence_score !== 'number') {
-              result.confidence_score = 0.95;
-            }
-            console.log(`Result ${index + 1}: Not a subscription (confidence: ${result.confidence_score})`);
-        }
-        
-        return result;
-        });
-        
-        console.log(`Successfully processed batch with ${processedResults.length} results`);
-        return { results: processedResults };
-        
-      } catch (parseError) {
-        console.log(`Attempt ${attempt}: JSON parse error:`, parseError.message);
-        if (attempt < maxRetries) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          continue;
-        } else {
-          return { error: `Parse failed: ${parseError.message}`, results: [] };
-        }
-      }
-      
-    } catch (error) {
-      lastError = error;
-      console.log(`Attempt ${attempt}: Request error:`, error.message);
-      
-      if (attempt < maxRetries) {
-        const retryDelay = Math.pow(2, attempt) * 5000;
-        await new Promise(resolve => setTimeout(resolve, retryDelay));
-      } else {
-        break;
-      }
-    }
-  }
-  
-  return { error: `All attempts failed: ${lastError?.message}`, results: [] };
+  if (!resp.ok) throw new Error(`Gemini API error ${resp.status}`);
+  const data = await resp.json();
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "[]";
+  const match = text.match(/```json\s*([\s\S]*?)```/);
+  const json = match ? match[1] : text;
+  return JSON.parse(json);
 }
 
+/* -------------------------------------------------------------------------- */
+/* Progress helper                                                             */
+/* -------------------------------------------------------------------------- */
+async function updateProgress(scanId: string, done: number, total: number) {
+  const pct = 70 + Math.floor((done / total) * 29); // 70→99
+  await supabase.from("scan_history").update({ progress: Math.min(pct, 99), emails_processed: done, updated_at: new Date().toISOString() }).eq("scan_id", scanId);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Main handler                                                                */
+/* -------------------------------------------------------------------------- */
 serve(async (req) => {
-  // Validate essential env variables once per invocation
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-    console.error("[gemini-scan] Fatal: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not configured");
-    return new Response(JSON.stringify({
-      error: "Server misconfiguration: missing SUPABASE credentials"
-    }), { status: 500, headers: corsHeaders });
-  }
-
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-
   try {
-    const startTime = Date.now();
-    const maxExecutionTime = 7 * 60 * 1000;
-    
-    // Get scan IDs and user IDs from the request body
-    const { scan_ids, user_ids } = await req.json();
-    
-    console.log(`Starting analysis for scans: ${scan_ids}, users: ${user_ids}`);
-    
-    if (!scan_ids || !user_ids || scan_ids.length === 0) {
-      return new Response(JSON.stringify({ 
-        success: true, 
-        message: "No scan IDs provided" 
-      }), { status: 200 });
+    const { scan_ids } = await req.json();
+    if (!Array.isArray(scan_ids) || !scan_ids.length) {
+      return new Response(JSON.stringify({ success: true, message: "No scans" }), { status: 200 });
     }
-    
-    // Get the specific scans that were passed from the trigger
-    const { data: scans, error: scanError } = await supabase
+
+    const { data: scans } = await supabase
       .from("scan_history")
       .select("*")
       .in("scan_id", scan_ids);
 
-    if (scanError) {
-      console.error("Failed to fetch scans:", scanError);
-      return new Response(JSON.stringify({ error: "Failed to fetch scans", details: scanError }), { status: 500 });
-    }
+    for (const scan of scans || []) {
+      // Accept both 'ready_for_analysis' and 'analyzing' to avoid race with trigger
+      if (!(scan.status === "ready_for_analysis" || scan.status === "analyzing")) continue;
 
-    if (!scans || scans.length === 0) {
-      console.log("No scans found");
-      return new Response(JSON.stringify({ success: true, message: "No scans found" }), { status: 200 });
-    }
+      let subsFound = 0;
+      let errorMsg: string | null = null;
 
-    console.log(`Found ${scans.length} scans to process`);
+      try {
+        const { error: updErr } = await supabase
+          .from("scan_history")
+          .update({ status: "analyzing", progress: 70, updated_at: new Date().toISOString() })
+          .eq("scan_id", scan.scan_id)
+          .eq("user_id", scan.user_id);
+        if (updErr) throw new Error(`Failed to mark scan analyzing: ${updErr.message}`);
 
-    let totalProcessed = 0;
-    let totalErrors = 0;
-    let totalSubscriptionsFound = 0;
+        const { data: rows } = await supabase
+          .from("subscription_analysis")
+          .select("*, email_data(content,subject,sender)")
+          .eq("scan_id", scan.scan_id)
+          .eq("analysis_status", "pending");
 
-    for (const scan of scans) {
-      console.log(`Processing scan ${scan.scan_id} for user ${scan.user_id}`);
-      
-      if (Date.now() - startTime > maxExecutionTime) {
-        console.log(`Processing timeout reached after ${totalProcessed} scans`);
-        return new Response(JSON.stringify({ 
-          success: true, 
-          message: `Processed ${totalProcessed} scans before timeout`,
-          timeout: true
-        }), { status: 200 });
-      }
-      
-      // Skip if scan is not in analyzing status (should be set by trigger)
-      if (scan.status !== "analyzing") {
-        console.log(`Skipping scan ${scan.scan_id} - status is ${scan.status}, expected analyzing`);
-        continue;
-      }
-      
-      let quotaExhausted = false;
-      let subscriptionsFound = 0;
-      const { data: potentialSubscriptions, error: subscriptionError } = await supabase
-        .from("subscription_analysis")
-        .select("*")
-        .eq("scan_id", scan.scan_id)
-        .eq("analysis_status", "pending");
+        const emails = (rows || []).filter((r) => r.email_data);
+        if (!emails.length) throw new Error("No emails to analyze");
 
-      // If there are *no* pending analyses for this scan after email collection, finish early to avoid getting stuck in "analyzing"
-      if (!subscriptionError && (!potentialSubscriptions || potentialSubscriptions.length === 0)) {
-        console.log(`[gemini-scan] No pending analyses for scan ${scan.scan_id} – marking as completed (0 subscriptions found)`);
-        await supabase.from("scan_history").update({
+        const BATCH = 10;
+        for (let i = 0; i < emails.length; i += BATCH) {
+          const chunk = emails.slice(i, i + BATCH);
+        const results = await analyzeEmailsWithGemini(chunk.map((c) => c.email_data));
+
+          for (let j = 0; j < chunk.length; j++) {
+            const row = chunk[j];
+            const email = row.email_data;
+            const res = results[j] || {} as any;
+
+            // Local post-processing to improve reliability
+            const subject = email?.subject || "";
+            const sender = email?.sender || "";
+            const content = email?.content || "";
+            const combined = `${subject}\n${sender}\n${content}`;
+
+            // Fallback extraction if Gemini omitted price/currency
+            let price: number | null = (typeof res.price === 'number' ? res.price : null);
+            let currency: string | null = res.currency || null;
+            if (price == null) {
+              const { price: p2, currency: c2 } = extractPriceAndCurrency(combined);
+              price = p2;
+              currency = currency || c2;
+            }
+
+            // Derive billing cycle when missing
+            let billing = res.billing_cycle || detectBillingCycle(combined) || "monthly";
+
+            // Strengthen confidence with heuristics
+            const kScore = keywordScore(combined);
+            let confidence = Math.max(Number(res.confidence_score || 0), kScore);
+            if (price && price > 0) confidence = Math.min(1, confidence + 0.25);
+            if (STRONG_TRANSACTIONAL.some(k => (combined.toLowerCase()).includes(k))) confidence = Math.min(1, confidence + 0.1);
+
+            // Service name fallback
+            const subName = res.subscription_name || deriveServiceName(subject, sender) || null;
+
+            // Update analysis row with enriched data
+            await supabase.from("subscription_analysis").update({
+              analysis_status: "completed",
+              subscription_name: subName,
+              price: price ?? 0,
+              currency: currency || 'USD',
+              billing_cycle: billing,
+              confidence_score: confidence,
+              gemini_response: JSON.stringify(res),
+              updated_at: new Date().toISOString()
+            }).eq("id", row.id);
+
+            // Handle cancellations: mark existing subscriptions as canceled
+            if (res.is_cancellation && (res.subscription_name || deriveServiceName(subject, sender))) {
+              const name = res.subscription_name || deriveServiceName(subject, sender);
+              if (name) {
+                const { data: rows } = await supabase
+                  .from("subscriptions")
+                  .select("id")
+                  .eq("user_id", scan.user_id)
+                  .ilike("name", `%${normalize(name)}%`)
+                  .limit(1);
+                if (rows && rows.length) {
+                  await supabase
+                    .from("subscriptions")
+                    .update({ status: 'canceled', status_updated_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+                    .eq("id", rows[0].id);
+                }
+              }
+            }
+
+            // Only create subscription when clearly valid
+            const FINAL_CONFIDENCE_THRESHOLD = 0.7;
+            if (subName && price && price > 0 && confidence >= FINAL_CONFIDENCE_THRESHOLD) {
+              const dup = await supabase
+                .from("subscriptions")
+                .select("id")
+                .eq("user_id", scan.user_id)
+                .ilike("name", `%${normalize(subName)}%`);
+              if (!dup.data?.length) {
+                const { error } = await supabase.from("subscriptions").insert({
+                  user_id: scan.user_id,
+                  name: subName,
+                  price,
+                  currency: currency || "USD",
+                  billing_cycle: billing || "monthly",
+                  provider: subName,
+                  category: "auto-detected",
+                  is_manual: false,
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString()
+                });
+                if (!error) subsFound++;
+              }
+            }
+          }
+          await updateProgress(scan.scan_id, Math.min(i + BATCH, emails.length), emails.length);
+        }
+      } catch (e: any) {
+        errorMsg = String(e?.message || e);
+        console.error("Gemini scan error", scan.scan_id, errorMsg);
+      } finally {
+        const { error: finErr } = await supabase.from("scan_history").update({
           status: "completed",
+          progress: 100,
           completed_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          subscriptions_found: 0
-        }).eq("id", scan.id);
-        totalProcessed++;
-        continue; // move to next scan
-      }
-
-      if (subscriptionError) {
-        console.error(`Failed to fetch potential subscriptions for scan ${scan.scan_id}:`, subscriptionError);
-        await supabase.from("scan_history").update({ 
-          status: "error", 
-          error_message: `Failed to fetch potential subscriptions: ${subscriptionError.message}`,
+          subscriptions_found: subsFound,
+          error_message: errorMsg,
           updated_at: new Date().toISOString()
-        }).eq("id", scan.id);
-        totalErrors++;
-        continue;
-      }
-
-      if (!potentialSubscriptions || potentialSubscriptions.length === 0) {
-        console.log(`No pending analyses found for scan ${scan.scan_id}`);
-        // Do not return/continue here; let the completion update run below
-      } else {
-        console.log(`Found ${potentialSubscriptions.length} pending analyses for scan ${scan.scan_id}`);
-
-        let processedCount = 0;
-        let errorCount = 0;
-        
-        // First, fetch all email data for the pending analyses
-        const emailDataPromises = potentialSubscriptions.map(async (analysis) => {
-            const { data: emailData, error: emailError } = await supabase
-              .from("email_data")
-              .select("content, subject, sender, gmail_message_id")
-              .eq("id", analysis.email_data_id)
-              .single();
-
-          if (emailError || !emailData) {
-          console.error(`Failed to fetch email data for analysis ${analysis.id}:`, emailError);
-          return { analysis, emailData: null, error: emailError };
-          }
-
-        return { analysis, emailData, error: null };
-      });
-      
-      const emailDataResults = await Promise.all(emailDataPromises);
-      
-      // Filter out emails that couldn't be fetched and group by user for batching
-      const validEmails = emailDataResults
-        .filter(result => result.emailData && !result.error)
-        .map(result => ({
-          analysisId: result.analysis.id,
-          emailDataId: result.analysis.email_data_id,
-          content: result.emailData!.content,
-          subject: result.emailData!.subject,
-          sender: result.emailData!.sender,
-          gmailMessageId: result.emailData!.gmail_message_id
-        }));
-      
-      console.log(`Processing ${validEmails.length} valid emails for scan ${scan.scan_id}`);
-      
-      // Process emails in batches of 5 (reasonable batch size for Gemini)
-      const BATCH_SIZE = 5;
-      for (let i = 0; i < validEmails.length; i += BATCH_SIZE) {
-        const batch = validEmails.slice(i, i + BATCH_SIZE);
-        
-        // Check for timeout
-        if (Date.now() - startTime > maxExecutionTime) {
-          console.log(`Processing timeout reached after ${i} emails`);
-          break;
-        }
-        
-        console.log(`Processing batch ${Math.floor(i / BATCH_SIZE) + 1} with ${batch.length} emails for scan ${scan.scan_id}`);
-        
-        const batchEmails = batch.map(email => ({
-          id: email.analysisId,
-          content: email.content,
-          subject: email.subject,
-          sender: email.sender
-        }));
-        
-        const { results: batchResults, error: batchError } = await analyzeEmailsBatchWithGemini(batchEmails);
-        
-        console.log(`Batch analysis result for scan ${scan.scan_id}:`, { 
-          batchResults: batchResults?.length || 0, 
-          batchError 
-        });
-        
-        if (batchError) {
-          // Provide clearer error propagation to the parent scan record so the dashboard can surface it
-          await supabase.from("scan_history").update({
-            status: "error",
-            // Cast batchError to any to safely access message in non-strict Deno environment
-            error_message: typeof batchError === "string" ? batchError : JSON.stringify(batchError as any),
-            updated_at: new Date().toISOString()
-          }).eq("id", scan.id);
-
-          if (typeof batchError === 'object' && batchError.quota_exhausted) {
-              quotaExhausted = true;
-            console.log(`Quota exhausted for scan ${scan.scan_id}`);
-              
-              await supabase.from("scan_history").update({
-                status: "quota_exhausted",
-                error_message: "Gemini API quota exhausted. Analysis will resume when quota resets.",
-                updated_at: new Date().toISOString()
-              }).eq("id", scan.id);
-              
-            // Mark all remaining analyses as pending for quota exhaustion
-            for (const email of batch) {
-              await supabase.from("subscription_analysis").update({
-                analysis_status: 'pending',
-                gemini_response: JSON.stringify({ error: batchError, quota_exhausted: true }),
-                updated_at: new Date().toISOString()
-              }).eq("id", email.analysisId);
-            }
-              
-              break;
-            }
-            
-          // Handle other batch errors
-          console.error(`Batch error for scan ${scan.scan_id}:`, batchError);
-          for (const email of batch) {
-            await supabase.from("subscription_analysis").update({
-              analysis_status: 'failed',
-              gemini_response: JSON.stringify({ error: batchError }),
-              updated_at: new Date().toISOString()
-            }).eq("id", email.analysisId);
-            errorCount++;
-          }
-          continue;
-        }
-
-        if (!batchResults || batchResults.length === 0) {
-          console.log(`No batch results for scan ${scan.scan_id}`);
-          continue;
-        }
-
-        // Process batch results
-        for (let j = 0; j < batch.length; j++) {
-          const email = batch[j];
-          const geminiResult = batchResults[j];
-
-          if (!geminiResult) {
-            console.log(`No result for email ${email.analysisId} in batch`);
-            await supabase.from("subscription_analysis").update({
-              analysis_status: 'failed',
-              gemini_response: JSON.stringify({ error: "No result from batch analysis" }),
-              updated_at: new Date().toISOString()
-            }).eq("id", email.analysisId);
-            errorCount++;
-            continue;
-          }
-
-          if (geminiResult.error) {
-            console.log(`Error in result for email ${email.analysisId}:`, geminiResult.error);
-            await supabase.from("subscription_analysis").update({
-              analysis_status: 'failed',
-              gemini_response: JSON.stringify({ error: geminiResult.error }),
-              updated_at: new Date().toISOString()
-            }).eq("id", email.analysisId);
-            errorCount++;
-            continue;
-          }
-
-          // Update the analysis record
-          const { error: updateError } = await supabase.from("subscription_analysis").update({
-            subscription_name: geminiResult.subscription_name,
-            price: geminiResult.price,
-            currency: geminiResult.currency,
-            billing_cycle: geminiResult.billing_cycle,
-            next_billing_date: geminiResult.next_billing_date,
-            service_provider: geminiResult.service_provider,
-            confidence_score: geminiResult.confidence_score,
-            analysis_status: geminiResult.is_subscription ? 'completed' : 'not_subscription',
-            gemini_response: JSON.stringify(geminiResult),
-            updated_at: new Date().toISOString()
-          }).eq("id", email.analysisId);
-
-          if (updateError) {
-            console.error(`Failed to update analysis for email ${email.analysisId}:`, updateError);
-            errorCount++;
-            continue;
-          }
-
-          console.log(`Processing result for email ${email.analysisId}:`, geminiResult);
-
-          if (geminiResult && geminiResult.is_subscription && geminiResult.subscription_name) {
-            console.log(`Found subscription: ${geminiResult.subscription_name} with price ${geminiResult.price} ${geminiResult.currency}`);
-            
-            const normalizedServiceName = normalizeServiceName(geminiResult.subscription_name);
-            
-            // Check for existing subscriptions by normalized name AND price
-            const { data: existingSubscriptions, error: checkError } = await supabase
-              .from("subscriptions")
-              .select("name, price")
-              .eq("user_id", scan.user_id);
-            
-            const alreadyExists =
-              !checkError &&
-              existingSubscriptions &&
-              existingSubscriptions.some(sub =>
-                normalizeServiceName(sub.name) === normalizedServiceName &&
-                Number(sub.price) === Number(geminiResult.price)
-              );
-            
-            if (alreadyExists) {
-              console.log(`Subscription ${geminiResult.subscription_name} at price ${geminiResult.price} already exists for user ${scan.user_id}, skipping`);
-              processedCount++;
-              continue;
-            }
-            
-            console.log(`Attempting to insert subscription: ${geminiResult.subscription_name} for user ${scan.user_id}`);
-            
-            const { error: subscriptionError } = await supabase.from("subscriptions").insert({
-              user_id: scan.user_id,
-              name: geminiResult.subscription_name,
-              price: geminiResult.price || 0,
-              currency: geminiResult.currency || 'USD',
-              billing_cycle: geminiResult.billing_cycle || 'monthly',
-              next_billing_date: geminiResult.next_billing_date,
-              provider: geminiResult.service_provider,
-              category: 'auto-detected',
-              email_id: email.gmailMessageId,
-              is_manual: false,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            });
-
-            if (subscriptionError) {
-              console.error(`Failed to insert subscription for user ${scan.user_id}:`, subscriptionError);
-              errorCount++;
-              continue;
-            }
-
-            console.log(`Successfully inserted subscription: ${geminiResult.subscription_name} for user ${scan.user_id}`);
-            subscriptionsFound++;
-            processedCount++;
-          } else {
-            console.log(`Email ${email.analysisId} is not a subscription`);
-            processedCount++;
-          }
-        }
-        
-        // Add a small delay between batches to be respectful to the API
-        if (i + BATCH_SIZE < validEmails.length) {
-          await new Promise(resolve => setTimeout(resolve, 2000));
-        }
-      }
-      }
-
-      // Always attempt to mark scan as completed unless quota exhausted
-      if (!quotaExhausted) {
-        console.log(`Attempting to mark scan ${scan.scan_id} as completed`);
-        const { error: completionError } = await supabase.from("scan_history").update({ 
-          status: "completed", 
-          completed_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          subscriptions_found: subscriptionsFound
-        }).eq("id", scan.id);
-        if (completionError) {
-          console.error(`Failed to update scan completion for ${scan.scan_id}:`, completionError);
-          totalErrors++;
-        } else {
-          console.log(`Scan ${scan.scan_id} successfully marked as completed`);
-          totalProcessed++;
-          totalSubscriptionsFound += subscriptionsFound;
-        }
-      } else {
-        console.log(`Quota exhausted for scan ${scan.scan_id}, not marking as completed`);
+        }).eq("scan_id", scan.scan_id).eq("user_id", scan.user_id);
+        if (finErr) console.error("Failed final update", finErr.message);
       }
     }
 
-    console.log(`All scans processed: ${totalProcessed} successful, ${totalErrors} errors, ${totalSubscriptionsFound} total subscriptions found`);
-
-    return new Response(JSON.stringify({ 
-      success: true, 
-      message: `Processed ${totalProcessed} scans successfully, ${totalErrors} errors, ${totalSubscriptionsFound} subscriptions found` 
-    }), { status: 200 });
-    
-  } catch (error) {
-    console.error("Unexpected error in Edge Function:", error);
-    return new Response(JSON.stringify({ 
-      error: "Unexpected error", 
-      details: error.message 
-    }), { status: 500 });
+    return new Response(JSON.stringify({ success: true }), { status: 200 });
+  } catch (e: any) {
+    console.error("Edge-function fatal", e);
+    return new Response(JSON.stringify({ error: e.message }), { status: 500 });
   }
 });

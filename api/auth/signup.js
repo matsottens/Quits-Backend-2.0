@@ -102,7 +102,8 @@ export default async function handler(req, res) {
     const tokenPayload = {
       id: user.id,
       email: user.email,
-      name: user.name
+      name: user.name,
+      ...(user.gmail_access_token ? { gmail_token: user.gmail_access_token } : {})
     };
     const token = jwt.sign(
       tokenPayload,

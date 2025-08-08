@@ -56,6 +56,13 @@ let schemaEnsured = false;
 async function ensureUserTableSchema() {
   if (schemaEnsured) return;
 
+  // Skip schema ensure for now - columns should already exist
+  // This prevents the exec_sql RPC error
+  console.log('[google-proxy] Skipping schema ensure - assuming columns exist');
+  schemaEnsured = true;
+  return;
+
+  /* DISABLED - causing exec_sql RPC error
   const sql = `\nALTER TABLE public.users\n  ADD COLUMN IF NOT EXISTS linked_accounts TEXT[],\n  ADD COLUMN IF NOT EXISTS google_id TEXT UNIQUE,\n  ADD COLUMN IF NOT EXISTS gmail_refresh_token TEXT,\n  ADD COLUMN IF NOT EXISTS gmail_access_token TEXT,\n  ADD COLUMN IF NOT EXISTS gmail_token_expires_at TIMESTAMP WITH TIME ZONE;\n`;
 
   try {
@@ -80,6 +87,7 @@ async function ensureUserTableSchema() {
   } catch (err) {
     console.error('[google-proxy] Failed to ensure user table schema', err);
   }
+  */
 }
 
 export default async function handler(req, res) {

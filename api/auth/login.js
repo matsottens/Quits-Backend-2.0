@@ -44,15 +44,19 @@ export default async function handler(req, res) {
     const supabase = getSupabaseClient();
     const { data: user, error } = await supabase
       .from('users')
-      .select('id, email, name, password_hash')
+      // Also fetch any existing Gmail access-token so we can embed it in the JWT
+      .select('id, email, name, password_hash, gmail_access_token')
       .eq('email', email)
       .single();
 
-    // If Supabase returned an error (e.g., table missing) treat as 500 so we can surface the underlying problem in the client
+    // If Supabase returned an error, distinguish "no rows" from real DB errors
     if (error) {
+      if (error.code === 'PGRST116') {
+        // No user with this email
+        return res.status(401).json({ error: 'Invalid email or password' });
+      }
       console.error('[login] Database error fetching user:', error);
-      res.status(500).json({ error: 'Database error retrieving user', details: error.message });
-      return;
+      return res.status(500).json({ error: 'Database error retrieving user', details: error.message });
     }
 
     if (!user) {
@@ -79,7 +83,10 @@ export default async function handler(req, res) {
     const tokenPayload = {
       id: user.id,
       email: user.email,
-      name: user.name
+      name: user.name,
+      // If the account has a Gmail token stored, embed it so the /email/scan
+      // endpoint can use it immediately without another DB lookup.
+      ...(user.gmail_access_token ? { gmail_token: user.gmail_access_token } : {})
     };
     const token = jwt.sign(
       tokenPayload,
