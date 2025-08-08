@@ -324,6 +324,7 @@ const processEmailsForSubscriptions = async (emails, subscriptionExamples, gmail
   console.log(`SCAN-DEBUG: Processing ${emails.length} emails`);
   
   const subscriptionEmails = [];
+  const candidateEmails = []; // Fallback candidates when pattern matching finds nothing
   let processedCount = 0;
   let uniqueEmailsProcessed = 0;
   
@@ -413,6 +414,18 @@ const processEmailsForSubscriptions = async (emails, subscriptionExamples, gmail
         });
         // Track normalized name locally to avoid enqueuing duplicates in this pass
         existingSubscriptions.push(normalizedServiceName);
+      } else {
+        // Collect a limited set of fallback candidates for AI analysis
+        if (candidateEmails.length < 25) {
+          candidateEmails.push({
+            messageId,
+            subject: parsedHeaders.subject,
+            from: parsedHeaders.from,
+            date: parsedHeaders.date,
+            emailBody,
+            analysis: null
+          });
+        }
       }
       
       processedCount++;
@@ -424,8 +437,8 @@ const processEmailsForSubscriptions = async (emails, subscriptionExamples, gmail
     }
   }
   
-  console.log(`SCAN-DEBUG: Processed ${processedCount} emails, found ${subscriptionEmails.length} subscriptions`);
-  return { subscriptionEmails, processedCount };
+  console.log(`SCAN-DEBUG: Processed ${processedCount} emails, found ${subscriptionEmails.length} subscriptions, collected ${candidateEmails.length} fallback candidates`);
+  return { subscriptionEmails, candidateEmails, processedCount };
 };
 
 // Helper function to store email data
@@ -486,13 +499,13 @@ const createSubscriptionAnalysisRecords = async (subscriptionEmails, scanId, use
         email_data_id: email.emailDataId,
         user_id: userId,
         scan_id: scanId,
-        subscription_name: email.analysis.serviceName,
-        price: email.analysis.amount || 0,
-        currency: email.analysis.currency || 'USD',
-        billing_cycle: email.analysis.billingFrequency || 'monthly',
-        next_billing_date: email.analysis.nextBillingDate,
-        service_provider: email.analysis.serviceName,
-        confidence_score: email.analysis.confidence,
+        subscription_name: email.analysis?.serviceName || null,
+        price: email.analysis?.amount || null,
+        currency: email.analysis?.currency || null,
+        billing_cycle: email.analysis?.billingFrequency || null,
+        next_billing_date: email.analysis?.nextBillingDate || null,
+        service_provider: email.analysis?.serviceName || null,
+        confidence_score: email.analysis?.confidence || null,
         analysis_status: 'pending',
         gemini_response: null,
         created_at: new Date().toISOString(),
@@ -1761,7 +1774,7 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
     
     console.log('SCAN-DEBUG: About to process emails for subscriptions...');
     // Process emails to find subscriptions (this now includes storing data and creating analysis records)
-    const { subscriptionEmails, processedCount } = await processEmailsForSubscriptions(
+    const { subscriptionEmails, candidateEmails, processedCount } = await processEmailsForSubscriptions(
       emails, 
       subscriptionExamples, 
       gmailToken, 
@@ -1788,6 +1801,15 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
         await createSubscriptionAnalysisRecords(subscriptionEmails, scanId, userId);
       } catch (persistError) {
         console.error('SCAN-DEBUG: Failed to persist email/analysis records:', persistError);
+      }
+    }
+    // If no pattern matches, persist a small set of candidates for AI to analyze anyway
+    if (subscriptionEmails.length === 0 && candidateEmails.length > 0) {
+      try {
+        await storeEmailData(candidateEmails, scanId, userId);
+        await createSubscriptionAnalysisRecords(candidateEmails, scanId, userId);
+      } catch (persistError) {
+        console.error('SCAN-DEBUG: Failed to persist fallback candidate records:', persistError);
       }
     }
     
@@ -2127,7 +2149,7 @@ export default async function handler(req, res) {
       
       console.log('SCAN-DEBUG: About to process emails for subscriptions...');
       // Process emails to find subscriptions (this now includes storing data and creating analysis records)
-      const { subscriptionEmails, processedCount } = await processEmailsForSubscriptions(
+      const { subscriptionEmails, candidateEmails, processedCount } = await processEmailsForSubscriptions(
         emails, 
         subscriptionExamples, 
         gmailToken, 
@@ -2157,6 +2179,15 @@ export default async function handler(req, res) {
           await createSubscriptionAnalysisRecords(subscriptionEmails, scanId, dbUserId);
         } catch (persistError) {
           console.error('SCAN-DEBUG: Failed to persist email/analysis records:', persistError);
+        }
+      }
+      // If no pattern matches, persist a small set of candidates for AI to analyze anyway
+      if (subscriptionEmails.length === 0 && candidateEmails.length > 0) {
+        try {
+          await storeEmailData(candidateEmails, scanId, dbUserId);
+          await createSubscriptionAnalysisRecords(candidateEmails, scanId, dbUserId);
+        } catch (persistError) {
+          console.error('SCAN-DEBUG: Failed to persist fallback candidate records:', persistError);
         }
       }
       
