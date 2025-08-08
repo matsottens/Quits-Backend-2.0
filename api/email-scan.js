@@ -410,7 +410,8 @@ const processEmailsForSubscriptions = async (emails, subscriptionExamples, gmail
             .insert({
           user_id: userId,
               name: analysis.serviceName,
-              price: analysis.monthlyPrice || 0,
+              // Use the detected amount; monthlyPrice may be undefined in pattern matcher
+              price: (typeof analysis.amount === 'number' ? analysis.amount : 0),
           currency: analysis.currency || 'USD',
           billing_cycle: analysis.billingFrequency || 'monthly',
               provider: analysis.serviceName,
@@ -1811,10 +1812,10 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
     });
     
     if (subscriptionEmails.length === 0) {
-      console.log('SCAN-DEBUG: No subscriptions found, but still need Gemini analysis');
+      console.log('SCAN-DEBUG: No subscriptions found during pattern matching');
       await updateScanStatus(scanId, userId, {
-        status: 'ready_for_analysis',
-        progress: 60,
+        status: emails.length === 0 ? 'completed' : 'ready_for_analysis',
+        progress: emails.length === 0 ? 100 : 70,
         updated_at: new Date().toISOString()
       });
     } else {
@@ -1826,7 +1827,7 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
       // The Gemini function is responsible for setting the final 'completed' status.
         await updateScanStatus(scanId, dbUserId, {
         status: 'ready_for_analysis',
-        progress: 60, // Set progress to the start of the analysis phase
+        progress: 70, // Set progress to analysis phase
           updated_at: new Date().toISOString()
         });
       
@@ -2170,12 +2171,21 @@ export default async function handler(req, res) {
       });
       
       if (subscriptionEmails.length === 0) {
-        console.log('SCAN-DEBUG: No subscriptions found, but still need Gemini analysis');
-        await updateScanStatus(scanId, dbUserId, {
-          status: 'ready_for_analysis',
-          progress: 60,
-          updated_at: new Date().toISOString()
-        });
+        console.log('SCAN-DEBUG: No subscriptions found during pattern matching');
+        // If no sub emails and also zero emails overall, we can complete early.
+        if (emails.length === 0) {
+          await updateScanStatus(scanId, dbUserId, {
+            status: 'completed',
+            progress: 100,
+            updated_at: new Date().toISOString()
+          });
+        } else {
+          await updateScanStatus(scanId, dbUserId, {
+            status: 'ready_for_analysis',
+            progress: 70,
+            updated_at: new Date().toISOString()
+          });
+        }
       } else {
         console.log('SCAN-DEBUG: Email processing completed successfully');
         console.log('SCAN-DEBUG: Pattern matching detected subscriptions successfully!');
@@ -2185,7 +2195,7 @@ export default async function handler(req, res) {
         // The Gemini function is responsible for setting the final 'completed' status.
         await updateScanStatus(scanId, dbUserId, {
           status: 'ready_for_analysis',
-          progress: 60, // Set progress to the start of the analysis phase
+          progress: 70, // Move to 70 to signal AI phase explicitly
           updated_at: new Date().toISOString()
         });
         

@@ -10,17 +10,90 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 const normalize = (s: string) =>
   (s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
 
+// Heuristics and helpers for robust scoring and extraction
+const SUBSCRIPTION_KEYWORDS = [
+  "subscription", "subscribed", "your plan", "membership", "renewal", "auto-renew",
+  "billed", "billing", "payment", "receipt", "invoice", "charged", "charge",
+  "trial", "trial ended", "will renew", "has been renewed"
+];
+
+const STRONG_TRANSACTIONAL = ["receipt", "invoice", "payment", "charged", "subscription"];
+
+const CURRENCY_SIGNS: Record<string, RegExp> = {
+  USD: /(?:\$)\s?(\d{1,4}(?:[.,]\d{2})?)/,
+  EUR: /(?:€)\s?(\d{1,4}(?:[.,]\d{2})?)/,
+  GBP: /(?:£)\s?(\d{1,4}(?:[.,]\d{2})?)/
+};
+
+const EXPLICIT_CURRENCY: Array<{ code: string; re: RegExp }> = [
+  { code: "USD", re: /(\d{1,4}(?:[.,]\d{2})?)\s?(?:usd|dollars?)/i },
+  { code: "EUR", re: /(\d{1,4}(?:[.,]\d{2})?)\s?(?:eur|euros?)/i },
+  { code: "GBP", re: /(\d{1,4}(?:[.,]\d{2})?)\s?(?:gbp|pounds?)/i }
+];
+
+function extractPriceAndCurrency(text: string): { price: number | null; currency: string | null } {
+  const t = text || "";
+  for (const [code, re] of Object.entries(CURRENCY_SIGNS)) {
+    const m = t.match(re);
+    if (m && m[1]) return { price: Number(m[1].replace(',', '.')), currency: code };
+  }
+  for (const { code, re } of EXPLICIT_CURRENCY) {
+    const m = t.match(re);
+    if (m && m[1]) return { price: Number(m[1].replace(',', '.')), currency: code };
+  }
+  return { price: null, currency: null };
+}
+
+function detectBillingCycle(text: string): string | null {
+  const t = (text || "").toLowerCase();
+  if (/(monthly|per month|\/month)/i.test(t)) return "monthly";
+  if (/(yearly|annual|per year|\/year)/i.test(t)) return "yearly";
+  if (/(weekly|per week|\/week)/i.test(t)) return "weekly";
+  if (/(quarterly|per quarter)/i.test(t)) return "quarterly";
+  return null;
+}
+
+function keywordScore(text: string): number {
+  const t = (text || "").toLowerCase();
+  let score = 0;
+  for (const k of SUBSCRIPTION_KEYWORDS) if (t.includes(k)) score += 0.05; // cap later
+  for (const k of STRONG_TRANSACTIONAL) if (t.includes(k)) score += 0.1;
+  return Math.min(score, 0.6);
+}
+
+function deriveServiceName(subject: string, sender: string): string | null {
+  const fromDomain = (sender || '').match(/@([\w.-]+)/);
+  if (fromDomain && fromDomain[1]) {
+    const dom = fromDomain[1].split('.')[0];
+    if (dom && !['gmail','yahoo','hotmail','outlook','mail','noreply','no-reply'].includes(dom)) {
+      return dom.charAt(0).toUpperCase() + dom.slice(1);
+    }
+  }
+  const s = (subject || '').split(/\s+/).find(w => w && w.length > 2);
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : null;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Gemini helper                                                               */
 /* -------------------------------------------------------------------------- */
 async function analyzeEmailsWithGemini(emails: any[]) {
-  const systemPrompt = `You are an expert financial assistant. Analyze the following email contents to identify commercial subscriptions.
-For each email, return a single JSON object. Your response for all emails MUST be a valid JSON array of these objects.
-
-The JSON object for each email MUST have this exact structure:
-{ "is_subscription": boolean, "subscription_name": string | null, "price": number, "currency": string, "billing_cycle": string, "confidence_score": number }
-
-Use 0 price for trials or if price not found. Default currency: USD, billing_cycle: monthly.`;
+  const systemPrompt = `You are an expert financial assistant. Analyze the following emails to identify paid subscription transactions and explicit cancellations (not newsletters or ads).
+Return a JSON array. Each element MUST be an object with EXACTLY these keys:
+{
+  "is_subscription": boolean,
+  "subscription_name": string | null,
+  "price": number | null,
+  "currency": string | null,
+  "billing_cycle": "monthly" | "yearly" | "weekly" | "quarterly" | null,
+  "confidence_score": number,  // 0.0 to 1.0 reflecting likelihood this is a subscription charge
+  "is_cancellation": boolean  // true if the email explicitly confirms cancellation/termination of a subscription
+}
+Rules:
+- Prefer actual charge/receipt/renewal confirmations over marketing.
+- If price is not explicitly stated, use null (do NOT invent 0).
+- Only set is_subscription true if the email clearly indicates a subscription payment, renewal, or plan details.
+- Set is_cancellation true only for explicit cancellation confirmations (e.g., "Your subscription has been canceled").
+`;
 
   const combined = emails.map((e, i) => `EMAIL ${i + 1}:\nSubject: ${e.subject}\nFrom: ${e.sender}\nContent: ${e.content.slice(0, 3000)}`).join("\n\n");
 
@@ -92,25 +165,87 @@ serve(async (req) => {
         const BATCH = 10;
         for (let i = 0; i < emails.length; i += BATCH) {
           const chunk = emails.slice(i, i + BATCH);
-          const results = await analyzeEmailsWithGemini(chunk.map((c) => c.email_data));
+        const results = await analyzeEmailsWithGemini(chunk.map((c) => c.email_data));
 
           for (let j = 0; j < chunk.length; j++) {
             const row = chunk[j];
-            const res = results[j] || {};
+            const email = row.email_data;
+            const res = results[j] || {} as any;
 
-            await supabase.from("subscription_analysis").update({ analysis_status: "completed", gemini_response: JSON.stringify(res), updated_at: new Date().toISOString() }).eq("id", row.id);
+            // Local post-processing to improve reliability
+            const subject = email?.subject || "";
+            const sender = email?.sender || "";
+            const content = email?.content || "";
+            const combined = `${subject}\n${sender}\n${content}`;
 
-            const price = Number(res.price);
-            if (res.is_subscription && res.subscription_name && price > 0) {
-              const dup = await supabase.from("subscriptions").select("id").eq("user_id", scan.user_id).ilike("name", `%${normalize(res.subscription_name)}%`);
+            // Fallback extraction if Gemini omitted price/currency
+            let price: number | null = (typeof res.price === 'number' ? res.price : null);
+            let currency: string | null = res.currency || null;
+            if (price == null) {
+              const { price: p2, currency: c2 } = extractPriceAndCurrency(combined);
+              price = p2;
+              currency = currency || c2;
+            }
+
+            // Derive billing cycle when missing
+            let billing = res.billing_cycle || detectBillingCycle(combined) || "monthly";
+
+            // Strengthen confidence with heuristics
+            const kScore = keywordScore(combined);
+            let confidence = Math.max(Number(res.confidence_score || 0), kScore);
+            if (price && price > 0) confidence = Math.min(1, confidence + 0.25);
+            if (STRONG_TRANSACTIONAL.some(k => (combined.toLowerCase()).includes(k))) confidence = Math.min(1, confidence + 0.1);
+
+            // Service name fallback
+            const subName = res.subscription_name || deriveServiceName(subject, sender) || null;
+
+            // Update analysis row with enriched data
+            await supabase.from("subscription_analysis").update({
+              analysis_status: "completed",
+              subscription_name: subName,
+              price: price ?? 0,
+              currency: currency || 'USD',
+              billing_cycle: billing,
+              confidence_score: confidence,
+              gemini_response: JSON.stringify(res),
+              updated_at: new Date().toISOString()
+            }).eq("id", row.id);
+
+            // Handle cancellations: mark existing subscriptions as canceled
+            if (res.is_cancellation && (res.subscription_name || deriveServiceName(subject, sender))) {
+              const name = res.subscription_name || deriveServiceName(subject, sender);
+              if (name) {
+                const { data: rows } = await supabase
+                  .from("subscriptions")
+                  .select("id")
+                  .eq("user_id", scan.user_id)
+                  .ilike("name", `%${normalize(name)}%`)
+                  .limit(1);
+                if (rows && rows.length) {
+                  await supabase
+                    .from("subscriptions")
+                    .update({ status: 'canceled', status_updated_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+                    .eq("id", rows[0].id);
+                }
+              }
+            }
+
+            // Only create subscription when clearly valid
+            const FINAL_CONFIDENCE_THRESHOLD = 0.7;
+            if (subName && price && price > 0 && confidence >= FINAL_CONFIDENCE_THRESHOLD) {
+              const dup = await supabase
+                .from("subscriptions")
+                .select("id")
+                .eq("user_id", scan.user_id)
+                .ilike("name", `%${normalize(subName)}%`);
               if (!dup.data?.length) {
                 const { error } = await supabase.from("subscriptions").insert({
                   user_id: scan.user_id,
-                  name: res.subscription_name,
+                  name: subName,
                   price,
-                  currency: res.currency || "USD",
-                  billing_cycle: res.billing_cycle || "monthly",
-                  provider: res.subscription_name,
+                  currency: currency || "USD",
+                  billing_cycle: billing || "monthly",
+                  provider: subName,
                   category: "auto-detected",
                   is_manual: false,
                   created_at: new Date().toISOString(),
