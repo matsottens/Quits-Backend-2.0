@@ -353,6 +353,8 @@ const processEmailsForSubscriptions = async (emails, subscriptionExamples, gmail
     console.error('SCAN-DEBUG: Error loading existing subscriptions:', error);
   }
   
+  let lastProgressUpdateTime = 0;
+  const updateEveryNEmails = 5;
   for (let i = 0; i < emails.length; i++) {
     const message = emails[i];
     const messageId = message.id || message;
@@ -360,11 +362,15 @@ const processEmailsForSubscriptions = async (emails, subscriptionExamples, gmail
     try {
       console.log(`SCAN-DEBUG: Processing email ${i + 1}/${emails.length}`);
       
-      // Update progress
-      await updateScanStatus(scanId, userId, {
-        progress: 30 + Math.round((i / emails.length) * 40),
-        emails_processed: i
-      });
+      // Throttle progress updates to avoid network timeouts
+      const shouldUpdateProgress = (i % updateEveryNEmails === 0) || (Date.now() - lastProgressUpdateTime > 2000) || i === emails.length - 1;
+      if (shouldUpdateProgress) {
+        await updateScanStatus(scanId, userId, {
+          progress: 30 + Math.round((i / emails.length) * 40),
+          emails_processed: i
+        });
+        lastProgressUpdateTime = Date.now();
+      }
       
       console.log(`SCAN-DEBUG: Fetching content for email ${messageId}`);
       console.log(`SCAN-DEBUG: Fetching content for email ID: ${messageId}`);

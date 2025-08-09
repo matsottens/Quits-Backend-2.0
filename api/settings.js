@@ -37,11 +37,21 @@ export default async function handler(req, res) {
         .from('users')
         .select('email, linked_accounts, scan_frequency')
         .eq('id', userId)
-        .single();
+        .maybeSingle();
 
       if (error) {
         console.error('Settings API: Database query error:', error);
         throw error;
+      }
+
+      if (!data) {
+        console.log('Settings API: No user row found; returning defaults');
+        return res.status(200).json({
+          email: {
+            accounts: [],
+            scanFrequency: 'manual'
+          }
+        });
       }
 
       console.log('Settings API: Raw database data:', data);
