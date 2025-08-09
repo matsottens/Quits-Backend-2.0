@@ -88,35 +88,8 @@ export default async function handler(req, res) {
       dbUserId = users[0].id;
       console.log(`MANUAL-SUB: Found existing user with ID: ${dbUserId}`);
     } else {
-      // Create a new user if not found
-      const createUserResponse = await fetch(
-        `${supabaseUrl}/rest/v1/users`, 
-        {
-          method: 'POST',
-          headers: {
-            'apikey': supabaseKey,
-            'Authorization': `Bearer ${supabaseKey}`,
-            'Content-Type': 'application/json',
-            'Prefer': 'return=representation'
-          },
-          body: JSON.stringify({
-            email: decoded.email,
-            google_id: userId,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          })
-        }
-      );
-
-      if (!createUserResponse.ok) {
-        const errorText = await createUserResponse.text();
-        console.error('MANUAL-SUB: User creation failed:', errorText);
-        return res.status(500).json({ error: 'user_creation_failed', message: 'Failed to create user', details: errorText });
-      }
-
-      const newUser = await createUserResponse.json();
-      dbUserId = newUser[0].id;
-      console.log(`MANUAL-SUB: Created new user with ID: ${dbUserId}`);
+      console.log('MANUAL-SUB: User not found; returning user_not_found to prevent duplicates');
+      return res.status(404).json({ error: 'user_not_found', message: 'User not found. Please re-authenticate.' });
     }
 
     // Parse subscription data from request body

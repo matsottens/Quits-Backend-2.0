@@ -1393,72 +1393,20 @@ const createScanRecord = async (req, userId, decoded) => {
     const isScheduledScan = req.body.scheduled === true;
     const scheduledScanId = req.headers['x-scan-id'];
 
-    // Look up the user using consistent logic across all endpoints
-    // First, try by email (most reliable identifier)
-    const { data: users, error: userError } = await supabaseAdmin
+    // Authoritative user comes from JWT (Supabase UUID)
+    // Verify the user exists; do not create here to avoid duplicates
+    const { data: existingUser, error: fetchUserErr } = await supabaseAdmin
       .from('users')
-      .select('id, email, google_id')
-      .eq('email', userEmail);
+      .select('id')
+      .eq('id', userId)
+      .single();
 
-    if (userError) {
-      console.error('SCAN-DEBUG: User lookup failed:', userError.message);
-      throw new Error(`User lookup failed: ${userError.message}`);
+    if (fetchUserErr || !existingUser) {
+      throw new Error('Authenticated user not found. Please re-authenticate.');
     }
-    
-    // Create a new user if not found
-    let dbUserId;
-    if (!users || users.length === 0) {
-      console.log(`SCAN-DEBUG: User not found in database, creating new user for: ${userEmail}`);
-      
-      // DON'T set explicit ID - let database auto-generate to avoid conflicts
-      const { data: newUser, error: createUserError } = await supabaseAdmin
-        .from('users')
-        .insert({
-          email: userEmail,
-          google_id: userId, // Store the JWT user ID as google_id for reference
-          name: decoded.name || userEmail.split('@')[0],
-          avatar_url: decoded.picture || null,
-        })
-        .select('id')
-        .single();
-      
-      if (createUserError) {
-        console.error('SCAN-DEBUG: Failed to create user:', createUserError.message);
-        // Check if it's a unique constraint violation (user created by another request)
-        if (createUserError.code === '23505') {
-          console.log('SCAN-DEBUG: User was created by concurrent request, looking up again...');
-          const { data: retryUsers, error: retryError } = await supabaseAdmin
-            .from('users')
-            .select('id, email, google_id')
-            .eq('email', userEmail)
-            .single();
-          
-          if (retryError) {
-            throw new Error(`Failed to lookup user after concurrent creation: ${retryError.message}`);
-          }
-          
-          dbUserId = retryUsers.id;
-          console.log(`SCAN-DEBUG: Found user created concurrently with ID: ${dbUserId}`);
-        } else {
-          throw new Error(`Failed to create user: ${createUserError.message}`);
-        }
-      } else {
-        dbUserId = newUser.id;
-        console.log(`SCAN-DEBUG: Created new user with ID: ${dbUserId}`);
-      }
-    } else {
-      dbUserId = users[0].id;
-      console.log(`SCAN-DEBUG: Found existing user with ID: ${dbUserId}`);
-      
-      // Update google_id if it's missing (for legacy users)
-      if (!users[0].google_id && userId) {
-        console.log('SCAN-DEBUG: Updating missing google_id for existing user');
-        await supabaseAdmin
-          .from('users')
-          .update({ google_id: userId })
-          .eq('id', dbUserId);
-      }
-    }
+
+    const dbUserId = existingUser.id;
+    console.log(`SCAN-DEBUG: Using authenticated user ID: ${dbUserId}`);
     
     // Check if there's already an active scan for this user within the last 5 minutes
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
