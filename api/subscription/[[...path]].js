@@ -191,30 +191,91 @@ export default async function handler(req, res) {
             console.log(`[PATH] Fetching subscription ${subscriptionId} for user ${dbUserId}`);
             
             try {
-              const response = await fetch(
-                `${supabaseUrl}/rest/v1/subscriptions?id=eq.${subscriptionId}&user_id=eq.${dbUserId}&select=*`, 
-                {
-                  method: 'GET',
-                  headers: {
-                    'apikey': supabaseKey,
-                    'Authorization': `Bearer ${supabaseKey}`,
-                    'Content-Type': 'application/json'
+              // Check if this is an analysis-based subscription ID (analysis_<uuid>)
+              if (subscriptionId.startsWith('analysis_')) {
+                const analysisId = subscriptionId.replace('analysis_', '');
+                console.log(`[PATH] Fetching analysis subscription with ID: ${analysisId}`);
+                
+                const response = await fetch(
+                  `${supabaseUrl}/rest/v1/subscription_analysis?id=eq.${analysisId}&user_id=eq.${dbUserId}&select=*`, 
+                  {
+                    method: 'GET',
+                    headers: {
+                      'apikey': supabaseKey,
+                      'Authorization': `Bearer ${supabaseKey}`,
+                      'Content-Type': 'application/json'
+                    }
                   }
+                );
+                
+                if (!response.ok) {
+                  const errorText = await response.text();
+                  throw new Error(`Supabase API error: ${response.status} - ${errorText}`);
                 }
-              );
-              
-              if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`Supabase API error: ${response.status} - ${errorText}`);
-              }
-              
-              const subscriptions = await response.json();
-              
-              if (!subscriptions || subscriptions.length === 0) {
-                return res.status(404).json({ 
-                  error: 'not_found', 
-                  message: 'Subscription not found' 
+                
+                const analysisData = await response.json();
+                
+                if (!analysisData || analysisData.length === 0) {
+                  return res.status(404).json({ 
+                    error: 'not_found', 
+                    message: 'Analysis subscription not found' 
+                  });
+                }
+                
+                // Format as subscription-like object
+                const data = analysisData[0];
+                const formattedSubscription = {
+                  id: subscriptionId,
+                  name: data.subscription_name,
+                  price: parseFloat(data.price || 0),
+                  currency: data.currency || 'USD',
+                  billing_cycle: data.billing_cycle || 'monthly',
+                  billingCycle: data.billing_cycle || 'monthly',
+                  next_billing_date: data.next_billing_date,
+                  nextBillingDate: data.next_billing_date,
+                  category: 'auto-detected',
+                  is_manual: false,
+                  source_analysis_id: data.id,
+                  service_provider: data.service_provider,
+                  confidence_score: data.confidence_score,
+                  analysis_status: data.analysis_status,
+                  created_at: data.created_at,
+                  updated_at: data.updated_at,
+                  createdAt: data.created_at,
+                  updatedAt: data.updated_at
+                };
+                
+                return res.status(200).json({
+                  success: true,
+                  subscription: formattedSubscription
                 });
+              } else {
+                // Regular subscription fetch
+                const response = await fetch(
+                  `${supabaseUrl}/rest/v1/subscriptions?id=eq.${subscriptionId}&user_id=eq.${dbUserId}&select=*`, 
+                  {
+                    method: 'GET',
+                    headers: {
+                      'apikey': supabaseKey,
+                      'Authorization': `Bearer ${supabaseKey}`,
+                      'Content-Type': 'application/json'
+                    }
+                  }
+                );
+                
+                if (!response.ok) {
+                  const errorText = await response.text();
+                  throw new Error(`Supabase API error: ${response.status} - ${errorText}`);
+                }
+                
+                const subscriptions = await response.json();
+                
+                if (!subscriptions || subscriptions.length === 0) {
+                  return res.status(404).json({ 
+                    error: 'not_found', 
+                    message: 'Subscription not found' 
+                  });
+                }
               }
               
               // Format the subscription data – keep DB column names intact
@@ -367,7 +428,8 @@ export default async function handler(req, res) {
                     next_billing_date: analysis.next_billing_date,
                     category: 'auto-detected',
                     is_manual: false,
-                    is_pending: analysis.analysis_status !== 'completed',
+                    is_pending: false, // Not pending since we only fetch completed analysis
+                    analysis_status: 'completed', // Always completed since we only fetch completed analysis
                     source_analysis_id: analysis.id,
                     service_provider: analysis.service_provider,
                     confidence_score: analysis.confidence_score,

@@ -163,24 +163,66 @@ export default async function handler(req, res) {
         // After user lookup/creation, handle the actual API request method (GET, PUT, POST, DELETE)
         if (req.method === 'GET') {
           if (isSpecificSubscription) {
-            // Fetch specific subscription
-            const { data, error } = await supabase
-              .from('subscriptions')
-              .select('*')
-              .eq('id', subscriptionId)
-              .eq('user_id', dbUserId) // Ensure user can only access their own subscriptions
-              .single();
+            // Check if this is an analysis-based subscription ID (analysis_<uuid>)
+            if (subscriptionId.startsWith('analysis_')) {
+              const analysisId = subscriptionId.replace('analysis_', '');
+              console.log(`[PATH] Fetching analysis subscription with ID: ${analysisId}`);
+              
+              const { data, error } = await supabase
+                .from('subscription_analysis')
+                .select('*')
+                .eq('id', analysisId)
+                .eq('user_id', dbUserId)
+                .single();
 
-            if (error) {
-              console.error(`[PATH] Error fetching subscription ${subscriptionId}:`, error);
-              return res.status(500).json({ error: 'Failed to fetch subscription' });
+              if (error) {
+                console.error(`[PATH] Error fetching analysis subscription ${analysisId}:`, error);
+                return res.status(500).json({ error: 'Failed to fetch analysis subscription' });
+              }
+
+              if (!data) {
+                return res.status(404).json({ error: `Analysis subscription with ID ${subscriptionId} not found` });
+              }
+
+              // Format as subscription-like object
+              const formattedSubscription = {
+                id: subscriptionId,
+                name: data.subscription_name,
+                price: parseFloat(data.price || 0),
+                currency: data.currency || 'USD',
+                billing_cycle: data.billing_cycle || 'monthly',
+                next_billing_date: data.next_billing_date,
+                category: 'auto-detected',
+                is_manual: false,
+                source_analysis_id: data.id,
+                service_provider: data.service_provider,
+                confidence_score: data.confidence_score,
+                analysis_status: data.analysis_status,
+                created_at: data.created_at,
+                updated_at: data.updated_at
+              };
+
+              return res.status(200).json({ success: true, subscription: formattedSubscription });
+            } else {
+              // Fetch regular subscription
+              const { data, error } = await supabase
+                .from('subscriptions')
+                .select('*')
+                .eq('id', subscriptionId)
+                .eq('user_id', dbUserId) // Ensure user can only access their own subscriptions
+                .single();
+
+              if (error) {
+                console.error(`[PATH] Error fetching subscription ${subscriptionId}:`, error);
+                return res.status(500).json({ error: 'Failed to fetch subscription' });
+              }
+
+              if (!data) {
+                return res.status(404).json({ error: `Subscription with ID ${subscriptionId} not found` });
+              }
+
+              return res.status(200).json({ success: true, subscription: data });
             }
-
-            if (!data) {
-              return res.status(404).json({ error: `Subscription with ID ${subscriptionId} not found` });
-            }
-
-            return res.status(200).json({ success: true, subscription: data });
 
           } else {
             // Fetch all subscriptions for the user

@@ -215,7 +215,8 @@ export default async function handler(req, res) {
                 source: 'email_scan',
                 source_analysis_id: analysis.id,
                 confidence_score: analysis.confidence_score,
-                analysis_status: analysis.analysis_status,
+                analysis_status: 'completed', // Always set to completed since we only fetch completed analysis
+                is_pending: false, // Not pending since analysis is completed
                 created_at: analysis.created_at,
                 updated_at: analysis.updated_at
               }))
