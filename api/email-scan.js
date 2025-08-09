@@ -1394,19 +1394,59 @@ const createScanRecord = async (req, userId, decoded) => {
     const scheduledScanId = req.headers['x-scan-id'];
 
     // Authoritative user comes from JWT (Supabase UUID)
-    // Verify the user exists; do not create here to avoid duplicates
-    const { data: existingUser, error: fetchUserErr } = await supabaseAdmin
+    // Verify the user exists, create if they don't
+    let { data: existingUser, error: fetchUserErr } = await supabaseAdmin
       .from('users')
-      .select('id')
+      .select('id, email, name, gmail_access_token')
       .eq('id', userId)
       .single();
 
-    if (fetchUserErr || !existingUser) {
-      throw new Error('Authenticated user not found. Please re-authenticate.');
+    if (fetchUserErr && fetchUserErr.code === 'PGRST116') {
+      // User doesn't exist, create them
+      console.log(`SCAN-DEBUG: User ${userId} not found, creating new user record`);
+      
+      const newUserData = {
+        id: userId,
+        email: decoded.email || userEmail || 'unknown@example.com',
+        name: decoded.name || 'Unknown User',
+        gmail_access_token: extractGmailToken(token),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      
+      const { data: newUser, error: createUserErr } = await supabaseAdmin
+        .from('users')
+        .insert(newUserData)
+        .select('id')
+        .single();
+      
+      if (createUserErr) {
+        console.error('SCAN-DEBUG: Failed to create user:', createUserErr);
+        throw new Error('Failed to create user record. Please try again.');
+      }
+      
+      existingUser = newUser;
+      console.log(`SCAN-DEBUG: Created new user: ${userId}`);
+    } else if (fetchUserErr || !existingUser) {
+      console.error('SCAN-DEBUG: User lookup failed:', fetchUserErr);
+      throw new Error('User lookup failed. Please re-authenticate.');
     }
 
     const dbUserId = existingUser.id;
     console.log(`SCAN-DEBUG: Using authenticated user ID: ${dbUserId}`);
+    
+    // Update Gmail token if we have a fresh one
+    const currentGmailToken = extractGmailToken(token);
+    if (currentGmailToken && currentGmailToken !== existingUser.gmail_access_token) {
+      console.log('SCAN-DEBUG: Updating Gmail token for user');
+      await supabaseAdmin
+        .from('users')
+        .update({ 
+          gmail_access_token: currentGmailToken,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', dbUserId);
+    }
     
     // Check if there's already an active scan for this user within the last 5 minutes
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();

@@ -23,11 +23,67 @@ async function validateToken(token) {
 }
 
 async function listMessageIds(token) {
-  const url = 'https://gmail.googleapis.com/gmail/v1/users/me/messages?q=subject:(subscription OR receipt OR invoice OR billing OR payment OR renewal)&maxResults=50';
-  const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  if (!resp.ok) return [];
-  const json = await resp.json();
-  return (json.messages || []).map(m => m.id);
+  // More comprehensive search for subscription-related emails
+  const queries = [
+    // Core subscription terms
+    'subject:(subscription OR subscribed OR "your subscription" OR "subscription renewal")',
+    // Payment and billing terms
+    'subject:(receipt OR invoice OR billing OR payment OR charged OR "payment confirmation")',
+    // Renewal and recurring terms
+    'subject:(renewal OR "auto-renew" OR "automatically renew" OR recurring OR "next billing")',
+    // Trial and plan terms
+    'subject:(trial OR "trial ended" OR plan OR membership OR premium OR pro)',
+    // Monthly/yearly billing
+    'subject:(monthly OR yearly OR annual OR "per month" OR "per year")',
+    // Common service providers (broad search)
+    'from:(netflix OR spotify OR amazon OR google OR apple OR microsoft OR adobe OR dropbox)',
+    // General billing domains
+    'from:(billing OR noreply OR no-reply) subject:(confirmation OR receipt OR invoice)'
+  ];
+  
+  const allMessageIds = new Set();
+  
+  // Try each query and collect unique message IDs
+  for (const query of queries) {
+    try {
+      const encodedQuery = encodeURIComponent(query);
+      const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodedQuery}&maxResults=25`;
+      const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      
+      if (resp.ok) {
+        const json = await resp.json();
+        const messages = json.messages || [];
+        messages.forEach(msg => allMessageIds.add(msg.id));
+        
+        // Small delay between queries to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    } catch (error) {
+      console.warn('Query failed:', query, error.message);
+    }
+    
+    // Stop if we have enough emails
+    if (allMessageIds.size >= 100) break;
+  }
+  
+  // If still no emails found, try a very broad search
+  if (allMessageIds.size === 0) {
+    try {
+      const broadUrl = 'https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=50';
+      const resp = await fetch(broadUrl, { headers: { Authorization: `Bearer ${token}` } });
+      if (resp.ok) {
+        const json = await resp.json();
+        const messages = json.messages || [];
+        messages.forEach(msg => allMessageIds.add(msg.id));
+      }
+    } catch (error) {
+      console.warn('Broad search failed:', error.message);
+    }
+  }
+  
+  const messageIds = Array.from(allMessageIds);
+  console.log(`Found ${messageIds.length} unique emails across all queries`);
+  return messageIds.slice(0, 75); // Limit to 75 emails for performance
 }
 
 async function getMessage(token, id) {
