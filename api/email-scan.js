@@ -16,8 +16,8 @@ const supabaseKey = supabaseServiceRoleKey || supabaseServiceKey;
 // Initialize Supabase client
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-// Use the service role key for all backend operations to bypass RLS.
-const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
+// Use a privileged key (service role preferred, fallback to service key) to bypass RLS for backend ops.
+const supabaseAdmin = createClient(supabaseUrl, supabaseKey);
 
 // Add logging to help debug
 console.log(`Email-scan: Supabase URL defined: ${!!supabaseUrl}`);
@@ -1895,6 +1895,12 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') {
     console.log('SCAN-DEBUG: Handling OPTIONS preflight request');
     return res.status(204).end();
+  }
+
+  // Ensure privileged Supabase key is configured to avoid RLS violations
+  if (!supabaseServiceRoleKey && !supabaseServiceKey) {
+    console.error('SCAN-DEBUG: Missing SUPABASE_SERVICE_ROLE_KEY or SUPABASE_SERVICE_KEY; cannot perform privileged inserts/updates (RLS will block).');
+    return res.status(500).json({ error: 'Server misconfiguration: missing Supabase service key. Please set SUPABASE_SERVICE_ROLE_KEY.' });
   }
 
   if (req.method !== 'POST') {
