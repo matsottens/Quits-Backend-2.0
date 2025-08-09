@@ -2068,15 +2068,8 @@ export default async function handler(req, res) {
           updated_at: new Date().toISOString(),
           error_message: 'Gmail token invalid – proceeding without email fetch'
         });
-        // still trigger edge function so analysis/sweeper flow continues
-        try {
-          const url = `${process.env.SUPABASE_URL}/functions/v1/gemini-scan`;
-          await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}` },
-            body: JSON.stringify({ scan_ids: [scanId] })
-          });
-        } catch {}
+        // NOTE: Since there are no emails to process, we don't trigger the edge function
+        // The scan-watchdog or trigger-gemini-scan cron will handle cleanup of stale scans
         return res.status(200).json({ success: true, scanId, processingCompleted: true });
       }
 
@@ -2104,26 +2097,8 @@ export default async function handler(req, res) {
         console.warn('SCAN-DEBUG: scan-worker returned non-200:', workerResp.status);
       }
 
-      // After we transition to ready_for_analysis, trigger Gemini analysis immediately
-      try {
-        const url = `${process.env.SUPABASE_URL}/functions/v1/gemini-scan`;
-        const payload = { scan_ids: [scanId] };
-        const resp = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
-          },
-          body: JSON.stringify(payload)
-        });
-        if (!resp.ok) {
-          console.error('SCAN-DEBUG: Direct Gemini trigger failed with status:', resp.status);
-        } else {
-          console.log('SCAN-DEBUG: ✅ Direct Gemini trigger succeeded');
-        }
-      } catch (triggerErr) {
-        console.error('SCAN-DEBUG: Error triggering Gemini function:', triggerErr.message);
-      }
+      // NOTE: Edge function will be triggered by the scan-worker after email processing completes
+      console.log('SCAN-DEBUG: Worker will handle Gemini edge function trigger');
 
       // Signal to frontend that processing phase finished; status will continue via polling
       return res.status(200).json({ success: true, scanId, processingCompleted: true });

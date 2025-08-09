@@ -200,14 +200,26 @@ const scanWorkerHandler = withErrorHandling(async (req, res) => {
     await updateScan(scanId, userId, { status: 'ready_for_analysis', progress: 70, emails_processed: processed });
 
     // Trigger edge function
+    workerLogger.info('Triggering Gemini edge function', { scanId });
     try {
       const url = `${process.env.SUPABASE_URL}/functions/v1/gemini-scan`;
-      await fetch(url, {
+      const edgeFunctionResponse = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}` },
         body: JSON.stringify({ scan_ids: [scanId] })
       });
-    } catch {}
+      
+      if (!edgeFunctionResponse.ok) {
+        const errorText = await edgeFunctionResponse.text();
+        throw new Error(`Edge function failed: ${edgeFunctionResponse.status} - ${errorText}`);
+      }
+      
+      const result = await edgeFunctionResponse.json();
+      workerLogger.info('Edge function triggered successfully', { scanId, result });
+    } catch (edgeError) {
+      workerLogger.error('Failed to trigger edge function', { scanId, error: edgeError.message });
+      // Don't fail the whole scan, but log the error
+    }
 
   const duration = Date.now() - new Date(scan.created_at).getTime();
   workerLogger.scanComplete(scanId, duration, { emailsProcessed: processed });
