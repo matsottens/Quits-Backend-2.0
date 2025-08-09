@@ -1649,43 +1649,19 @@ const updateScanStatus = async (scanId, dbUserId, updates) => {
 
       console.log('SCAN-DEBUG: Final update data:', JSON.stringify(filteredUpdates, null, 2));
 
-      // Add timeout to prevent hanging
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
-      
-      const response = await fetch(`${supabaseUrl}/rest/v1/scan_history?scan_id=eq.${scanId}`, {
-        method: 'PATCH',
-        headers: {
-          'apikey': supabaseKey,
-          'Authorization': `Bearer ${supabaseKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(filteredUpdates),
-        signal: controller.signal
-      });
-      
-      clearTimeout(timeoutId);
+      // Use Supabase JS client instead of raw fetch to avoid manual timeouts
+      const { error: patchError } = await supabaseAdmin
+        .from('scan_history')
+        .update(filteredUpdates)
+        .eq('scan_id', scanId)
+        .eq('user_id', userId);
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('SCAN-DEBUG: Failed to update scan status:', errorText);
-        console.error('SCAN-DEBUG: Response status:', response.status);
-        console.error('SCAN-DEBUG: Response headers:', Object.fromEntries(response.headers.entries()));
-        throw new Error(`Failed to update scan status: ${errorText}`);
+      if (patchError) {
+        console.error('SCAN-DEBUG: Failed to update scan status via supabase client:', patchError.message);
+        throw new Error(`Failed to update scan status: ${patchError.message}`);
       }
 
-      // Handle the response more carefully
-      try {
-        const responseText = await response.text();
-        if (responseText && responseText.trim()) {
-          const responseData = JSON.parse(responseText);
-          console.log('SCAN-DEBUG: Successfully updated scan status. Response:', JSON.stringify(responseData, null, 2));
-        } else {
-          console.log('SCAN-DEBUG: Successfully updated scan status. Empty response (this is normal for PATCH operations).');
-        }
-      } catch (parseError) {
-        console.log('SCAN-DEBUG: Successfully updated scan status. Could not parse response (this is normal for PATCH operations):', parseError.message);
-      }
+      console.log('SCAN-DEBUG: Successfully updated scan status via supabase client');
       
       // If we get here, the update was successful
       return;
