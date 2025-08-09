@@ -246,6 +246,9 @@ serve(async (req) => {
             // Derive billing cycle when missing
             let billing = res.billing_cycle || detectBillingCycle(combined) || "monthly";
 
+            // Debug price extraction
+            console.log(`[${scan.scan_id}] Email analysis - Subject: "${subject}", Price: ${price}, Currency: ${currency}, Service: ${subName}`);
+            
             // Strengthen confidence with heuristics
             const kScore = keywordScore(combined);
             let confidence = Math.max(Number(res.confidence_score || 0), kScore);
@@ -259,7 +262,7 @@ serve(async (req) => {
             await supabase.from("subscription_analysis").update({
               analysis_status: "completed",
               subscription_name: subName,
-              price: price ?? 0,
+              price: price, // Don't default to 0, keep null if no price found
               currency: currency || 'USD',
               billing_cycle: billing,
               confidence_score: confidence,
@@ -288,7 +291,9 @@ serve(async (req) => {
 
             // Only create subscription when clearly valid
             const FINAL_CONFIDENCE_THRESHOLD = 0.6;
-            if (subName && price && price > 0 && confidence >= FINAL_CONFIDENCE_THRESHOLD) {
+            const validPrice = price && typeof price === 'number' && price > 0;
+            if (subName && validPrice && confidence >= FINAL_CONFIDENCE_THRESHOLD) {
+              console.log(`[${scan.scan_id}] Creating subscription: ${subName} - $${price} ${currency} (confidence: ${confidence})`);
               const dup = await supabase
                 .from("subscriptions")
                 .select("id")
