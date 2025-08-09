@@ -154,13 +154,47 @@ serve(async (req) => {
           .eq("user_id", scan.user_id);
         if (updErr) throw new Error(`Failed to mark scan analyzing: ${updErr.message}`);
 
-        const { data: rows } = await supabase
+        let { data: rows } = await supabase
           .from("subscription_analysis")
           .select("*, email_data(content,subject,sender)")
           .eq("scan_id", scan.scan_id)
           .eq("analysis_status", "pending");
 
-        const emails = (rows || []).filter((r) => r.email_data);
+        // Fallback: if no pending analysis rows found, create them from email_data
+        let emails = (rows || []).filter((r) => r.email_data);
+        if (!emails.length) {
+          const { data: emailRows } = await supabase
+            .from("email_data")
+            .select("id, subject, sender, content")
+            .eq("scan_id", scan.scan_id)
+            .eq("user_id", scan.user_id)
+            .order("created_at", { ascending: true })
+            .limit(200);
+
+          if (emailRows && emailRows.length) {
+            // Insert pending analysis entries for any emails missing them
+            for (const e of emailRows) {
+              await supabase.from("subscription_analysis").insert({
+                email_data_id: e.id,
+                user_id: scan.user_id,
+                scan_id: scan.scan_id,
+                analysis_status: "pending",
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              });
+            }
+
+            // Re-query pending rows with join after seeding
+            const reseed = await supabase
+              .from("subscription_analysis")
+              .select("*, email_data(content,subject,sender)")
+              .eq("scan_id", scan.scan_id)
+              .eq("analysis_status", "pending");
+            rows = reseed.data || [];
+            emails = (rows || []).filter((r) => r.email_data);
+          }
+        }
+
         if (!emails.length) throw new Error("No emails to analyze");
 
         const BATCH = 10;

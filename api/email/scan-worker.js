@@ -82,11 +82,46 @@ export default async function handler(req, res) {
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
-      await fetch(`${supabaseUrl}/rest/v1/email_data`, {
+      // Insert email_data and capture the inserted row (need its id)
+      const emailInsertResp = await fetch(`${supabaseUrl}/rest/v1/email_data`, {
         method: 'POST',
-        headers: { 'apikey': supabaseServiceRoleKey, 'Authorization': `Bearer ${supabaseServiceRoleKey}`, 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
+        headers: {
+          'apikey': supabaseServiceRoleKey,
+          'Authorization': `Bearer ${supabaseServiceRoleKey}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation'
+        },
         body: JSON.stringify(record)
       });
+
+      let emailRowId = null;
+      if (emailInsertResp.ok) {
+        try {
+          const inserted = await emailInsertResp.json();
+          const emailRow = Array.isArray(inserted) ? inserted[0] : inserted;
+          emailRowId = emailRow?.id || null;
+        } catch {}
+      }
+
+      // Create a pending analysis row for this email so the edge function can process it
+      if (emailRowId) {
+        await fetch(`${supabaseUrl}/rest/v1/subscription_analysis`, {
+          method: 'POST',
+          headers: {
+            'apikey': supabaseServiceRoleKey,
+            'Authorization': `Bearer ${supabaseServiceRoleKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            email_data_id: emailRowId,
+            user_id: userId,
+            scan_id: scanId,
+            analysis_status: 'pending',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+        });
+      }
       processed++;
       if (processed % 5 === 0) await updateScan(scanId, userId, { progress: 30 + Math.round((processed / Math.max(ids.length, 1)) * 40), emails_processed: processed });
     }
