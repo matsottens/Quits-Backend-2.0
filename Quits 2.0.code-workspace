@@ -1,7 +1,11 @@
 {
-    "folders": [
-        {
-            "path": "."
-        }
-    ]
+  "folders": [
+    { "path": "." },
+    { "path": "frontend" }
+  ],
+  "settings": {
+    "git.autoRepositoryDetection": "all",
+    "git.detectSubmodules": true,
+    "scm.alwaysShowRepositories": true
+  }
 }
