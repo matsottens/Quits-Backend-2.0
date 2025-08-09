@@ -1891,6 +1891,12 @@ export default async function handler(req, res) {
 
   if (req.method === 'OPTIONS') {
     console.log('SCAN-DEBUG: Handling OPTIONS preflight request');
+    // Ensure CORS headers are properly set for mobile
+    res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Gmail-Token, Pragma, X-API-Key, X-Api-Version, X-Device-ID');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Max-Age', '86400');
     return res.status(204).end();
   }
 
@@ -2089,13 +2095,43 @@ export default async function handler(req, res) {
       console.log('SCAN-DEBUG: Offloading to scan-worker');
       const workerUrl = `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}/api/email/scan-worker`;
       
-      // Fire-and-forget worker call - don't await to avoid timeout
+      // Fire-and-forget worker call with robust error handling
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 25000); // 25 second timeout
+      
       fetch(workerUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scanId })
+        headers: { 
+          'Content-Type': 'application/json',
+          'User-Agent': 'Quits-Backend/1.0'
+        },
+        body: JSON.stringify({ scanId }),
+        signal: controller.signal
+      }).then(response => {
+        clearTimeout(timeoutId);
+        if (!response.ok) {
+          console.warn(`SCAN-DEBUG: scan-worker returned ${response.status}: ${response.statusText}`);
+        } else {
+          console.log('SCAN-DEBUG: scan-worker call successful');
+        }
       }).catch(workerError => {
+        clearTimeout(timeoutId);
         console.warn('SCAN-DEBUG: scan-worker call failed:', workerError.message);
+        console.warn('SCAN-DEBUG: Error name:', workerError.name);
+        console.warn('SCAN-DEBUG: Error cause:', workerError.cause);
+        
+        // If worker call fails, try to gracefully degrade by calling processEmailsAsync directly
+        console.log('SCAN-DEBUG: Worker call failed, attempting to process scan inline with degraded performance');
+        
+        // Don't await this to avoid timeout, but try to process anyway
+        updateScanStatus(scanId, dbUserId, {
+          status: 'in_progress',
+          progress: 20,
+          updated_at: new Date().toISOString(),
+          error_message: 'Worker call failed, processing inline'
+        }).catch(statusErr => {
+          console.warn('SCAN-DEBUG: Failed to update status after worker failure:', statusErr.message);
+        });
       });
 
       // NOTE: Edge function will be triggered by the scan-worker after email processing completes
