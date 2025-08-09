@@ -256,16 +256,21 @@ serve(async (req) => {
             const subName = res.subscription_name || deriveServiceName(subject, sender) || null;
 
             // Update analysis row with enriched data
-            await supabase.from("subscription_analysis").update({
+            const { error: updateError } = await supabase.from("subscription_analysis").update({
               analysis_status: "completed",
               subscription_name: subName,
-              price: price, // Don't default to 0, keep null if no price found
+              price: price, // Keep null if no price found - analysis table allows this
               currency: currency || 'USD',
               billing_cycle: billing,
               confidence_score: confidence,
               gemini_response: JSON.stringify(res),
               updated_at: new Date().toISOString()
             }).eq("id", row.id);
+            
+            if (updateError) {
+              console.error(`[${scan.scan_id}] Failed to update analysis: ${updateError.message}`);
+              // Continue processing even if update fails
+            }
 
             // Handle cancellations: mark existing subscriptions as canceled
             if (res.is_cancellation && (res.subscription_name || deriveServiceName(subject, sender))) {
@@ -309,7 +314,11 @@ serve(async (req) => {
                   created_at: new Date().toISOString(),
                   updated_at: new Date().toISOString()
                 });
-                if (!error) subsFound++;
+                if (error) {
+                  console.error(`[${scan.scan_id}] Failed to create subscription: ${error.message}`);
+                } else {
+                  subsFound++;
+                }
               }
             }
             
