@@ -259,7 +259,7 @@ serve(async (req) => {
             const { error: updateError } = await supabase.from("subscription_analysis").update({
               analysis_status: "completed",
               subscription_name: subName,
-              price: price, // Keep null if no price found - analysis table allows this
+              price: price ?? 0, // Default to 0 to avoid database issues, but use strict validation for subscription creation
               currency: currency || 'USD',
               billing_cycle: billing,
               confidence_score: confidence,
