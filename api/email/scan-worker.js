@@ -83,7 +83,7 @@ async function listMessageIds(token) {
   
   const messageIds = Array.from(allMessageIds);
   console.log(`Found ${messageIds.length} unique emails across all queries`);
-  return messageIds.slice(0, 75); // Limit to 75 emails for performance
+  return messageIds; // Return all emails found
 }
 
 async function getMessage(token, id) {
@@ -176,99 +176,110 @@ const scanWorkerHandler = withErrorHandling(async (req, res) => {
 
     let processed = 0;
     let lastProgressUpdate = Date.now();
+    const BATCH_SIZE = 10; // Process emails in batches to avoid timeout
     
-    for (let i = 0; i < ids.length; i++) {
-      const id = ids[i];
-      const msg = await getMessage(gmailToken, id);
-      if (!msg) continue;
-      const headers = msg.payload?.headers || [];
+    // Process emails in batches to avoid timeout
+    for (let batchStart = 0; batchStart < ids.length; batchStart += BATCH_SIZE) {
+      const batchEnd = Math.min(batchStart + BATCH_SIZE, ids.length);
+      const batch = ids.slice(batchStart, batchEnd);
       
-      // Extract email content
-      const content = extractEmailContent(msg);
-      const preview = content.substring(0, 500); // First 500 chars as preview
+      workerLogger.info(`Processing batch ${Math.floor(batchStart/BATCH_SIZE) + 1}/${Math.ceil(ids.length/BATCH_SIZE)} (${batch.length} emails)`, { scanId });
       
-      const record = {
-        scan_id: scanId,
-        user_id: userId,
-        gmail_message_id: id,
-        subject: header(headers, 'Subject') || 'No Subject',
-        sender: header(headers, 'From') || 'Unknown Sender',
-        date: header(headers, 'Date') || new Date().toISOString(),
-        content: content,
-        content_preview: preview,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-      // Insert email_data and capture the inserted row (need its id)
-      const emailInsertResp = await fetch(`${supabaseUrl}/rest/v1/email_data`, {
-        method: 'POST',
-        headers: {
-          'apikey': supabaseServiceRoleKey,
-          'Authorization': `Bearer ${supabaseServiceRoleKey}`,
-          'Content-Type': 'application/json',
-          'Prefer': 'return=representation'
-        },
-        body: JSON.stringify(record)
-      });
-
-      let emailRowId = null;
-      if (emailInsertResp.ok) {
+      // Process batch concurrently for speed
+      const batchPromises = batch.map(async (id, index) => {
+        const globalIndex = batchStart + index;
         try {
-          const inserted = await emailInsertResp.json();
-          const emailRow = Array.isArray(inserted) ? inserted[0] : inserted;
-          emailRowId = emailRow?.id || null;
-        } catch {}
-      }
-
-      // Create a pending analysis row for this email so the edge function can process it
-      if (emailRowId) {
-        await fetch(`${supabaseUrl}/rest/v1/subscription_analysis`, {
-          method: 'POST',
-          headers: {
-            'apikey': supabaseServiceRoleKey,
-            'Authorization': `Bearer ${supabaseServiceRoleKey}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            email_data_id: emailRowId,
-            user_id: userId,
+          const msg = await getMessage(gmailToken, id);
+          if (!msg) return null;
+          
+          const headers = msg.payload?.headers || [];
+          const content = extractEmailContent(msg);
+          const preview = content.substring(0, 500);
+          
+          const record = {
             scan_id: scanId,
-            analysis_status: 'pending',
+            user_id: userId,
+            gmail_message_id: id,
+            subject: header(headers, 'Subject') || 'No Subject',
+            sender: header(headers, 'From') || 'Unknown Sender',
+            date: header(headers, 'Date') || new Date().toISOString(),
+            content: content,
+            content_preview: preview,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
-          })
-        });
-      }
-      processed++;
+          };
+          
+          // Insert email_data
+          const emailInsertResp = await fetch(`${supabaseUrl}/rest/v1/email_data`, {
+            method: 'POST',
+            headers: {
+              'apikey': supabaseServiceRoleKey,
+              'Authorization': `Bearer ${supabaseServiceRoleKey}`,
+              'Content-Type': 'application/json',
+              'Prefer': 'return=representation'
+            },
+            body: JSON.stringify(record)
+          });
+
+          let emailRowId = null;
+          if (emailInsertResp.ok) {
+            try {
+              const inserted = await emailInsertResp.json();
+              const emailRow = Array.isArray(inserted) ? inserted[0] : inserted;
+              emailRowId = emailRow?.id || null;
+            } catch {}
+          }
+
+          // Create pending analysis row
+          if (emailRowId) {
+            await fetch(`${supabaseUrl}/rest/v1/subscription_analysis`, {
+              method: 'POST',
+              headers: {
+                'apikey': supabaseServiceRoleKey,
+                'Authorization': `Bearer ${supabaseServiceRoleKey}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                email_data_id: emailRowId,
+                user_id: userId,
+                scan_id: scanId,
+                analysis_status: 'pending',
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              })
+            });
+          }
+          
+          return { success: true, index: globalIndex };
+        } catch (error) {
+          workerLogger.warn(`Error processing email ${globalIndex + 1}: ${error.message}`, { scanId });
+          return { success: false, index: globalIndex, error: error.message };
+        }
+      });
       
-      // Update progress much more frequently for better UX
+      // Wait for batch to complete
+      const batchResults = await Promise.allSettled(batchPromises);
+      const successCount = batchResults.filter(r => r.status === 'fulfilled' && r.value?.success).length;
+      processed += successCount;
+      
+      // Update progress after each batch
       const now = Date.now();
-      const shouldUpdate = (
-        processed === ids.length || // Always update on last email
-        (now - lastProgressUpdate > 1000) || // Update every second
-        (processed === 1) // Update immediately after first email
-      );
+      const emailProgress = Math.round((processed / Math.max(ids.length, 1)) * 50);
+      const currentProgress = 20 + emailProgress;
       
-      if (shouldUpdate) {
-        // Progress from 20% to 70% during email processing
-        const emailProgress = Math.round((processed / Math.max(ids.length, 1)) * 50);
-        const currentProgress = 20 + emailProgress;
-        
-        workerLogger.info(`Updating progress: ${processed}/${ids.length} emails processed (${currentProgress}%)`, { scanId });
-        
-        await updateScan(scanId, userId, { 
-          progress: Math.min(currentProgress, 70), 
-          emails_processed: processed,
-          status: 'in_progress'
-        });
-        
-        lastProgressUpdate = now;
-        workerLogger.scanProgress(scanId, Math.min(currentProgress, 70), 'in_progress', { emailsProcessed: processed, totalEmails: ids.length });
-      }
+      workerLogger.info(`Batch complete: ${processed}/${ids.length} emails processed (${currentProgress}%)`, { scanId });
       
-      // Add a small delay between emails to allow progress updates to be visible
-      if (i < ids.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, 200)); // 200ms delay between emails
+      await updateScan(scanId, userId, { 
+        progress: Math.min(currentProgress, 70), 
+        emails_processed: processed,
+        status: 'in_progress'
+      });
+      
+      workerLogger.scanProgress(scanId, Math.min(currentProgress, 70), 'in_progress', { emailsProcessed: processed, totalEmails: ids.length });
+      
+      // Small delay between batches to prevent overwhelming the API
+      if (batchEnd < ids.length) {
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
     }
 
