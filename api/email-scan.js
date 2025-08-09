@@ -2139,7 +2139,7 @@ export default async function handler(req, res) {
       
       // Fire-and-forget worker call with robust error handling
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 25000); // 25 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout for complex scans
       
       fetch(workerUrl, {
         method: 'POST',
@@ -2162,18 +2162,28 @@ export default async function handler(req, res) {
         console.warn('SCAN-DEBUG: Error name:', workerError.name);
         console.warn('SCAN-DEBUG: Error cause:', workerError.cause);
         
-        // If worker call fails, try to gracefully degrade by calling processEmailsAsync directly
-        console.log('SCAN-DEBUG: Worker call failed, attempting to process scan inline with degraded performance');
-        
-        // Don't await this to avoid timeout, but try to process anyway
-        updateScanStatus(scanId, dbUserId, {
-          status: 'in_progress',
-          progress: 20,
-          updated_at: new Date().toISOString(),
-          error_message: 'Worker call failed, processing inline'
-        }).catch(statusErr => {
-          console.warn('SCAN-DEBUG: Failed to update status after worker failure:', statusErr.message);
-        });
+        // If it's a timeout/abort error, mark scan as ready for analysis instead of trying inline
+        if (workerError.name === 'AbortError' || workerError.message.includes('aborted')) {
+          console.log('SCAN-DEBUG: Worker timeout detected, marking scan as ready_for_analysis for later processing');
+          updateScanStatus(scanId, dbUserId, {
+            status: 'ready_for_analysis',
+            progress: 70,
+            updated_at: new Date().toISOString(),
+            error_message: 'Processing will continue via background worker'
+          }).catch(statusErr => {
+            console.warn('SCAN-DEBUG: Failed to update status after worker timeout:', statusErr.message);
+          });
+        } else {
+          console.log('SCAN-DEBUG: Worker call failed, attempting to process scan inline with degraded performance');
+          updateScanStatus(scanId, dbUserId, {
+            status: 'in_progress',
+            progress: 20,
+            updated_at: new Date().toISOString(),
+            error_message: 'Worker call failed, processing inline'
+          }).catch(statusErr => {
+            console.warn('SCAN-DEBUG: Failed to update status after worker failure:', statusErr.message);
+          });
+        }
       });
 
       // NOTE: Edge function will be triggered by the scan-worker after email processing completes
