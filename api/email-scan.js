@@ -1765,15 +1765,8 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
         updated_at: new Date().toISOString(),
         error_message: 'No subscription-related emails found in your Gmail account. This could mean you don\'t have any active subscriptions, or your emails are organized differently.'
       });
-      
-      // Return scan ID immediately to prevent timeout
-      console.log('SCAN-DEBUG: Returning scanId immediately to prevent timeout:', scanId);
-      return res.status(200).json({ 
-        success: true, 
-        scanId: scanId,
-        message: 'Scan completed. No subscription emails found.',
-        processingCompleted: true
-      });
+      // Nothing more to process here; let caller continue
+      return;
     }
     
     console.log('SCAN-DEBUG: About to process emails for subscriptions...');
