@@ -1393,11 +1393,12 @@ const createScanRecord = async (req, userId, decoded) => {
     const isScheduledScan = req.body.scheduled === true;
     const scheduledScanId = req.headers['x-scan-id'];
 
-    // Look up the user using the admin client to bypass RLS
+    // Look up the user using consistent logic across all endpoints
+    // First, try by email (most reliable identifier)
     const { data: users, error: userError } = await supabaseAdmin
       .from('users')
       .select('id, email, google_id')
-      .or(`email.eq.${userEmail},google_id.eq.${userId},id.eq.${userId}`);
+      .eq('email', userEmail);
 
     if (userError) {
       console.error('SCAN-DEBUG: User lookup failed:', userError.message);
@@ -1409,12 +1410,12 @@ const createScanRecord = async (req, userId, decoded) => {
     if (!users || users.length === 0) {
       console.log(`SCAN-DEBUG: User not found in database, creating new user for: ${userEmail}`);
       
+      // DON'T set explicit ID - let database auto-generate to avoid conflicts
       const { data: newUser, error: createUserError } = await supabaseAdmin
         .from('users')
         .insert({
           email: userEmail,
-          google_id: userId,
-          id: userId, // Explicitly set the UUID from the token
+          google_id: userId, // Store the JWT user ID as google_id for reference
           name: decoded.name || userEmail.split('@')[0],
           avatar_url: decoded.picture || null,
         })
@@ -1423,19 +1424,65 @@ const createScanRecord = async (req, userId, decoded) => {
       
       if (createUserError) {
         console.error('SCAN-DEBUG: Failed to create user:', createUserError.message);
-        throw new Error(`Failed to create user: ${createUserError.message}`);
+        // Check if it's a unique constraint violation (user created by another request)
+        if (createUserError.code === '23505') {
+          console.log('SCAN-DEBUG: User was created by concurrent request, looking up again...');
+          const { data: retryUsers, error: retryError } = await supabaseAdmin
+            .from('users')
+            .select('id, email, google_id')
+            .eq('email', userEmail)
+            .single();
+          
+          if (retryError) {
+            throw new Error(`Failed to lookup user after concurrent creation: ${retryError.message}`);
+          }
+          
+          dbUserId = retryUsers.id;
+          console.log(`SCAN-DEBUG: Found user created concurrently with ID: ${dbUserId}`);
+        } else {
+          throw new Error(`Failed to create user: ${createUserError.message}`);
+        }
+      } else {
+        dbUserId = newUser.id;
+        console.log(`SCAN-DEBUG: Created new user with ID: ${dbUserId}`);
       }
-      
-      dbUserId = newUser.id;
-      console.log(`SCAN-DEBUG: Created new user with ID: ${dbUserId}`);
     } else {
       dbUserId = users[0].id;
       console.log(`SCAN-DEBUG: Found existing user with ID: ${dbUserId}`);
+      
+      // Update google_id if it's missing (for legacy users)
+      if (!users[0].google_id && userId) {
+        console.log('SCAN-DEBUG: Updating missing google_id for existing user');
+        await supabaseAdmin
+          .from('users')
+          .update({ google_id: userId })
+          .eq('id', dbUserId);
+      }
     }
     
+    // Check if there's already an active scan for this user within the last 5 minutes
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const { data: recentScans, error: recentScansError } = await supabaseAdmin
+      .from('scan_history')
+      .select('scan_id, status, created_at')
+      .eq('user_id', dbUserId)
+      .gte('created_at', fiveMinutesAgo)
+      .in('status', ['pending', 'in_progress', 'ready_for_analysis', 'analyzing'])
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (recentScansError) {
+      console.error('SCAN-DEBUG: Error checking recent scans:', recentScansError.message);
+    } else if (recentScans && recentScans.length > 0) {
+      const existingScan = recentScans[0];
+      console.log('SCAN-DEBUG: Found recent active scan:', existingScan.scan_id, 'created:', existingScan.created_at);
+      // Return the existing scan instead of creating a new one
+      return { scanId: existingScan.scan_id, dbUserId };
+    }
+
     // Cancel any previous unfinished scans for this user before creating a new one
     const openStatuses = ['pending', 'in_progress', 'ready_for_analysis', 'analyzing'];
-    await supabaseAdmin
+    const { error: cancelError } = await supabaseAdmin
       .from('scan_history')
       .update({
         status: 'cancelled',
@@ -1444,6 +1491,12 @@ const createScanRecord = async (req, userId, decoded) => {
       })
       .eq('user_id', dbUserId)
       .in('status', openStatuses);
+    
+    if (cancelError) {
+      console.error('SCAN-DEBUG: Error cancelling previous scans (non-fatal):', cancelError.message);
+    } else {
+      console.log('SCAN-DEBUG: Cancelled any previous active scans');
+    }
     
     // Use provided scan ID for scheduled scans, or generate new one
     const scanId = isScheduledScan && scheduledScanId ? scheduledScanId : 'scan_' + Math.random().toString(36).substring(2, 15);
@@ -2126,9 +2179,22 @@ export default async function handler(req, res) {
 
     (async () => {
       try {
+        console.log('SCAN-DEBUG: About to call processEmailsAsync with params:', { scanId, dbUserId });
         await processEmailsAsync(gmailToken, scanId, dbUserId);
+        console.log('SCAN-DEBUG: processEmailsAsync completed successfully');
       } catch (bgErr) {
         console.error('SCAN-DEBUG: Background processing error:', bgErr.message);
+        console.error('SCAN-DEBUG: Background processing stack:', bgErr.stack);
+        // Set scan status to error
+        try {
+          await updateScanStatus(scanId, dbUserId, {
+            status: 'error',
+            error_message: bgErr.message,
+            updated_at: new Date().toISOString()
+          });
+        } catch (updateErr) {
+          console.error('SCAN-DEBUG: Failed to update scan status to error:', updateErr.message);
+        }
       }
     })();
 
