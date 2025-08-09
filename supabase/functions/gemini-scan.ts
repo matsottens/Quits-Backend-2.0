@@ -232,7 +232,7 @@ serve(async (req) => {
             }
 
             // Only create subscription when clearly valid
-            const FINAL_CONFIDENCE_THRESHOLD = 0.7;
+            const FINAL_CONFIDENCE_THRESHOLD = 0.6;
             if (subName && price && price > 0 && confidence >= FINAL_CONFIDENCE_THRESHOLD) {
               const dup = await supabase
                 .from("subscriptions")

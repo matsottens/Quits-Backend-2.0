@@ -55,6 +55,14 @@
       "schedule": "*/1 * * * *"
     },
     {
+      "path": "/api/scan-watchdog",
+      "schedule": "*/2 * * * *"
+    },
+    {
+      "path": "/api/analysis-sweeper",
+      "schedule": "*/3 * * * *"
+    },
+    {
       "path": "/api/scheduled-scan",
       "schedule": "0 9 * * *"
     }
