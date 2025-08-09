@@ -1385,7 +1385,7 @@ const storeSubscriptionExample = async (sender, subject, analysisResult) => {
 };
 
 // Function to create a scan record
-const createScanRecord = async (req, userId, decoded) => {
+const createScanRecord = async (req, userId, decoded, token) => {
   console.log('SCAN-DEBUG: Creating scan record for user:', userId);
   
   try {
@@ -2086,7 +2086,7 @@ export default async function handler(req, res) {
 
     console.log('SCAN-DEBUG: About to create scan record...');
     // Create scan record
-    const { scanId, dbUserId } = await createScanRecord(req, userId, decoded);
+    const { scanId, dbUserId } = await createScanRecord(req, userId, decoded, token);
     console.log('SCAN-DEBUG: Created scan record with ID:', scanId);
     console.log('SCAN-DEBUG: Using database user ID:', dbUserId);
 
