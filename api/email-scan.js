@@ -2106,8 +2106,19 @@ export default async function handler(req, res) {
       // Validate Gmail token and connectivity now; degrade if not available
       console.log('SCAN-DEBUG: Validating Gmail token post-scan creation...');
       console.log('SCAN-DEBUG: Gmail token length for validation:', gmailToken?.length || 0);
-      const tokenOk = await validateGmailToken(gmailToken);
-      console.log('SCAN-DEBUG: Gmail token validation result:', tokenOk);
+      console.log('SCAN-DEBUG: Gmail token type:', typeof gmailToken);
+      console.log('SCAN-DEBUG: Gmail token truthy:', !!gmailToken);
+      
+      let tokenOk = false;
+      try {
+        tokenOk = await validateGmailToken(gmailToken);
+        console.log('SCAN-DEBUG: Gmail token validation result:', tokenOk);
+      } catch (validationError) {
+        console.error('SCAN-DEBUG: Gmail token validation threw error:', validationError.message);
+        console.error('SCAN-DEBUG: Validation error stack:', validationError.stack);
+        tokenOk = false;
+      }
+      
       if (!tokenOk) {
         console.warn('SCAN-DEBUG: Gmail token invalid; degrading this scan to ready_for_analysis');
         await updateScanStatus(scanId, dbUserId, {
@@ -2118,6 +2129,7 @@ export default async function handler(req, res) {
         });
         // NOTE: Since there are no emails to process, we don't trigger the edge function
         // The scan-watchdog or trigger-gemini-scan cron will handle cleanup of stale scans
+        console.log('SCAN-DEBUG: Returning early due to invalid token - no worker will be called');
         return res.status(200).json({ success: true, scanId, processingCompleted: true });
       }
 
