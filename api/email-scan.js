@@ -11,19 +11,35 @@ const { verify } = jsonwebtoken;
 const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+// Prefer service role key, fallback to service key, but avoid anon key for admin operations
 const supabaseKey = supabaseServiceRoleKey || supabaseServiceKey;
+
+// Validate that we have a proper admin key (not anon key)
+if (supabaseKey === supabaseAnonKey) {
+  console.error('Email-scan: WARNING - Using anon key for admin operations, this will cause RLS violations');
+}
 
 // Initialize Supabase client
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 // Use a privileged key (service role preferred, fallback to service key) to bypass RLS for backend ops.
-const supabaseAdmin = createClient(supabaseUrl, supabaseKey);
+// Configure with service role auth to ensure RLS bypass
+const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
+  auth: {
+    autoRefreshToken: false,
+    persistSession: false
+  }
+});
 
 // Add logging to help debug
 console.log(`Email-scan: Supabase URL defined: ${!!supabaseUrl}`);
 console.log(`Email-scan: Supabase key defined: ${!!supabaseKey}`);
 console.log(`Email-scan: Using SUPABASE_SERVICE_ROLE_KEY: ${!!supabaseServiceRoleKey}`);
 console.log(`Email-scan: Using SUPABASE_SERVICE_KEY: ${!!supabaseServiceKey}`);
+console.log(`Email-scan: Final key type: ${supabaseKey ? (supabaseKey.includes('service_role') ? 'service_role' : 'anon') : 'undefined'}`);
+console.log(`Email-scan: Key prefix: ${supabaseKey ? supabaseKey.substring(0, 20) + '...' : 'undefined'}`);
 
 // Add unhandled promise rejection handler
 process.on('unhandledRejection', (reason, promise) => {
@@ -1447,6 +1463,7 @@ const createScanRecord = async (req, userId, decoded) => {
     };
     
     console.log('SCAN-DEBUG: Creating scan record with data:', JSON.stringify(scanRecord, null, 2));
+    console.log('SCAN-DEBUG: Using supabaseAdmin client with key type:', supabaseKey ? (supabaseKey.includes('service_role') ? 'service_role' : 'anon/other') : 'undefined');
     
     // Use the admin client to insert the scan record
     const { data: result, error: scanError } = await supabaseAdmin
@@ -1454,6 +1471,10 @@ const createScanRecord = async (req, userId, decoded) => {
       .insert(scanRecord)
       .select()
       .single();
+    
+    console.log('SCAN-DEBUG: Insert attempt completed');
+    console.log('SCAN-DEBUG: Insert result:', result ? 'SUCCESS' : 'FAILED');
+    console.log('SCAN-DEBUG: Insert error:', scanError ? JSON.stringify(scanError, null, 2) : 'None');
 
     if (scanError) {
       console.error('SCAN-DEBUG: Failed to create scan record:', scanError.message);
@@ -1907,6 +1928,31 @@ export default async function handler(req, res) {
   if (!supabaseServiceRoleKey && !supabaseServiceKey) {
     console.error('SCAN-DEBUG: Missing SUPABASE_SERVICE_ROLE_KEY or SUPABASE_SERVICE_KEY; cannot perform privileged inserts/updates (RLS will block).');
     return res.status(500).json({ error: 'Server misconfiguration: missing Supabase service key. Please set SUPABASE_SERVICE_ROLE_KEY.' });
+  }
+  
+  // Log the key configuration for debugging
+  console.log('SCAN-DEBUG: Key configuration at handler start:');
+  console.log(`SCAN-DEBUG: - SUPABASE_SERVICE_ROLE_KEY: ${!!supabaseServiceRoleKey}`);
+  console.log(`SCAN-DEBUG: - SUPABASE_SERVICE_KEY: ${!!supabaseServiceKey}`);
+  console.log(`SCAN-DEBUG: - SUPABASE_ANON_KEY: ${!!supabaseAnonKey}`);
+  console.log(`SCAN-DEBUG: - Final key type: ${supabaseKey ? (supabaseKey.includes('service_role') ? 'service_role' : 'anon/other') : 'undefined'}`);
+  console.log(`SCAN-DEBUG: - Key prefix: ${supabaseKey ? supabaseKey.substring(0, 20) + '...' : 'undefined'}`);
+  console.log(`SCAN-DEBUG: - Using anon key?: ${supabaseKey === supabaseAnonKey}`);
+  
+  // Test key privileges early if possible
+  try {
+    const { data: testUsers, error: testError } = await supabaseAdmin
+      .from('users')
+      .select('id')
+      .limit(1);
+    
+    if (testError) {
+      console.error('SCAN-DEBUG: Key test failed - cannot read users table:', testError.message);
+    } else {
+      console.log('SCAN-DEBUG: Key test passed - can read users table');
+    }
+  } catch (keyTestError) {
+    console.error('SCAN-DEBUG: Key test exception:', keyTestError.message);
   }
 
   if (req.method !== 'POST') {
