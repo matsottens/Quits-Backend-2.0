@@ -2100,47 +2100,48 @@ export default async function handler(req, res) {
       console.error('SCAN-DEBUG: Failed to set initial in_progress status (non-fatal):', initErr.message);
     }
 
-    (async () => {
+    // Run inline to guarantee analysis records are created before response (serverless-safe)
+    try {
+      console.log('SCAN-DEBUG: About to call processEmailsAsync with params:', { scanId, dbUserId });
+      await processEmailsAsync(gmailToken, scanId, dbUserId);
+      console.log('SCAN-DEBUG: processEmailsAsync completed successfully');
+
+      // After we transition to ready_for_analysis, trigger Gemini analysis immediately
       try {
-        console.log('SCAN-DEBUG: About to call processEmailsAsync with params:', { scanId, dbUserId });
-        await processEmailsAsync(gmailToken, scanId, dbUserId);
-        console.log('SCAN-DEBUG: processEmailsAsync completed successfully');
-
-        // After we transition to ready_for_analysis, trigger Gemini analysis immediately
-        try {
-          const url = `${process.env.SUPABASE_URL}/functions/v1/gemini-scan`;
-          const payload = { scan_ids: [scanId] };
-          const resp = await fetch(url, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
-            },
-            body: JSON.stringify(payload)
-          });
-          if (!resp.ok) {
-            console.error('SCAN-DEBUG: Direct Gemini trigger failed with status:', resp.status);
-          } else {
-            console.log('SCAN-DEBUG: ✅ Direct Gemini trigger succeeded');
-          }
-        } catch (triggerErr) {
-          console.error('SCAN-DEBUG: Error triggering Gemini function:', triggerErr.message);
+        const url = `${process.env.SUPABASE_URL}/functions/v1/gemini-scan`;
+        const payload = { scan_ids: [scanId] };
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
+          },
+          body: JSON.stringify(payload)
+        });
+        if (!resp.ok) {
+          console.error('SCAN-DEBUG: Direct Gemini trigger failed with status:', resp.status);
+        } else {
+          console.log('SCAN-DEBUG: ✅ Direct Gemini trigger succeeded');
         }
-      } catch (bgErr) {
-        console.error('SCAN-DEBUG: Background processing error:', bgErr.message);
-        try {
-          await updateScanStatus(scanId, dbUserId, {
-            status: 'error',
-            error_message: bgErr.message,
-            updated_at: new Date().toISOString()
-          });
-        } catch (updateErr) {
-          console.error('SCAN-DEBUG: Failed to update scan status to error:', updateErr.message);
-        }
+      } catch (triggerErr) {
+        console.error('SCAN-DEBUG: Error triggering Gemini function:', triggerErr.message);
       }
-    })();
 
-    return res.status(200).json({ success: true, scanId });
+      // Signal to frontend that processing phase finished; status will continue via polling
+      return res.status(200).json({ success: true, scanId, processingCompleted: true });
+    } catch (bgErr) {
+      console.error('SCAN-DEBUG: Processing error:', bgErr.message);
+      try {
+        await updateScanStatus(scanId, dbUserId, {
+          status: 'error',
+          error_message: bgErr.message,
+          updated_at: new Date().toISOString()
+        });
+      } catch (updateErr) {
+        console.error('SCAN-DEBUG: Failed to update scan status to error:', updateErr.message);
+      }
+      return res.status(500).json({ success: false, scanId, error: 'processing_failed', message: bgErr.message });
+    }
 
   } catch (error) {
     console.error('SCAN-DEBUG: Error in email scan handler:', error);
