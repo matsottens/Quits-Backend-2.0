@@ -3,11 +3,16 @@ import { supabase } from './utils/supabase.js';
 
 export default async function handler(_req, res) {
   try {
-    // Find scans ready for analysis
+    // Find scans ready for analysis, but only for users who have enabled automatic scanning
     const { data: scans, error } = await supabase
       .from('scan_history')
-      .select('scan_id')
+      .select(`
+        scan_id,
+        user_id,
+        users!inner(scan_frequency)
+      `)
       .eq('status', 'ready_for_analysis')
+      .in('users.scan_frequency', ['realtime', 'daily', 'weekly'])
       .order('created_at', { ascending: false })
       .limit(10);
 

@@ -43,20 +43,26 @@ export default async function handler(_req, res) {
 
         if (existing && existing.length) continue;
 
-        const { error: insErr } = await supabase
-          .from('subscriptions')
-          .insert({
-            user_id: r.user_id,
-            name: name,
-            price: Number(r.price || 0),
-            currency: r.currency || 'USD',
-            billing_cycle: r.billing_cycle || 'monthly',
-            category: 'auto-detected',
-            is_manual: false,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          });
-        if (!insErr) promoted++;
+        // Only create subscriptions with valid prices > 0
+        const price = Number(r.price || 0);
+        if (price > 0) {
+          const { error: insErr } = await supabase
+            .from('subscriptions')
+            .insert({
+              user_id: r.user_id,
+              name: name,
+              price: price,
+              currency: r.currency || 'USD',
+              billing_cycle: r.billing_cycle || 'monthly',
+              category: 'auto-detected',
+              is_manual: false,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            });
+          if (!insErr) promoted++;
+        } else {
+          console.log(`[SWEEPER] Skipping ${name} - invalid price: ${price}`);
+        }
       }
     }
 
