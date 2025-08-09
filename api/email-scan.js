@@ -2089,8 +2089,9 @@ export default async function handler(req, res) {
     console.log('SCAN-DEBUG: Created scan record with ID:', scanId);
     console.log('SCAN-DEBUG: Using database user ID:', dbUserId);
 
-    // Kick off asynchronous processing and return immediately to avoid 504 timeouts
-    console.log('SCAN-DEBUG: Starting ASYNCHRONOUS processing and returning early');
+    // Run processing inline so progress/status updates are guaranteed to be written
+    // before the request ends (serverless platforms may stop background work after response).
+    console.log('SCAN-DEBUG: Starting inline processing (awaiting processEmailsAsync)');
     try {
       await updateScanStatus(scanId, dbUserId, {
         status: 'in_progress',
@@ -2101,28 +2102,26 @@ export default async function handler(req, res) {
       console.error('SCAN-DEBUG: Failed to set initial in_progress status (non-fatal):', initErr.message);
     }
 
-    (async () => {
+    try {
+      console.log('SCAN-DEBUG: Calling processEmailsAsync with params:', { scanId, dbUserId });
+      await processEmailsAsync(gmailToken, scanId, dbUserId);
+      console.log('SCAN-DEBUG: processEmailsAsync finished');
+    } catch (procErr) {
+      console.error('SCAN-DEBUG: Processing error:', procErr.message);
       try {
-        console.log('SCAN-DEBUG: About to call processEmailsAsync with params:', { scanId, dbUserId });
-        await processEmailsAsync(gmailToken, scanId, dbUserId);
-        console.log('SCAN-DEBUG: processEmailsAsync completed successfully');
-      } catch (bgErr) {
-        console.error('SCAN-DEBUG: Background processing error:', bgErr.message);
-        console.error('SCAN-DEBUG: Background processing stack:', bgErr.stack);
-        // Set scan status to error
-        try {
-          await updateScanStatus(scanId, dbUserId, {
-            status: 'error',
-            error_message: bgErr.message,
-            updated_at: new Date().toISOString()
-          });
-        } catch (updateErr) {
-          console.error('SCAN-DEBUG: Failed to update scan status to error:', updateErr.message);
-        }
+        await updateScanStatus(scanId, dbUserId, {
+          status: 'error',
+          error_message: procErr.message,
+          updated_at: new Date().toISOString()
+        });
+      } catch (updateErr) {
+        console.error('SCAN-DEBUG: Failed to update scan status to error:', updateErr.message);
       }
-    })();
+      return res.status(500).json({ success: false, scanId, error: 'processing_failed', message: procErr.message });
+    }
 
-    return res.status(200).json({ success: true, scanId, message: 'Scan started' });
+    // Indicate the processing phase completed; status is already updated by processEmailsAsync
+    return res.status(200).json({ success: true, scanId, processingCompleted: true });
 
   } catch (error) {
     console.error('SCAN-DEBUG: Error in email scan handler:', error);

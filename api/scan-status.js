@@ -396,8 +396,8 @@ export default async function handler(req, res) {
   }
 } 
 
-// Helper function to calculate progress
-const calculateProgress = (scan) => {
+  // Helper function to calculate progress
+  const calculateProgress = (scan) => {
   let progress = 0;
   
   // Handle different scan statuses with more granular progress
@@ -406,8 +406,8 @@ const calculateProgress = (scan) => {
       progress = 0;
       break;
     case 'in_progress':
-      // Use the actual progress value from the database
-      progress = Math.min(80, scan.progress || 0);
+        // Prefer DB progress if present; otherwise, minimal baseline 10
+        progress = typeof scan.progress === 'number' ? Math.min(80, scan.progress) : 10;
       break;
     case 'ready_for_analysis':
       // Keep at 60 to match pipeline handoff
