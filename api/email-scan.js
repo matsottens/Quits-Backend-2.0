@@ -2092,9 +2092,17 @@ export default async function handler(req, res) {
         console.warn('SCAN-DEBUG: Gmail profile test exception; continuing:', e.message);
       }
 
-      console.log('SCAN-DEBUG: About to call processEmailsAsync with params:', { scanId, dbUserId });
-      await processEmailsAsync(gmailToken, scanId, dbUserId);
-      console.log('SCAN-DEBUG: processEmailsAsync completed successfully');
+      // Offload heavy work to worker to avoid 30s Vercel timeout
+      console.log('SCAN-DEBUG: Offloading to scan-worker');
+      const workerUrl = `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}/api/email/scan-worker`;
+      const workerResp = await fetch(workerUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scanId })
+      });
+      if (!workerResp.ok) {
+        console.warn('SCAN-DEBUG: scan-worker returned non-200:', workerResp.status);
+      }
 
       // After we transition to ready_for_analysis, trigger Gemini analysis immediately
       try {
