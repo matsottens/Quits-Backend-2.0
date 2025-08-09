@@ -2105,7 +2105,9 @@ export default async function handler(req, res) {
     try {
       // Validate Gmail token and connectivity now; degrade if not available
       console.log('SCAN-DEBUG: Validating Gmail token post-scan creation...');
+      console.log('SCAN-DEBUG: Gmail token length for validation:', gmailToken?.length || 0);
       const tokenOk = await validateGmailToken(gmailToken);
+      console.log('SCAN-DEBUG: Gmail token validation result:', tokenOk);
       if (!tokenOk) {
         console.warn('SCAN-DEBUG: Gmail token invalid; degrading this scan to ready_for_analysis');
         await updateScanStatus(scanId, dbUserId, {
