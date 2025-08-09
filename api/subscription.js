@@ -456,8 +456,9 @@ export default async function handler(req, res) {
 
           // Fetch auto-detected subscriptions from analysis results (pattern-matching)
           let analysisSubscriptions = [];
+          // Only include Gemini-completed analysis items
           const analysisResponse = await fetch(
-            `${supabaseUrl}/rest/v1/subscription_analysis?user_id=eq.${dbUserId}&analysis_status=in.(completed,pending)&select=*`,
+            `${supabaseUrl}/rest/v1/subscription_analysis?user_id=eq.${dbUserId}&analysis_status=eq.completed&select=*`,
             {
               method: 'GET',
               headers: {

@@ -1654,7 +1654,7 @@ const updateScanStatus = async (scanId, dbUserId, updates) => {
         .from('scan_history')
         .update(filteredUpdates)
         .eq('scan_id', scanId)
-        .eq('user_id', userId);
+        .eq('user_id', dbUserId);
 
       if (patchError) {
         console.error('SCAN-DEBUG: Failed to update scan status via supabase client:', patchError.message);
@@ -1883,7 +1883,7 @@ const processEmailsAsync = async (gmailToken, scanId, userId) => {
       
       // Always set status to ready_for_analysis so the Gemini function can run.
       // The Gemini function is responsible for setting the final 'completed' status.
-        await updateScanStatus(scanId, dbUserId, {
+        await updateScanStatus(scanId, userId, {
         status: 'ready_for_analysis',
         progress: 70, // Set progress to analysis phase
           updated_at: new Date().toISOString()
