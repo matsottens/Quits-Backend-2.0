@@ -2088,20 +2088,22 @@ export default async function handler(req, res) {
       // Offload heavy work to worker to avoid 30s Vercel timeout
       console.log('SCAN-DEBUG: Offloading to scan-worker');
       const workerUrl = `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}/api/email/scan-worker`;
-      const workerResp = await fetch(workerUrl, {
+      
+      // Fire-and-forget worker call - don't await to avoid timeout
+      fetch(workerUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ scanId })
+      }).catch(workerError => {
+        console.warn('SCAN-DEBUG: scan-worker call failed:', workerError.message);
       });
-      if (!workerResp.ok) {
-        console.warn('SCAN-DEBUG: scan-worker returned non-200:', workerResp.status);
-      }
 
       // NOTE: Edge function will be triggered by the scan-worker after email processing completes
       console.log('SCAN-DEBUG: Worker will handle Gemini edge function trigger');
 
-      // Signal to frontend that processing phase finished; status will continue via polling
-      return res.status(200).json({ success: true, scanId, processingCompleted: true });
+      // Return scan ID immediately so frontend can start polling
+      console.log('SCAN-DEBUG: Returning scan ID immediately for frontend polling');
+      return res.status(200).json({ success: true, scanId, message: 'Scan initiated - check status for progress' });
     } catch (bgErr) {
       console.error('SCAN-DEBUG: Processing error; degrading to ready_for_analysis:', bgErr.message);
       try {

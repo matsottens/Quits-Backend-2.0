@@ -101,6 +101,7 @@ const scanWorkerHandler = withErrorHandling(async (req, res) => {
   const gmailToken = userRow?.gmail_access_token;
 
   await updateScan(scanId, userId, { status: 'in_progress', progress: 15 });
+  workerLogger.info('Starting email scan', { scanId, userId });
   workerLogger.scanProgress(scanId, 15, 'in_progress');
 
   // Validate token and list messages
@@ -118,7 +119,10 @@ const scanWorkerHandler = withErrorHandling(async (req, res) => {
   workerLogger.scanProgress(scanId, 20, 'in_progress', { emailsFound: ids.length });
 
     let processed = 0;
-    for (const id of ids) {
+    let lastProgressUpdate = Date.now();
+    
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i];
       const msg = await getMessage(gmailToken, id);
       if (!msg) continue;
       const headers = msg.payload?.headers || [];
@@ -181,17 +185,34 @@ const scanWorkerHandler = withErrorHandling(async (req, res) => {
       }
       processed++;
       
-      // Update progress more frequently for better UX - every 2 emails or every 5 seconds
-      const shouldUpdate = (processed % 2 === 0) || (processed === ids.length);
+      // Update progress much more frequently for better UX
+      const now = Date.now();
+      const shouldUpdate = (
+        processed === ids.length || // Always update on last email
+        (now - lastProgressUpdate > 1000) || // Update every second
+        (processed === 1) // Update immediately after first email
+      );
+      
       if (shouldUpdate) {
         // Progress from 20% to 70% during email processing
         const emailProgress = Math.round((processed / Math.max(ids.length, 1)) * 50);
         const currentProgress = 20 + emailProgress;
+        
+        workerLogger.info(`Updating progress: ${processed}/${ids.length} emails processed (${currentProgress}%)`, { scanId });
+        
         await updateScan(scanId, userId, { 
           progress: Math.min(currentProgress, 70), 
           emails_processed: processed,
           status: 'in_progress'
         });
+        
+        lastProgressUpdate = now;
+        workerLogger.scanProgress(scanId, Math.min(currentProgress, 70), 'in_progress', { emailsProcessed: processed, totalEmails: ids.length });
+      }
+      
+      // Add a small delay between emails to allow progress updates to be visible
+      if (i < ids.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 200)); // 200ms delay between emails
       }
     }
 

@@ -119,9 +119,24 @@ Rules:
 /* -------------------------------------------------------------------------- */
 /* Progress helper                                                             */
 /* -------------------------------------------------------------------------- */
-async function updateProgress(scanId: string, done: number, total: number) {
-  const pct = 70 + Math.floor((done / total) * 29); // 70→99
-  await supabase.from("scan_history").update({ progress: Math.min(pct, 99), emails_processed: done, updated_at: new Date().toISOString() }).eq("scan_id", scanId);
+async function updateProgress(scanId: string, done: number, total: number, currentBatch?: number, totalBatches?: number) {
+  // More granular progress from 70% to 95% during analysis
+  let pct: number;
+  if (currentBatch !== undefined && totalBatches !== undefined) {
+    // When processing batches, update more frequently
+    const batchProgress = (currentBatch / totalBatches) * 25; // 25% of the analysis phase
+    const emailProgress = (done / total) * 25; // Remaining 25% based on emails processed
+    pct = 70 + Math.floor(batchProgress + emailProgress);
+  } else {
+    pct = 70 + Math.floor((done / total) * 25); // 70→95
+  }
+  
+  console.log(`[${scanId}] Updating analysis progress: ${done}/${total} emails (${Math.min(pct, 95)}%)`);
+  await supabase.from("scan_history").update({ 
+    progress: Math.min(pct, 95), 
+    emails_processed: done, 
+    updated_at: new Date().toISOString() 
+  }).eq("scan_id", scanId);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -198,9 +213,15 @@ serve(async (req) => {
         if (!emails.length) throw new Error("No emails to analyze");
 
         const BATCH = 10;
+        const totalBatches = Math.ceil(emails.length / BATCH);
+        console.log(`[${scan.scan_id}] Processing ${emails.length} emails in ${totalBatches} batches of ${BATCH}`);
+        
         for (let i = 0; i < emails.length; i += BATCH) {
           const chunk = emails.slice(i, i + BATCH);
-        const results = await analyzeEmailsWithGemini(chunk.map((c) => c.email_data));
+          const currentBatch = Math.floor(i / BATCH) + 1;
+          
+          console.log(`[${scan.scan_id}] Processing batch ${currentBatch}/${totalBatches} (${chunk.length} emails)`);
+          const results = await analyzeEmailsWithGemini(chunk.map((c) => c.email_data));
 
           for (let j = 0; j < chunk.length; j++) {
             const row = chunk[j];
@@ -289,8 +310,19 @@ serve(async (req) => {
                 if (!error) subsFound++;
               }
             }
+            
+            // Update progress after each email within the batch for more frequent updates
+            const emailsProcessedSoFar = i + j + 1;
+            if (emailsProcessedSoFar % 2 === 0 || emailsProcessedSoFar === emails.length) {
+              await updateProgress(scan.scan_id, emailsProcessedSoFar, emails.length, currentBatch, totalBatches);
+            }
           }
-          await updateProgress(scan.scan_id, Math.min(i + BATCH, emails.length), emails.length);
+          
+          // Always update progress after completing each batch
+          const emailsProcessedThisBatch = Math.min(i + BATCH, emails.length);
+          await updateProgress(scan.scan_id, emailsProcessedThisBatch, emails.length, currentBatch, totalBatches);
+          
+          console.log(`[${scan.scan_id}] Completed batch ${currentBatch}/${totalBatches}, processed ${emailsProcessedThisBatch}/${emails.length} emails`);
         }
       } catch (e: any) {
         errorMsg = String(e?.message || e);
