@@ -2060,211 +2060,27 @@ export default async function handler(req, res) {
     console.log('SCAN-DEBUG: Created scan record with ID:', scanId);
     console.log('SCAN-DEBUG: Using database user ID:', dbUserId);
 
-    // Process emails SYNCHRONOUSLY before sending response (this will work in serverless)
-    console.log('SCAN-DEBUG: Starting SYNCHRONOUS email processing...');
-    console.log('SCAN-DEBUG: This approach will work in serverless environments');
-    
+    // Kick off asynchronous processing and return immediately to avoid 504 timeouts
+    console.log('SCAN-DEBUG: Starting ASYNCHRONOUS processing and returning early');
     try {
-      // Update scan status to indicate we're starting
-      console.log('SCAN-DEBUG: About to update scan status to in_progress...');
       await updateScanStatus(scanId, dbUserId, {
         status: 'in_progress',
         progress: 10,
         updated_at: new Date().toISOString()
       });
-      console.log('SCAN-DEBUG: Successfully updated scan status to in_progress');
-      
-      console.log('SCAN-DEBUG: About to fetch subscription examples...');
-      // Fetch subscription examples for pattern matching
-      const subscriptionExamples = await fetchSubscriptionExamples();
-      console.log('SCAN-DEBUG: Fetched subscription examples:', subscriptionExamples.length);
-      
-      // Add a small delay to show preparation progress
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // Update progress
-      console.log('SCAN-DEBUG: About to update progress to 15...');
-      await updateScanStatus(scanId, dbUserId, {
-        progress: 15,
-        updated_at: new Date().toISOString()
-      });
-      console.log('SCAN-DEBUG: Successfully updated progress to 15');
-      
-      console.log('SCAN-DEBUG: About to fetch emails from Gmail...');
-      console.log('SCAN-DEBUG: Calling fetchEmailsFromGmail function...');
-      // Fetch emails from Gmail using the comprehensive search function
-      let emails;
-      try {
-        console.log('SCAN-DEBUG: Starting Gmail fetch with timeout protection...');
-        // Add overall timeout to the Gmail fetch operation
-        const fetchPromise = fetchEmailsFromGmail(gmailToken);
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Gmail fetch operation timed out after 60 seconds')), 60000)
-        );
-        
-        emails = await Promise.race([fetchPromise, timeoutPromise]);
-        console.log('SCAN-DEBUG: Fetched emails from Gmail:', emails.length);
-        console.log('SCAN-DEBUG: Email IDs sample:', emails.slice(0, 3));
-      } catch (fetchError) {
-        console.error('SCAN-DEBUG: Error in fetchEmailsFromGmail:', fetchError.message);
-        console.error('SCAN-DEBUG: fetchEmailsFromGmail error stack:', fetchError.stack);
-        
-        // Try a simple fallback query
-        console.log('SCAN-DEBUG: Attempting simple fallback Gmail query...');
-        try {
-          emails = await fetchEmailsSimple(gmailToken);
-          console.log('SCAN-DEBUG: Fallback query successful, emails found:', emails.length);
-        } catch (fallbackError) {
-          console.error('SCAN-DEBUG: Fallback query also failed:', fallbackError.message);
-          throw new Error(`Failed to fetch emails from Gmail: ${fetchError.message}`);
-        }
-      }
-      
-      // Add a small delay to show email fetching progress
-      await new Promise(resolve => setTimeout(resolve, 800));
-      
-      // Update scan status with email count
-      console.log('SCAN-DEBUG: About to update scan status with email count...');
-      await updateScanStatus(scanId, dbUserId, {
-        progress: 20,
-        emails_found: emails.length,
-        emails_to_process: emails.length,
-        updated_at: new Date().toISOString()
-      });
-      console.log('SCAN-DEBUG: Successfully updated scan status with email count');
-      
-      if (emails.length === 0) {
-        console.log('SCAN-DEBUG: No emails found, but still proceed to analysis phase');
-        await updateScanStatus(scanId, dbUserId, {
-          status: 'ready_for_analysis',
-          progress: 60,
-          updated_at: new Date().toISOString(),
-          error_message: 'No subscription-related emails found in your Gmail account. This could mean you don\'t have any active subscriptions, or your emails are organized differently.'
-        });
-
-    // Return scan ID immediately to prevent timeout
-    console.log('SCAN-DEBUG: Returning scanId immediately to prevent timeout:', scanId);
-    res.status(200).json({ 
-      success: true, 
-      scanId: scanId,
-          message: 'Scan completed. No subscription emails found.',
-          processingCompleted: true
-        });
-        return;
-      }
-      
-      console.log('SCAN-DEBUG: About to process emails for subscriptions...');
-      // Process emails to find subscriptions (this now includes storing data and creating analysis records)
-      const { subscriptionEmails, candidateEmails, processedCount } = await processEmailsForSubscriptions(
-        emails, 
-        subscriptionExamples, 
-        gmailToken, 
-        scanId, 
-        dbUserId
-      );
-      
-      console.log('SCAN-DEBUG: Processed emails for subscriptions:', processedCount);
-      console.log('SCAN-DEBUG: Found subscription emails:', subscriptionEmails.length);
-      
-      // Add a small delay to show processing progress
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Update scan status with processing results
-      await updateScanStatus(scanId, dbUserId, {
-        progress: 90,
-        emails_processed: processedCount,
-        emails_scanned: processedCount,
-        subscriptions_found: subscriptionEmails.length,
-        updated_at: new Date().toISOString()
-      });
-
-      // Persist emails and queue AI analysis when we found potential subscriptions
-      if (subscriptionEmails.length > 0) {
-        try {
-          await storeEmailData(subscriptionEmails, scanId, dbUserId);
-          await createSubscriptionAnalysisRecords(subscriptionEmails, scanId, dbUserId);
-        } catch (persistError) {
-          console.error('SCAN-DEBUG: Failed to persist email/analysis records:', persistError);
-        }
-      }
-      // If no pattern matches, persist a small set of candidates for AI to analyze anyway
-      if (subscriptionEmails.length === 0 && candidateEmails.length > 0) {
-        try {
-          await storeEmailData(candidateEmails, scanId, dbUserId);
-          await createSubscriptionAnalysisRecords(candidateEmails, scanId, dbUserId);
-        } catch (persistError) {
-          console.error('SCAN-DEBUG: Failed to persist fallback candidate records:', persistError);
-        }
-      }
-      
-      if (subscriptionEmails.length === 0) {
-        console.log('SCAN-DEBUG: No subscriptions found during pattern matching');
-        // If no sub emails and also zero emails overall, we can complete early.
-        if (emails.length === 0) {
-          await updateScanStatus(scanId, dbUserId, {
-            status: 'completed',
-            progress: 100,
-            updated_at: new Date().toISOString()
-          });
-        } else {
-          await updateScanStatus(scanId, dbUserId, {
-            status: 'ready_for_analysis',
-            progress: 70,
-            updated_at: new Date().toISOString()
-          });
-        }
-      } else {
-        console.log('SCAN-DEBUG: Email processing completed successfully');
-        console.log('SCAN-DEBUG: Pattern matching detected subscriptions successfully!');
-        console.log('SCAN-DEBUG: Setting scan status to ready_for_analysis for Gemini processing');
-        
-        // Always set status to ready_for_analysis so the Gemini function can run.
-        // The Gemini function is responsible for setting the final 'completed' status.
-        await updateScanStatus(scanId, dbUserId, {
-          status: 'ready_for_analysis',
-          progress: 70, // Move to 70 to signal AI phase explicitly
-          updated_at: new Date().toISOString()
-        });
-        
-        console.log('SCAN-DEBUG: Scan status set to ready_for_analysis');
-        
-        // Note: The Edge Function will still be triggered by cron for additional AI analysis
-        console.log('SCAN-DEBUG: Cron job runs every minute and will automatically trigger analysis for additional AI processing');
-      }
-      
-      // Return scan ID with completion status
-      console.log('SCAN-DEBUG: Returning scanId with completion status:', scanId);
-      res.status(200).json({ 
-        success: true, 
-        scanId: scanId,
-        message: 'Scan started successfully.',
-        emailsFound: emails.length,
-        subscriptionsFound: subscriptionEmails.length
-      });
-      
-    } catch (processingError) {
-      console.error('SCAN-DEBUG: Error in synchronous email processing:', processingError);
-      console.error('SCAN-DEBUG: Error stack:', processingError.stack);
-      
-      // Update scan status to error
-      try {
-        await updateScanStatus(scanId, dbUserId, {
-        status: 'error',
-          error_message: processingError.message,
-        updated_at: new Date().toISOString()
-        });
-        console.log('SCAN-DEBUG: Successfully updated scan status to error');
-      } catch (updateError) {
-        console.error('SCAN-DEBUG: Failed to update scan status to error:', updateError);
-      }
-      
-      // Return error response
-      res.status(500).json({ 
-        error: 'Email processing failed',
-        message: processingError.message,
-        scanId: scanId
-      });
+    } catch (initErr) {
+      console.error('SCAN-DEBUG: Failed to set initial in_progress status (non-fatal):', initErr.message);
     }
+
+    (async () => {
+      try {
+        await processEmailsAsync(gmailToken, scanId, dbUserId);
+      } catch (bgErr) {
+        console.error('SCAN-DEBUG: Background processing error:', bgErr.message);
+      }
+    })();
+
+    return res.status(200).json({ success: true, scanId, message: 'Scan started' });
 
   } catch (error) {
     console.error('SCAN-DEBUG: Error in email scan handler:', error);
